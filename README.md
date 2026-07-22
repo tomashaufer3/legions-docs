@@ -1,4 +1,4 @@
-# Good Soldiers — project documentation (unlisted)
+# The Fateful Adventrues of the Good Soldiers — project documentation (unlisted)
 
 Generated documentation for a CERGE-EI master's thesis on desertion in the
 Czechoslovak Legions (WWI): pipeline, variable construction, data sources, live
