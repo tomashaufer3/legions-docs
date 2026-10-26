@@ -1,0 +1,1280 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Pair every Czech page of the 1910 register with the German pages that print it.</p><p class="tldr-facts"><b>1910 register</b> · v1.0.0 · 341 lines · 11 public functions · 7 constants · used by nothing else · <code>utils/lexikon_1910/build_de_page_map.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-lexikon_1910-build_de_page_map-normalise">normalise</a><a class="chip" href="#fn-utils-lexikon_1910-build_de_page_map-parse_head">parse_head</a><a class="chip" href="#fn-utils-lexikon_1910-build_de_page_map-court_crosswalk">court_crosswalk</a><a class="chip" href="#fn-utils-lexikon_1910-build_de_page_map-de_page_words">de_page_words</a><a class="chip" href="#fn-utils-lexikon_1910-build_de_page_map-de_page_courts">de_page_courts</a><a class="chip" href="#fn-utils-lexikon_1910-build_de_page_map-load_de_volume">load_de_volume</a><a class="chip" href="#fn-utils-lexikon_1910-build_de_page_map-cz_page_names">cz_page_names</a><a class="chip" href="#fn-utils-lexikon_1910-build_de_page_map-match_page">match_page</a><a class="chip" href="#fn-utils-lexikon_1910-build_de_page_map-build">build</a><a class="chip" href="#fn-utils-lexikon_1910-build_de_page_map-report">report</a><a class="chip" href="#fn-utils-lexikon_1910-build_de_page_map-main">main</a><a class="chip const" href="#c-utils-lexikon_1910-build_de_page_map-ROOT">ROOT</a><a class="chip const" href="#c-utils-lexikon_1910-build_de_page_map-GRID_CSV">GRID_CSV</a><a class="chip const" href="#c-utils-lexikon_1910-build_de_page_map-GRID_VOLUME">GRID_VOLUME</a><a class="chip const" href="#c-utils-lexikon_1910-build_de_page_map-OUT_CSV">OUT_CSV</a><a class="chip const" href="#c-utils-lexikon_1910-build_de_page_map-MIN_NAME">MIN_NAME</a><a class="chip const" href="#c-utils-lexikon_1910-build_de_page_map-WEAK_BELOW">WEAK_BELOW</a><a class="chip const" href="#c-utils-lexikon_1910-build_de_page_map-FIELDS">FIELDS</a></div>
+<h2>How it works</h2><p>The two volumes are the same census table set twice, and neither is a translation
+of the other's typesetting: they paginate differently and each orders an okres's
+municipalities alphabetically <strong>in its own language</strong>. So there is no scan-to-scan
+correspondence to assume — German scan 118 is not the German printing of Czech
+scan 118 — and a run that assumes one reads unrelated pages while looking
+entirely well-behaved.</p>
+<p>What makes the pairing possible is that <strong>both volumes print both names.</strong> The
+Czech table sets <code>Vysoká, Wisset</code>; the German sets <code>Wisset, Vysoká</code>. So the
+German twin of every municipality on a Czech page can be read straight off the
+Czech page, and the German page that prints those same names is the page that
+covers it. No external crosswalk, no district-name translation table, and — this
+is the point — <strong>the match score is itself the evidence</strong>. A bad pairing shows up
+as a low score rather than as a clean-looking wrong answer.</p>
+<p>Two guards, both from failures measured in this project:</p>
+<ul>
+<li><strong>The district is checked first.</strong> Village names repeat across Bohemia, and a
+  name-only match over 481 pages will find a homonym in another okres. Candidate
+  pages are therefore restricted to those whose running head names the right
+  <em>politischer Bezirk</em> before names are counted — the same discipline
+  <code>records_geo</code> uses when a birthplace could be one of several places.</li>
+<li><strong>A tie is refused, not broken.</strong> Where two DE pages score equally the row is
+  written <code>ambiguous</code> and carries both. <code>lexikon_1910_de</code> already refuses a
+  tie one level down rather than taking the first match, and for the same reason:
+  on this source a plausible wrong answer is indistinguishable from a right one.</li>
+</ul>
+<p>Output — <code>reference/places/lexikon_1910_de_page_map.csv</code>:</p>
+<pre><code>cz_scan  de_scans  score  n_names  n_matched  districts_cz  verdict
+</code></pre>
+<p><code>verdict</code> is <code>matched</code> / <code>weak</code> / <code>ambiguous</code> / <code>unmatched</code>. Nothing
+downstream may use a row that is not <code>matched</code> without saying so.</p>
+<pre><code>python utils/lexikon_1910/build_de_page_map.py --pages 118,270,449,450,451
+python utils/lexikon_1910/build_de_page_map.py --all --write
+</code></pre>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-lexikon_1910-build_de_page_map-normalise">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">normalise</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<div class="fndoc"><p>Match key for a place name, across two orthographies.</p>
+<p>Accents are stripped, and the German transliterations are folded onto the
+umlauts they stand for: the volume prints <code>Brüx</code> while the curated tables
+write <code>Bruex</code>, and under NFKD alone those are <code>brux</code> and <code>bruex</code> — two
+different keys for one town. That single mismatch is why
+<code>lexikon_1910_de.okres_pages("Bruex")</code> returns nothing.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_court_key.py</code> <code>tests/test_lexikon_1910_running_head.py</code> <code>utils/lexikon_1910/build_symbol_atlas.py</code> <code>utils/lexikon_1910/build_symbol_atlas_de.py</code> <code>utils/lexikon_1910/lexikon_1910_courts.py</code> <code>utils/lexikon_1910/lexikon_1910_de_notes.py</code> <code>utils/lexikon_1910/lexikon_1910_editions.py</code> <code>utils/lexikon_1910/lexikon_1910_names.py</code> <code>utils/lexikon_1910/lexikon_1910_notes.py</code> <code>utils/lexikon_1910/lexikon_1910_vision.py</code> <code>utils/lexikon_1910/lexikon_1910_volume.py</code> <code>utils/lexikon_1910/locate_glyphs.py</code> <code>utils/lexikon_1910/make_gold_worksheet.py</code> <code>utils/lexikon_1910/read_transcription_md.py</code> <code>utils/lexikon_1910/run_e3_pages.py</code> <code>utils/lexikon_1910/run_frozen.py</code> <code>utils/lexikon_1910/run_glyph_e3.py</code> <code>utils/lexikon_1910/run_lexikon_1910_pilot.py</code> <code>utils/lexikon_1910/run_r5_german_notes.py</code> <code>utils/lexikon_1910/score_r5_german_notes.py</code></p>
+<details><summary>source · lines 84–98 (15 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">84</span>
+<span class="normal">85</span>
+<span class="normal">86</span>
+<span class="normal">87</span>
+<span class="normal">88</span>
+<span class="normal">89</span>
+<span class="normal">90</span>
+<span class="normal">91</span>
+<span class="normal">92</span>
+<span class="normal">93</span>
+<span class="normal">94</span>
+<span class="normal">95</span>
+<span class="normal">96</span>
+<span class="normal">97</span>
+<span class="normal">98</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">normalise</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Match key for a place name, across two orthographies.</span>
+
+<span class="sd">    Accents are stripped, and the German transliterations are folded onto the</span>
+<span class="sd">    umlauts they stand for: the volume prints ``Brüx`` while the curated tables</span>
+<span class="sd">    write ``Bruex``, and under NFKD alone those are ``brux`` and ``bruex`` — two</span>
+<span class="sd">    different keys for one town. That single mismatch is why</span>
+<span class="sd">    ``lexikon_1910_de.okres_pages(&quot;Bruex&quot;)`` returns nothing.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">unicodedata</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="s2">&quot;NFKD&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">text</span><span class="p">))</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">text</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">unicodedata</span><span class="o">.</span><span class="n">combining</span><span class="p">(</span><span class="n">c</span><span class="p">))</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">text</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">pair</span><span class="p">,</span> <span class="n">single</span> <span class="ow">in</span> <span class="p">((</span><span class="s2">&quot;ue&quot;</span><span class="p">,</span> <span class="s2">&quot;u&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;oe&quot;</span><span class="p">,</span> <span class="s2">&quot;o&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;ae&quot;</span><span class="p">,</span> <span class="s2">&quot;a&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;ss&quot;</span><span class="p">,</span> <span class="s2">&quot;s&quot;</span><span class="p">)):</span>
+        <span class="n">text</span> <span class="o">=</span> <span class="n">text</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="n">pair</span><span class="p">,</span> <span class="n">single</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;[^a-z0-9]&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">text</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-build_de_page_map-parse_head">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">parse_head</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]]</span></pre>
+<div class="fndoc"><p><code>"Most: Most. — Náchod: Česká Skalice."</code> -&gt; <code>[(most,[most]), (nachod,[ceskaskalice])]</code>.</p>
+<p>Both sides are returned because they answer different questions: the political
+okres is what the German volume's index is keyed on, and the <strong>court</strong> is what
+actually identifies the page — a political okres runs to a dozen pages, a court
+to two or three.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 112–127 (16 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">parse_head</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``&quot;Most: Most. — Náchod: Česká Skalice.&quot;`` -&gt; ``[(most,[most]), (nachod,[ceskaskalice])]``.</span>
+
+<span class="sd">    Both sides are returned because they answer different questions: the political</span>
+<span class="sd">    okres is what the German volume&#39;s index is keyed on, and the **court** is what</span>
+<span class="sd">    actually identifies the page — a political okres runs to a dozen pages, a court</span>
+<span class="sd">    to two or three.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">out</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">political</span><span class="p">,</span> <span class="n">courts</span> <span class="ow">in</span> <span class="n">_HEAD_RE</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="n">text</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">):</span>
+        <span class="n">key</span> <span class="o">=</span> <span class="n">normalise</span><span class="p">(</span><span class="n">political</span><span class="p">)</span>
+        <span class="n">names</span> <span class="o">=</span> <span class="p">[</span><span class="n">normalise</span><span class="p">(</span><span class="n">c</span><span class="p">)</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">courts</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">)]</span>
+        <span class="n">names</span> <span class="o">=</span> <span class="p">[</span><span class="n">n</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">names</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">n</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">3</span><span class="p">]</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">key</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">3</span> <span class="ow">and</span> <span class="n">names</span><span class="p">:</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">key</span><span class="p">,</span> <span class="n">names</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-build_de_page_map-court_crosswalk">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">court_crosswalk</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span></pre>
+<div class="fndoc"><p>Czech court name -&gt; German, both sides normalised.</p>
+<p>Read through <code>normalise</code> on both sides rather than matched literally,
+which repairs two things at once: the curation writes the transliterated
+<code>Goerkau</code> / <code>Bruex</code> where the volume prints <code>Görkau</code> / <code>Brüx</code>, and the
+OCR of the Czech head gives <code>Chomútov</code> and <code>Marsov</code> where the curation has
+<code>Chomutov</code> and <code>Maršov</code>. Both are spelling, not identity.</p>
+<p>⚠ Only the 330 <strong>court</strong> rows carry a German name; all 158 okres rows have the
+column empty. That is why this pairs on courts and not on the political
+district — the data for the other one does not exist.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 130–149 (20 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">court_crosswalk</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Czech court name -&gt; German, both sides normalised.</span>
+
+<span class="sd">    Read through :func:`normalise` on both sides rather than matched literally,</span>
+<span class="sd">    which repairs two things at once: the curation writes the transliterated</span>
+<span class="sd">    ``Goerkau`` / ``Bruex`` where the volume prints ``Görkau`` / ``Brüx``, and the</span>
+<span class="sd">    OCR of the Czech head gives ``Chomútov`` and ``Marsov`` where the curation has</span>
+<span class="sd">    ``Chomutov`` and ``Maršov``. Both are spelling, not identity.</span>
+
+<span class="sd">    ⚠ Only the 330 **court** rows carry a German name; all 158 okres rows have the</span>
+<span class="sd">    column empty. That is why this pairs on courts and not on the political</span>
+<span class="sd">    district — the data for the other one does not exist.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;places&quot;</span> <span class="o">/</span> <span class="s2">&quot;district_cs_curation.csv&quot;</span>
+    <span class="n">out</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">with</span> <span class="n">path</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictReader</span><span class="p">(</span><span class="n">fh</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;level&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="s2">&quot;court&quot;</span> <span class="ow">and</span> <span class="p">(</span><span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;de&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+                <span class="n">out</span><span class="p">[</span><span class="n">normalise</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;cs&quot;</span><span class="p">])]</span> <span class="o">=</span> <span class="n">normalise</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;de&quot;</span><span class="p">])</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-build_de_page_map-de_page_words">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">de_page_words</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span></pre>
+<div class="fndoc"><p>Every word-shaped token on one German page, normalised.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 152–155 (4 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">de_page_words</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Every word-shaped token on one German page, normalised.&quot;&quot;&quot;</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">path</span><span class="o">.</span><span class="n">read_text</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;replace&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="n">normalise</span><span class="p">(</span><span class="n">w</span><span class="p">)</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">_WORD_RE</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="n">text</span><span class="p">)}</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-build_de_page_map-de_page_courts">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">de_page_courts</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">head_lines</span><span class="p">:</span> <span class="nb">int</span><span class="o">=</span><span class="mi">12</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span></pre>
+<div class="fndoc"><p>The <em>Gerichtsbezirk</em> names in one German page's running head.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 158–162 (5 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">de_page_courts</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">head_lines</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">12</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The *Gerichtsbezirk* names in one German page&#39;s running head.&quot;&quot;&quot;</span>
+    <span class="n">head</span> <span class="o">=</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+        <span class="n">path</span><span class="o">.</span><span class="n">read_text</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;replace&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)[:</span><span class="n">head_lines</span><span class="p">])</span>
+    <span class="k">return</span> <span class="p">{</span><span class="n">court</span> <span class="k">for</span> <span class="n">_political</span><span class="p">,</span> <span class="n">courts</span> <span class="ow">in</span> <span class="n">parse_head</span><span class="p">(</span><span class="n">head</span><span class="p">)</span> <span class="k">for</span> <span class="n">court</span> <span class="ow">in</span> <span class="n">courts</span><span class="p">}</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-build_de_page_map-load_de_volume">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">load_de_volume</span><span class="p">(</span><span class="n">plaintext_dir</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]]]</span></pre>
+<div class="fndoc"><p><code>scan -&gt; (words, courts)</code> for the German main part.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 165–172 (8 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">load_de_volume</span><span class="p">(</span><span class="n">plaintext_dir</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``scan -&gt; (words, courts)`` for the German main part.&quot;&quot;&quot;</span>
+    <span class="n">volume</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">scan</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">DE_FIRST_SCAN</span><span class="p">,</span> <span class="n">DE_LAST_SCAN</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="n">path</span> <span class="o">=</span> <span class="n">plaintext_dir</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;AC01116810-</span><span class="si">{</span><span class="n">scan</span><span class="si">:</span><span class="s2">04d</span><span class="si">}</span><span class="s2">.txt&quot;</span>
+        <span class="k">if</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="n">volume</span><span class="p">[</span><span class="n">scan</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">de_page_words</span><span class="p">(</span><span class="n">path</span><span class="p">),</span> <span class="n">de_page_courts</span><span class="p">(</span><span class="n">path</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">volume</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-build_de_page_map-cz_page_names">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">cz_page_names</span><span class="p">(</span><span class="n">scan</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">template</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span></pre>
+<div class="fndoc"><p><code>(German twin names, Czech district names)</code> printed on one Czech page.</p>
+<p>The name cell sets <code>Czech, German</code> — occasionally with a topographic symbol
+or a cadastral span trailing it — so the German twin is what follows the first
+comma, cut at the first character that cannot be part of a name. Rows whose
+name cell has no comma are settlements printed under one name in both
+volumes; they are skipped rather than guessed at.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 175–207 (33 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">cz_page_names</span><span class="p">(</span><span class="n">scan</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">template</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``(German twin names, Czech district names)`` printed on one Czech page.</span>
+
+<span class="sd">    The name cell sets ``Czech, German`` — occasionally with a topographic symbol</span>
+<span class="sd">    or a cadastral span trailing it — so the German twin is what follows the first</span>
+<span class="sd">    comma, cut at the first character that cannot be part of a name. Rows whose</span>
+<span class="sd">    name cell has no comma are settlements printed under one name in both</span>
+<span class="sd">    volumes; they are skipped rather than guessed at.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">page</span> <span class="o">=</span> <span class="n">lxp</span><span class="o">.</span><span class="n">alto_page</span><span class="p">(</span><span class="n">scan</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">page</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[],</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">rows</span> <span class="o">=</span> <span class="n">lx</span><span class="o">.</span><span class="n">extract_rows</span><span class="p">(</span><span class="n">page</span><span class="p">,</span> <span class="n">template</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+        <span class="c1"># &quot;no column rules — not a table page&quot;. The volume opens its table a few</span>
+        <span class="c1"># scans after the main part nominally begins (15-18 carry no apparatus</span>
+        <span class="c1"># either, which draw_gold_sample already excludes), and a page with no</span>
+        <span class="c1"># grid has no name column to read. Reported as unmatched rather than</span>
+        <span class="c1"># crashed on: the map has to cover every scan it was asked about, and a</span>
+        <span class="c1"># page that cannot be paired is a fact about the volume.</span>
+        <span class="k">return</span> <span class="p">[],</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="n">names</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+        <span class="n">cell</span> <span class="o">=</span> <span class="p">(</span><span class="n">row</span><span class="o">.</span><span class="n">cells</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="s2">&quot;,&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">cell</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">german</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;[^A-Za-zÄÖÜäöüß&#39;’.\-]&quot;</span><span class="p">,</span> <span class="n">cell</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span>
+        <span class="n">german</span> <span class="o">=</span> <span class="n">german</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">if</span> <span class="n">german</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">german</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="n">MIN_NAME</span><span class="p">:</span>
+            <span class="n">names</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">normalise</span><span class="p">(</span><span class="n">german</span><span class="p">))</span>
+    <span class="n">courts</span> <span class="o">=</span> <span class="p">{</span><span class="n">c</span> <span class="k">for</span> <span class="n">_pol</span><span class="p">,</span> <span class="n">cs</span> <span class="ow">in</span> <span class="n">parse_head</span><span class="p">(</span><span class="n">lx</span><span class="o">.</span><span class="n">running_head</span><span class="p">(</span><span class="n">page</span><span class="p">))</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cs</span><span class="p">}</span>
+    <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="nb">dict</span><span class="o">.</span><span class="n">fromkeys</span><span class="p">(</span><span class="n">n</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">names</span> <span class="k">if</span> <span class="n">n</span><span class="p">)),</span> <span class="n">courts</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-build_de_page_map-match_page">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">match_page</span><span class="p">(</span><span class="n">names</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">courts_cz</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">volume</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]]],</span> <span class="n">crosswalk</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">],</span> <span class="n">top</span><span class="p">:</span> <span class="nb">int</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span> <span class="nb">float</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span></pre>
+<div class="fndoc"><p>Score every German page against one Czech page's names.</p>
+<p>The district filter runs first and is the guard against homonyms: village
+names repeat across Bohemia, and a name-only search over 481 pages will find
+one in the wrong okres. Where the filter leaves nothing — a Czech running head
+the OCR destroyed, a German head it destroyed — the search falls back to the
+whole volume and the row is flagged, because an unfiltered match is a weaker
+claim and must not be recorded as if it were the same thing.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 210–250 (41 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">match_page</span><span class="p">(</span><span class="n">names</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">courts_cz</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+               <span class="n">volume</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]]],</span>
+               <span class="n">crosswalk</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">],</span>
+               <span class="n">top</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">3</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span> <span class="nb">float</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Score every German page against one Czech page&#39;s names.</span>
+
+<span class="sd">    The district filter runs first and is the guard against homonyms: village</span>
+<span class="sd">    names repeat across Bohemia, and a name-only search over 481 pages will find</span>
+<span class="sd">    one in the wrong okres. Where the filter leaves nothing — a Czech running head</span>
+<span class="sd">    the OCR destroyed, a German head it destroyed — the search falls back to the</span>
+<span class="sd">    whole volume and the row is flagged, because an unfiltered match is a weaker</span>
+<span class="sd">    claim and must not be recorded as if it were the same thing.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">names</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[],</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;unmatched&quot;</span>
+
+    <span class="n">wanted</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">names</span><span class="p">)</span>
+    <span class="c1"># Czech courts -&gt; German courts, then keep only the German pages whose own</span>
+    <span class="c1"># running head names one of them. This is the homonym guard: village names</span>
+    <span class="c1"># repeat across Bohemia, and a name-only search over 481 pages will happily</span>
+    <span class="c1"># find one in the wrong okres and score it as a hit.</span>
+    <span class="n">courts_de</span> <span class="o">=</span> <span class="p">{</span><span class="n">crosswalk</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">courts_cz</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">crosswalk</span><span class="p">}</span>
+    <span class="n">candidates</span> <span class="o">=</span> <span class="p">{</span><span class="n">s</span><span class="p">:</span> <span class="n">w</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="p">(</span><span class="n">w</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span> <span class="ow">in</span> <span class="n">volume</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">d</span> <span class="o">&amp;</span> <span class="n">courts_de</span><span class="p">}</span> \
+        <span class="k">if</span> <span class="n">courts_de</span> <span class="k">else</span> <span class="p">{}</span>
+    <span class="n">filtered</span> <span class="o">=</span> <span class="nb">bool</span><span class="p">(</span><span class="n">candidates</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">candidates</span><span class="p">:</span>
+        <span class="n">candidates</span> <span class="o">=</span> <span class="p">{</span><span class="n">s</span><span class="p">:</span> <span class="n">w</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="p">(</span><span class="n">w</span><span class="p">,</span> <span class="n">_d</span><span class="p">)</span> <span class="ow">in</span> <span class="n">volume</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+
+    <span class="n">scores</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">({</span><span class="n">scan</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">wanted</span> <span class="o">&amp;</span> <span class="n">words</span><span class="p">)</span> <span class="k">for</span> <span class="n">scan</span><span class="p">,</span> <span class="n">words</span> <span class="ow">in</span> <span class="n">candidates</span><span class="o">.</span><span class="n">items</span><span class="p">()})</span>
+    <span class="n">best</span> <span class="o">=</span> <span class="p">[(</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">scores</span><span class="o">.</span><span class="n">most_common</span><span class="p">(</span><span class="n">top</span><span class="p">)</span> <span class="k">if</span> <span class="n">c</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">best</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[],</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;unmatched&quot;</span>
+
+    <span class="n">top_count</span> <span class="o">=</span> <span class="n">best</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span>
+    <span class="n">winners</span> <span class="o">=</span> <span class="p">[</span><span class="n">s</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">best</span> <span class="k">if</span> <span class="n">c</span> <span class="o">==</span> <span class="n">top_count</span><span class="p">]</span>
+    <span class="n">share</span> <span class="o">=</span> <span class="n">top_count</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">wanted</span><span class="p">)</span>
+    <span class="n">verdict</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;ambiguous&quot;</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">winners</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span>
+               <span class="k">else</span> <span class="s2">&quot;weak&quot;</span> <span class="k">if</span> <span class="n">share</span> <span class="o">&lt;</span> <span class="n">WEAK_BELOW</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">filtered</span>
+               <span class="k">else</span> <span class="s2">&quot;matched&quot;</span><span class="p">)</span>
+    <span class="n">pages</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">({</span><span class="n">s</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">_c</span> <span class="ow">in</span> <span class="n">best</span><span class="p">})</span>
+    <span class="k">return</span> <span class="n">pages</span><span class="p">,</span> <span class="nb">round</span><span class="p">(</span><span class="n">share</span><span class="p">,</span> <span class="mi">3</span><span class="p">),</span> <span class="n">top_count</span><span class="p">,</span> <span class="n">verdict</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-build_de_page_map-build">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">build</span><span class="p">(</span><span class="n">scans</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span> <span class="n">plaintext_dir</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 253–275 (23 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">build</span><span class="p">(</span><span class="n">scans</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span> <span class="n">plaintext_dir</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+    <span class="n">template</span> <span class="o">=</span> <span class="n">lx</span><span class="o">.</span><span class="n">read_grid_template</span><span class="p">(</span><span class="n">GRID_CSV</span><span class="p">,</span> <span class="n">GRID_VOLUME</span><span class="p">)</span>
+    <span class="n">crosswalk</span> <span class="o">=</span> <span class="n">court_crosswalk</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">crosswalk</span><span class="p">)</span><span class="si">}</span><span class="s2"> court name pairs, cs -&gt; de&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  loading the German main part, scans &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">DE_FIRST_SCAN</span><span class="si">}</span><span class="s2">-</span><span class="si">{</span><span class="n">DE_LAST_SCAN</span><span class="si">}</span><span class="s2"> ...&quot;</span><span class="p">)</span>
+    <span class="n">volume</span> <span class="o">=</span> <span class="n">load_de_volume</span><span class="p">(</span><span class="n">plaintext_dir</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">volume</span><span class="p">)</span><span class="si">}</span><span class="s2"> German pages indexed&quot;</span><span class="p">)</span>
+
+    <span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">scan</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">scans</span><span class="p">,</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="n">names</span><span class="p">,</span> <span class="n">courts</span> <span class="o">=</span> <span class="n">cz_page_names</span><span class="p">(</span><span class="n">scan</span><span class="p">,</span> <span class="n">template</span><span class="p">)</span>
+        <span class="n">pages</span><span class="p">,</span> <span class="n">score</span><span class="p">,</span> <span class="n">matched</span><span class="p">,</span> <span class="n">verdict</span> <span class="o">=</span> <span class="n">match_page</span><span class="p">(</span><span class="n">names</span><span class="p">,</span> <span class="n">courts</span><span class="p">,</span> <span class="n">volume</span><span class="p">,</span> <span class="n">crosswalk</span><span class="p">)</span>
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
+            <span class="s2">&quot;cz_scan&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">scan</span><span class="si">:</span><span class="s2">04d</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;de_scans&quot;</span><span class="p">:</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">p</span><span class="si">:</span><span class="s2">04d</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">pages</span><span class="p">),</span>
+            <span class="s2">&quot;score&quot;</span><span class="p">:</span> <span class="n">score</span><span class="p">,</span> <span class="s2">&quot;n_names&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">names</span><span class="p">),</span> <span class="s2">&quot;n_matched&quot;</span><span class="p">:</span> <span class="n">matched</span><span class="p">,</span>
+            <span class="s2">&quot;districts_cz&quot;</span><span class="p">:</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="n">courts</span><span class="p">)),</span> <span class="s2">&quot;verdict&quot;</span><span class="p">:</span> <span class="n">verdict</span><span class="p">,</span>
+        <span class="p">})</span>
+        <span class="k">if</span> <span class="n">i</span> <span class="o">%</span> <span class="mi">50</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">or</span> <span class="nb">len</span><span class="p">(</span><span class="n">scans</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="mi">20</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    cz </span><span class="si">{</span><span class="n">scan</span><span class="si">:</span><span class="s2">04d</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">names</span><span class="p">)</span><span class="si">:</span><span class="s2">3d</span><span class="si">}</span><span class="s2"> names -&gt; &quot;</span>
+                  <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">rows</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="s1">&#39;de_scans&#39;</span><span class="p">]</span><span class="w"> </span><span class="ow">or</span><span class="w"> </span><span class="s1">&#39;-&#39;</span><span class="si">:</span><span class="s2">20s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">score</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">verdict</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">rows</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-build_de_page_map-report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code> <code>03_visualisation.ipynb</code> <code>utils/lexikon_1910/build_mark_ledger.py</code> <code>utils/lexikon_1910/build_symbol_atlas_de.py</code> <code>utils/lexikon_1910/read_transcription_md.py</code> <code>utils/lexikon_1910/run_glyph_e3.py</code> <code>utils/lexikon_1910/score_certification.py</code> <code>utils/lexikon_1910/score_table_passes.py</code> <code>utils/linkage.py</code> <code>utils/parsing/clean.py</code> <code>utils/parsing/dates.py</code> <code>utils/parsing/exit_codes.py</code> <code>utils/parsing/habsburg.py</code> <code>utils/validation/data_checks.py</code></p>
+<details><summary>source · lines 278–300 (23 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;build_de_page_map v</span><span class="si">{</span><span class="n">__version__</span><span class="si">}</span><span class="s2"> — CZ page -&gt; DE pages&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">]</span>
+    <span class="n">verdicts</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">)</span>
+    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span><span class="si">}</span><span class="s2"> Czech pages&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">verdict</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;matched&quot;</span><span class="p">,</span> <span class="s2">&quot;weak&quot;</span><span class="p">,</span> <span class="s2">&quot;ambiguous&quot;</span><span class="p">,</span> <span class="s2">&quot;unmatched&quot;</span><span class="p">):</span>
+        <span class="n">n</span> <span class="o">=</span> <span class="n">verdicts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">verdict</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">n</span><span class="p">:</span>
+            <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">verdict</span><span class="si">:</span><span class="s2">10s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">n</span><span class="si">:</span><span class="s2">4d</span><span class="si">}</span><span class="s2">  (</span><span class="si">{</span><span class="n">n</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span><span class="si">:</span><span class="s2">.1%</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+    <span class="n">scored</span> <span class="o">=</span> <span class="p">[</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;score&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;score&quot;</span><span class="p">]]</span>
+    <span class="k">if</span> <span class="n">scored</span><span class="p">:</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  mean name overlap on a hit: &quot;</span>
+                     <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">sum</span><span class="p">(</span><span class="n">scored</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="n">scored</span><span class="p">)</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span><span class="s2">&quot;&quot;</span><span class="p">,</span>
+              <span class="s2">&quot;  A Czech page spans two or three German pages, so the best single&quot;</span><span class="p">,</span>
+              <span class="s2">&quot;  German page holds only part of its names — the score measures &quot;</span>
+              <span class="s2">&quot;&#39;the right&quot;</span><span class="p">,</span>
+              <span class="s2">&quot;  district&#39;s page&#39;, not &#39;this page holds everything&#39;.&quot;</span><span class="p">,</span>
+              <span class="s2">&quot;&quot;</span><span class="p">,</span>
+              <span class="s2">&quot;  Only `matched` rows may be used without saying so. `ambiguous` &quot;</span>
+              <span class="s2">&quot;means two&quot;</span><span class="p">,</span>
+              <span class="s2">&quot;  German pages tied and the tie was refused rather than broken on &quot;</span>
+              <span class="s2">&quot;lookup order.&quot;</span><span class="p">]</span>
+    <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-build_de_page_map-main">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 303–337 (35 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span>
+<span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span>
+<span class="normal">337</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--pages&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;comma-separated Czech scans (default: the purposive five)&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--all&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;every Czech table page, </span><span class="si">{</span><span class="n">lxp</span><span class="o">.</span><span class="n">CZ_FIRST_SCAN</span><span class="si">}</span><span class="s2">-</span><span class="si">{</span><span class="n">lxp</span><span class="o">.</span><span class="n">CZ_LAST_SCAN</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--write&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;write </span><span class="si">{</span><span class="n">OUT_CSV</span><span class="o">.</span><span class="n">relative_to</span><span class="p">(</span><span class="n">ROOT</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">all</span><span class="p">:</span>
+        <span class="n">scans</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">lxp</span><span class="o">.</span><span class="n">CZ_FIRST_SCAN</span><span class="p">,</span> <span class="n">lxp</span><span class="o">.</span><span class="n">CZ_LAST_SCAN</span> <span class="o">+</span> <span class="mi">1</span><span class="p">))</span>
+    <span class="k">elif</span> <span class="n">args</span><span class="o">.</span><span class="n">pages</span><span class="p">:</span>
+        <span class="n">scans</span> <span class="o">=</span> <span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">p</span><span class="p">)</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">args</span><span class="o">.</span><span class="n">pages</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">p</span><span class="o">.</span><span class="n">strip</span><span class="p">()]</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">scans</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">lxp</span><span class="o">.</span><span class="n">PURPOSIVE_PAGES</span><span class="p">)</span>
+
+    <span class="n">plaintext</span> <span class="o">=</span> <span class="n">lxp</span><span class="o">.</span><span class="n">DE_PLAINTEXT</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">plaintext</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;no German plaintext at </span><span class="si">{</span><span class="n">plaintext</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">)</span>
+        <span class="k">return</span> <span class="mi">1</span>
+
+    <span class="n">rows</span> <span class="o">=</span> <span class="n">build</span><span class="p">(</span><span class="n">scans</span><span class="p">,</span> <span class="n">plaintext</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">report</span><span class="p">(</span><span class="n">rows</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">write</span><span class="p">:</span>
+        <span class="n">OUT_CSV</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">with</span> <span class="n">OUT_CSV</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;w&quot;</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+            <span class="n">writer</span> <span class="o">=</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictWriter</span><span class="p">(</span><span class="n">fh</span><span class="p">,</span> <span class="n">fieldnames</span><span class="o">=</span><span class="n">FIELDS</span><span class="p">)</span>
+            <span class="n">writer</span><span class="o">.</span><span class="n">writeheader</span><span class="p">()</span>
+            <span class="n">writer</span><span class="o">.</span><span class="n">writerows</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  wrote </span><span class="si">{</span><span class="n">OUT_CSV</span><span class="o">.</span><span class="n">relative_to</span><span class="p">(</span><span class="n">ROOT</span><span class="p">)</span><span class="si">}</span><span class="s2">  (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span><span class="si">}</span><span class="s2"> rows)&quot;</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  (dry run — pass --write to save)&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-lexikon_1910-build_de_page_map-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-build_de_page_map-GRID_CSV"><pre class="sig">GRID_CSV<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;reference&#39;</span> <span class="o">/</span> <span class="s1">&#39;places&#39;</span> <span class="o">/</span> <span class="s1">&#39;lexikon_1910_grid.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-build_de_page_map-GRID_VOLUME"><pre class="sig">GRID_VOLUME<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;cechy_1910_cz&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-build_de_page_map-OUT_CSV"><pre class="sig">OUT_CSV<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;reference&#39;</span> <span class="o">/</span> <span class="s1">&#39;places&#39;</span> <span class="o">/</span> <span class="s1">&#39;lexikon_1910_de_page_map.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-build_de_page_map-MIN_NAME"><pre class="sig">MIN_NAME<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">4</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-build_de_page_map-WEAK_BELOW"><pre class="sig">WEAK_BELOW<span class="kind">float</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mf">0.2</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-build_de_page_map-FIELDS"><pre class="sig">FIELDS<span class="kind">list · 7 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">[</span><span class="s1">&#39;cz_scan&#39;</span><span class="p">,</span> <span class="s1">&#39;de_scans&#39;</span><span class="p">,</span> <span class="s1">&#39;score&#39;</span><span class="p">,</span> <span class="s1">&#39;n_names&#39;</span><span class="p">,</span> <span class="s1">&#39;n_matched&#39;</span><span class="p">,</span> <span class="s1">&#39;districts_cz&#39;</span><span class="p">,</span> <span class="s1">&#39;verdict&#39;</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/lexikon_1910/build_de_page_map.py · 341 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span>
+<span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span>
+<span class="normal">337</span>
+<span class="normal">338</span>
+<span class="normal">339</span>
+<span class="normal">340</span>
+<span class="normal">341</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;Pair every Czech page of the 1910 register with the German pages that print it.</span>
+
+<span class="sd">The two volumes are the same census table set twice, and neither is a translation</span>
+<span class="sd">of the other&#39;s typesetting: they paginate differently and each orders an okres&#39;s</span>
+<span class="sd">municipalities alphabetically **in its own language**. So there is no scan-to-scan</span>
+<span class="sd">correspondence to assume — German scan 118 is not the German printing of Czech</span>
+<span class="sd">scan 118 — and a run that assumes one reads unrelated pages while looking</span>
+<span class="sd">entirely well-behaved.</span>
+
+<span class="sd">What makes the pairing possible is that **both volumes print both names.** The</span>
+<span class="sd">Czech table sets ``Vysoká, Wisset``; the German sets ``Wisset, Vysoká``. So the</span>
+<span class="sd">German twin of every municipality on a Czech page can be read straight off the</span>
+<span class="sd">Czech page, and the German page that prints those same names is the page that</span>
+<span class="sd">covers it. No external crosswalk, no district-name translation table, and — this</span>
+<span class="sd">is the point — **the match score is itself the evidence**. A bad pairing shows up</span>
+<span class="sd">as a low score rather than as a clean-looking wrong answer.</span>
+
+<span class="sd">Two guards, both from failures measured in this project:</span>
+
+<span class="sd">* **The district is checked first.** Village names repeat across Bohemia, and a</span>
+<span class="sd">  name-only match over 481 pages will find a homonym in another okres. Candidate</span>
+<span class="sd">  pages are therefore restricted to those whose running head names the right</span>
+<span class="sd">  *politischer Bezirk* before names are counted — the same discipline</span>
+<span class="sd">  ``records_geo`` uses when a birthplace could be one of several places.</span>
+<span class="sd">* **A tie is refused, not broken.** Where two DE pages score equally the row is</span>
+<span class="sd">  written ``ambiguous`` and carries both. ``lexikon_1910_de`` already refuses a</span>
+<span class="sd">  tie one level down rather than taking the first match, and for the same reason:</span>
+<span class="sd">  on this source a plausible wrong answer is indistinguishable from a right one.</span>
+
+<span class="sd">Output — ``reference/places/lexikon_1910_de_page_map.csv``:</span>
+
+<span class="sd">    cz_scan  de_scans  score  n_names  n_matched  districts_cz  verdict</span>
+
+<span class="sd">``verdict`` is ``matched`` / ``weak`` / ``ambiguous`` / ``unmatched``. Nothing</span>
+<span class="sd">downstream may use a row that is not ``matched`` without saying so.</span>
+
+<span class="sd">    python utils/lexikon_1910/build_de_page_map.py --pages 118,270,449,450,451</span>
+<span class="sd">    python utils/lexikon_1910/build_de_page_map.py --all --write</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">csv</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">unicodedata</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">Counter</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">))</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910</span> <span class="k">as</span> <span class="n">lx</span>            <span class="c1"># noqa: E402</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_pages</span> <span class="k">as</span> <span class="n">lxp</span>     <span class="c1"># noqa: E402</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.0.0&quot;</span>
+
+<span class="n">GRID_CSV</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;places&quot;</span> <span class="o">/</span> <span class="s2">&quot;lexikon_1910_grid.csv&quot;</span>
+<span class="n">GRID_VOLUME</span> <span class="o">=</span> <span class="s2">&quot;cechy_1910_cz&quot;</span>
+<span class="n">OUT_CSV</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;places&quot;</span> <span class="o">/</span> <span class="s2">&quot;lexikon_1910_de_page_map.csv&quot;</span>
+
+<span class="c1">#: The German volume&#39;s main part. Scan 0011–0013 is the *Zeichenerklärung*, 0496</span>
+<span class="c1">#: opens ``Landesübersicht I`` and everything after is the appendix and the</span>
+<span class="c1">#: alphabetical index. Measured by reading the heads at the boundary, not</span>
+<span class="c1">#: assumed: the index at the back names every district again, so a page range</span>
+<span class="c1">#: that includes it gives each district a dozen spurious pages.</span>
+<span class="n">DE_FIRST_SCAN</span><span class="p">,</span> <span class="n">DE_LAST_SCAN</span> <span class="o">=</span> <span class="mi">15</span><span class="p">,</span> <span class="mi">495</span>
+
+<span class="c1">#: A name has to be this long to count. Short tokens are column headings, roman</span>
+<span class="c1">#: numerals and OCR noise, and they match everywhere.</span>
+<span class="n">MIN_NAME</span> <span class="o">=</span> <span class="mi">4</span>
+
+<span class="c1">#: Below this share of the page&#39;s German names, a match is reported but flagged.</span>
+<span class="c1">#: A Czech page spans two or three German pages, so the best single German page</span>
+<span class="c1">#: legitimately holds only a third to a half of them — the threshold is set for</span>
+<span class="c1">#: &quot;this is the right district&#39;s page&quot;, not for &quot;this page holds everything&quot;.</span>
+<span class="n">WEAK_BELOW</span> <span class="o">=</span> <span class="mf">0.20</span>
+
+<span class="n">FIELDS</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;cz_scan&quot;</span><span class="p">,</span> <span class="s2">&quot;de_scans&quot;</span><span class="p">,</span> <span class="s2">&quot;score&quot;</span><span class="p">,</span> <span class="s2">&quot;n_names&quot;</span><span class="p">,</span> <span class="s2">&quot;n_matched&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;districts_cz&quot;</span><span class="p">,</span> <span class="s2">&quot;verdict&quot;</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">normalise</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Match key for a place name, across two orthographies.</span>
+
+<span class="sd">    Accents are stripped, and the German transliterations are folded onto the</span>
+<span class="sd">    umlauts they stand for: the volume prints ``Brüx`` while the curated tables</span>
+<span class="sd">    write ``Bruex``, and under NFKD alone those are ``brux`` and ``bruex`` — two</span>
+<span class="sd">    different keys for one town. That single mismatch is why</span>
+<span class="sd">    ``lexikon_1910_de.okres_pages(&quot;Bruex&quot;)`` returns nothing.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">unicodedata</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="s2">&quot;NFKD&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">text</span><span class="p">))</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">text</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">unicodedata</span><span class="o">.</span><span class="n">combining</span><span class="p">(</span><span class="n">c</span><span class="p">))</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">text</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">pair</span><span class="p">,</span> <span class="n">single</span> <span class="ow">in</span> <span class="p">((</span><span class="s2">&quot;ue&quot;</span><span class="p">,</span> <span class="s2">&quot;u&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;oe&quot;</span><span class="p">,</span> <span class="s2">&quot;o&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;ae&quot;</span><span class="p">,</span> <span class="s2">&quot;a&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;ss&quot;</span><span class="p">,</span> <span class="s2">&quot;s&quot;</span><span class="p">)):</span>
+        <span class="n">text</span> <span class="o">=</span> <span class="n">text</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="n">pair</span><span class="p">,</span> <span class="n">single</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;[^a-z0-9]&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">text</span><span class="p">)</span>
+
+
+<span class="n">_WORD_RE</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;[A-Za-zÄÖÜäöüß][\w&#39;’.\-]{</span><span class="si">%d</span><span class="s2">,}&quot;</span> <span class="o">%</span> <span class="p">(</span><span class="n">MIN_NAME</span> <span class="o">-</span> <span class="mi">1</span><span class="p">))</span>
+
+<span class="c1">#: The running head of both volumes prints ``political okres: court, court.`` —</span>
+<span class="c1">#: ``Chomútov: Chomútov, Jirkov.`` in Czech, ``Komotau: Görkau.`` in German. A</span>
+<span class="c1">#: page where one district ends and the next begins prints both, separated by an</span>
+<span class="c1">#: em dash. The trailing ``.`` is what ends the head; everything after it on the</span>
+<span class="c1">#: line is column-heading text the OCR has run together with it.</span>
+<span class="n">_HEAD_RE</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span>
+    <span class="sa">r</span><span class="s2">&quot;([A-Za-zÁ-Žá-žÄÖÜäöüß][\w.\-’&#39;À-ſ ]{1,28}?)\s*:\s*([^.:]{2,60})\.&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">parse_head</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``&quot;Most: Most. — Náchod: Česká Skalice.&quot;`` -&gt; ``[(most,[most]), (nachod,[ceskaskalice])]``.</span>
+
+<span class="sd">    Both sides are returned because they answer different questions: the political</span>
+<span class="sd">    okres is what the German volume&#39;s index is keyed on, and the **court** is what</span>
+<span class="sd">    actually identifies the page — a political okres runs to a dozen pages, a court</span>
+<span class="sd">    to two or three.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">out</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">political</span><span class="p">,</span> <span class="n">courts</span> <span class="ow">in</span> <span class="n">_HEAD_RE</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="n">text</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">):</span>
+        <span class="n">key</span> <span class="o">=</span> <span class="n">normalise</span><span class="p">(</span><span class="n">political</span><span class="p">)</span>
+        <span class="n">names</span> <span class="o">=</span> <span class="p">[</span><span class="n">normalise</span><span class="p">(</span><span class="n">c</span><span class="p">)</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">courts</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">)]</span>
+        <span class="n">names</span> <span class="o">=</span> <span class="p">[</span><span class="n">n</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">names</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">n</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">3</span><span class="p">]</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">key</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">3</span> <span class="ow">and</span> <span class="n">names</span><span class="p">:</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">key</span><span class="p">,</span> <span class="n">names</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">court_crosswalk</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Czech court name -&gt; German, both sides normalised.</span>
+
+<span class="sd">    Read through :func:`normalise` on both sides rather than matched literally,</span>
+<span class="sd">    which repairs two things at once: the curation writes the transliterated</span>
+<span class="sd">    ``Goerkau`` / ``Bruex`` where the volume prints ``Görkau`` / ``Brüx``, and the</span>
+<span class="sd">    OCR of the Czech head gives ``Chomútov`` and ``Marsov`` where the curation has</span>
+<span class="sd">    ``Chomutov`` and ``Maršov``. Both are spelling, not identity.</span>
+
+<span class="sd">    ⚠ Only the 330 **court** rows carry a German name; all 158 okres rows have the</span>
+<span class="sd">    column empty. That is why this pairs on courts and not on the political</span>
+<span class="sd">    district — the data for the other one does not exist.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;places&quot;</span> <span class="o">/</span> <span class="s2">&quot;district_cs_curation.csv&quot;</span>
+    <span class="n">out</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">with</span> <span class="n">path</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictReader</span><span class="p">(</span><span class="n">fh</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;level&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="s2">&quot;court&quot;</span> <span class="ow">and</span> <span class="p">(</span><span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;de&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+                <span class="n">out</span><span class="p">[</span><span class="n">normalise</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;cs&quot;</span><span class="p">])]</span> <span class="o">=</span> <span class="n">normalise</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;de&quot;</span><span class="p">])</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">de_page_words</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Every word-shaped token on one German page, normalised.&quot;&quot;&quot;</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">path</span><span class="o">.</span><span class="n">read_text</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;replace&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="n">normalise</span><span class="p">(</span><span class="n">w</span><span class="p">)</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">_WORD_RE</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="n">text</span><span class="p">)}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">de_page_courts</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">head_lines</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">12</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The *Gerichtsbezirk* names in one German page&#39;s running head.&quot;&quot;&quot;</span>
+    <span class="n">head</span> <span class="o">=</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+        <span class="n">path</span><span class="o">.</span><span class="n">read_text</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;replace&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)[:</span><span class="n">head_lines</span><span class="p">])</span>
+    <span class="k">return</span> <span class="p">{</span><span class="n">court</span> <span class="k">for</span> <span class="n">_political</span><span class="p">,</span> <span class="n">courts</span> <span class="ow">in</span> <span class="n">parse_head</span><span class="p">(</span><span class="n">head</span><span class="p">)</span> <span class="k">for</span> <span class="n">court</span> <span class="ow">in</span> <span class="n">courts</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">load_de_volume</span><span class="p">(</span><span class="n">plaintext_dir</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``scan -&gt; (words, courts)`` for the German main part.&quot;&quot;&quot;</span>
+    <span class="n">volume</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">scan</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">DE_FIRST_SCAN</span><span class="p">,</span> <span class="n">DE_LAST_SCAN</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="n">path</span> <span class="o">=</span> <span class="n">plaintext_dir</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;AC01116810-</span><span class="si">{</span><span class="n">scan</span><span class="si">:</span><span class="s2">04d</span><span class="si">}</span><span class="s2">.txt&quot;</span>
+        <span class="k">if</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="n">volume</span><span class="p">[</span><span class="n">scan</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">de_page_words</span><span class="p">(</span><span class="n">path</span><span class="p">),</span> <span class="n">de_page_courts</span><span class="p">(</span><span class="n">path</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">volume</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">cz_page_names</span><span class="p">(</span><span class="n">scan</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">template</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``(German twin names, Czech district names)`` printed on one Czech page.</span>
+
+<span class="sd">    The name cell sets ``Czech, German`` — occasionally with a topographic symbol</span>
+<span class="sd">    or a cadastral span trailing it — so the German twin is what follows the first</span>
+<span class="sd">    comma, cut at the first character that cannot be part of a name. Rows whose</span>
+<span class="sd">    name cell has no comma are settlements printed under one name in both</span>
+<span class="sd">    volumes; they are skipped rather than guessed at.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">page</span> <span class="o">=</span> <span class="n">lxp</span><span class="o">.</span><span class="n">alto_page</span><span class="p">(</span><span class="n">scan</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">page</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[],</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">rows</span> <span class="o">=</span> <span class="n">lx</span><span class="o">.</span><span class="n">extract_rows</span><span class="p">(</span><span class="n">page</span><span class="p">,</span> <span class="n">template</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+        <span class="c1"># &quot;no column rules — not a table page&quot;. The volume opens its table a few</span>
+        <span class="c1"># scans after the main part nominally begins (15-18 carry no apparatus</span>
+        <span class="c1"># either, which draw_gold_sample already excludes), and a page with no</span>
+        <span class="c1"># grid has no name column to read. Reported as unmatched rather than</span>
+        <span class="c1"># crashed on: the map has to cover every scan it was asked about, and a</span>
+        <span class="c1"># page that cannot be paired is a fact about the volume.</span>
+        <span class="k">return</span> <span class="p">[],</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="n">names</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+        <span class="n">cell</span> <span class="o">=</span> <span class="p">(</span><span class="n">row</span><span class="o">.</span><span class="n">cells</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="s2">&quot;,&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">cell</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">german</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;[^A-Za-zÄÖÜäöüß&#39;’.\-]&quot;</span><span class="p">,</span> <span class="n">cell</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span>
+        <span class="n">german</span> <span class="o">=</span> <span class="n">german</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">if</span> <span class="n">german</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">german</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="n">MIN_NAME</span><span class="p">:</span>
+            <span class="n">names</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">normalise</span><span class="p">(</span><span class="n">german</span><span class="p">))</span>
+    <span class="n">courts</span> <span class="o">=</span> <span class="p">{</span><span class="n">c</span> <span class="k">for</span> <span class="n">_pol</span><span class="p">,</span> <span class="n">cs</span> <span class="ow">in</span> <span class="n">parse_head</span><span class="p">(</span><span class="n">lx</span><span class="o">.</span><span class="n">running_head</span><span class="p">(</span><span class="n">page</span><span class="p">))</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cs</span><span class="p">}</span>
+    <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="nb">dict</span><span class="o">.</span><span class="n">fromkeys</span><span class="p">(</span><span class="n">n</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">names</span> <span class="k">if</span> <span class="n">n</span><span class="p">)),</span> <span class="n">courts</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">match_page</span><span class="p">(</span><span class="n">names</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">courts_cz</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+               <span class="n">volume</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]]],</span>
+               <span class="n">crosswalk</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">],</span>
+               <span class="n">top</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">3</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span> <span class="nb">float</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Score every German page against one Czech page&#39;s names.</span>
+
+<span class="sd">    The district filter runs first and is the guard against homonyms: village</span>
+<span class="sd">    names repeat across Bohemia, and a name-only search over 481 pages will find</span>
+<span class="sd">    one in the wrong okres. Where the filter leaves nothing — a Czech running head</span>
+<span class="sd">    the OCR destroyed, a German head it destroyed — the search falls back to the</span>
+<span class="sd">    whole volume and the row is flagged, because an unfiltered match is a weaker</span>
+<span class="sd">    claim and must not be recorded as if it were the same thing.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">names</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[],</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;unmatched&quot;</span>
+
+    <span class="n">wanted</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">names</span><span class="p">)</span>
+    <span class="c1"># Czech courts -&gt; German courts, then keep only the German pages whose own</span>
+    <span class="c1"># running head names one of them. This is the homonym guard: village names</span>
+    <span class="c1"># repeat across Bohemia, and a name-only search over 481 pages will happily</span>
+    <span class="c1"># find one in the wrong okres and score it as a hit.</span>
+    <span class="n">courts_de</span> <span class="o">=</span> <span class="p">{</span><span class="n">crosswalk</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">courts_cz</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">crosswalk</span><span class="p">}</span>
+    <span class="n">candidates</span> <span class="o">=</span> <span class="p">{</span><span class="n">s</span><span class="p">:</span> <span class="n">w</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="p">(</span><span class="n">w</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span> <span class="ow">in</span> <span class="n">volume</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">d</span> <span class="o">&amp;</span> <span class="n">courts_de</span><span class="p">}</span> \
+        <span class="k">if</span> <span class="n">courts_de</span> <span class="k">else</span> <span class="p">{}</span>
+    <span class="n">filtered</span> <span class="o">=</span> <span class="nb">bool</span><span class="p">(</span><span class="n">candidates</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">candidates</span><span class="p">:</span>
+        <span class="n">candidates</span> <span class="o">=</span> <span class="p">{</span><span class="n">s</span><span class="p">:</span> <span class="n">w</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="p">(</span><span class="n">w</span><span class="p">,</span> <span class="n">_d</span><span class="p">)</span> <span class="ow">in</span> <span class="n">volume</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+
+    <span class="n">scores</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">({</span><span class="n">scan</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">wanted</span> <span class="o">&amp;</span> <span class="n">words</span><span class="p">)</span> <span class="k">for</span> <span class="n">scan</span><span class="p">,</span> <span class="n">words</span> <span class="ow">in</span> <span class="n">candidates</span><span class="o">.</span><span class="n">items</span><span class="p">()})</span>
+    <span class="n">best</span> <span class="o">=</span> <span class="p">[(</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">scores</span><span class="o">.</span><span class="n">most_common</span><span class="p">(</span><span class="n">top</span><span class="p">)</span> <span class="k">if</span> <span class="n">c</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">best</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[],</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;unmatched&quot;</span>
+
+    <span class="n">top_count</span> <span class="o">=</span> <span class="n">best</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span>
+    <span class="n">winners</span> <span class="o">=</span> <span class="p">[</span><span class="n">s</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">best</span> <span class="k">if</span> <span class="n">c</span> <span class="o">==</span> <span class="n">top_count</span><span class="p">]</span>
+    <span class="n">share</span> <span class="o">=</span> <span class="n">top_count</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">wanted</span><span class="p">)</span>
+    <span class="n">verdict</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;ambiguous&quot;</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">winners</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span>
+               <span class="k">else</span> <span class="s2">&quot;weak&quot;</span> <span class="k">if</span> <span class="n">share</span> <span class="o">&lt;</span> <span class="n">WEAK_BELOW</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">filtered</span>
+               <span class="k">else</span> <span class="s2">&quot;matched&quot;</span><span class="p">)</span>
+    <span class="n">pages</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">({</span><span class="n">s</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">_c</span> <span class="ow">in</span> <span class="n">best</span><span class="p">})</span>
+    <span class="k">return</span> <span class="n">pages</span><span class="p">,</span> <span class="nb">round</span><span class="p">(</span><span class="n">share</span><span class="p">,</span> <span class="mi">3</span><span class="p">),</span> <span class="n">top_count</span><span class="p">,</span> <span class="n">verdict</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">build</span><span class="p">(</span><span class="n">scans</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span> <span class="n">plaintext_dir</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+    <span class="n">template</span> <span class="o">=</span> <span class="n">lx</span><span class="o">.</span><span class="n">read_grid_template</span><span class="p">(</span><span class="n">GRID_CSV</span><span class="p">,</span> <span class="n">GRID_VOLUME</span><span class="p">)</span>
+    <span class="n">crosswalk</span> <span class="o">=</span> <span class="n">court_crosswalk</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">crosswalk</span><span class="p">)</span><span class="si">}</span><span class="s2"> court name pairs, cs -&gt; de&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  loading the German main part, scans &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">DE_FIRST_SCAN</span><span class="si">}</span><span class="s2">-</span><span class="si">{</span><span class="n">DE_LAST_SCAN</span><span class="si">}</span><span class="s2"> ...&quot;</span><span class="p">)</span>
+    <span class="n">volume</span> <span class="o">=</span> <span class="n">load_de_volume</span><span class="p">(</span><span class="n">plaintext_dir</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">volume</span><span class="p">)</span><span class="si">}</span><span class="s2"> German pages indexed&quot;</span><span class="p">)</span>
+
+    <span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">scan</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">scans</span><span class="p">,</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="n">names</span><span class="p">,</span> <span class="n">courts</span> <span class="o">=</span> <span class="n">cz_page_names</span><span class="p">(</span><span class="n">scan</span><span class="p">,</span> <span class="n">template</span><span class="p">)</span>
+        <span class="n">pages</span><span class="p">,</span> <span class="n">score</span><span class="p">,</span> <span class="n">matched</span><span class="p">,</span> <span class="n">verdict</span> <span class="o">=</span> <span class="n">match_page</span><span class="p">(</span><span class="n">names</span><span class="p">,</span> <span class="n">courts</span><span class="p">,</span> <span class="n">volume</span><span class="p">,</span> <span class="n">crosswalk</span><span class="p">)</span>
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
+            <span class="s2">&quot;cz_scan&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">scan</span><span class="si">:</span><span class="s2">04d</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;de_scans&quot;</span><span class="p">:</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">p</span><span class="si">:</span><span class="s2">04d</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">pages</span><span class="p">),</span>
+            <span class="s2">&quot;score&quot;</span><span class="p">:</span> <span class="n">score</span><span class="p">,</span> <span class="s2">&quot;n_names&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">names</span><span class="p">),</span> <span class="s2">&quot;n_matched&quot;</span><span class="p">:</span> <span class="n">matched</span><span class="p">,</span>
+            <span class="s2">&quot;districts_cz&quot;</span><span class="p">:</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="n">courts</span><span class="p">)),</span> <span class="s2">&quot;verdict&quot;</span><span class="p">:</span> <span class="n">verdict</span><span class="p">,</span>
+        <span class="p">})</span>
+        <span class="k">if</span> <span class="n">i</span> <span class="o">%</span> <span class="mi">50</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">or</span> <span class="nb">len</span><span class="p">(</span><span class="n">scans</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="mi">20</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    cz </span><span class="si">{</span><span class="n">scan</span><span class="si">:</span><span class="s2">04d</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">names</span><span class="p">)</span><span class="si">:</span><span class="s2">3d</span><span class="si">}</span><span class="s2"> names -&gt; &quot;</span>
+                  <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">rows</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="s1">&#39;de_scans&#39;</span><span class="p">]</span><span class="w"> </span><span class="ow">or</span><span class="w"> </span><span class="s1">&#39;-&#39;</span><span class="si">:</span><span class="s2">20s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">score</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">verdict</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">rows</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;build_de_page_map v</span><span class="si">{</span><span class="n">__version__</span><span class="si">}</span><span class="s2"> — CZ page -&gt; DE pages&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">]</span>
+    <span class="n">verdicts</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">)</span>
+    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span><span class="si">}</span><span class="s2"> Czech pages&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">verdict</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;matched&quot;</span><span class="p">,</span> <span class="s2">&quot;weak&quot;</span><span class="p">,</span> <span class="s2">&quot;ambiguous&quot;</span><span class="p">,</span> <span class="s2">&quot;unmatched&quot;</span><span class="p">):</span>
+        <span class="n">n</span> <span class="o">=</span> <span class="n">verdicts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">verdict</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">n</span><span class="p">:</span>
+            <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">verdict</span><span class="si">:</span><span class="s2">10s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">n</span><span class="si">:</span><span class="s2">4d</span><span class="si">}</span><span class="s2">  (</span><span class="si">{</span><span class="n">n</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span><span class="si">:</span><span class="s2">.1%</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+    <span class="n">scored</span> <span class="o">=</span> <span class="p">[</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;score&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;score&quot;</span><span class="p">]]</span>
+    <span class="k">if</span> <span class="n">scored</span><span class="p">:</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  mean name overlap on a hit: &quot;</span>
+                     <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">sum</span><span class="p">(</span><span class="n">scored</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="n">scored</span><span class="p">)</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span><span class="s2">&quot;&quot;</span><span class="p">,</span>
+              <span class="s2">&quot;  A Czech page spans two or three German pages, so the best single&quot;</span><span class="p">,</span>
+              <span class="s2">&quot;  German page holds only part of its names — the score measures &quot;</span>
+              <span class="s2">&quot;&#39;the right&quot;</span><span class="p">,</span>
+              <span class="s2">&quot;  district&#39;s page&#39;, not &#39;this page holds everything&#39;.&quot;</span><span class="p">,</span>
+              <span class="s2">&quot;&quot;</span><span class="p">,</span>
+              <span class="s2">&quot;  Only `matched` rows may be used without saying so. `ambiguous` &quot;</span>
+              <span class="s2">&quot;means two&quot;</span><span class="p">,</span>
+              <span class="s2">&quot;  German pages tied and the tie was refused rather than broken on &quot;</span>
+              <span class="s2">&quot;lookup order.&quot;</span><span class="p">]</span>
+    <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--pages&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;comma-separated Czech scans (default: the purposive five)&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--all&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;every Czech table page, </span><span class="si">{</span><span class="n">lxp</span><span class="o">.</span><span class="n">CZ_FIRST_SCAN</span><span class="si">}</span><span class="s2">-</span><span class="si">{</span><span class="n">lxp</span><span class="o">.</span><span class="n">CZ_LAST_SCAN</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--write&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;write </span><span class="si">{</span><span class="n">OUT_CSV</span><span class="o">.</span><span class="n">relative_to</span><span class="p">(</span><span class="n">ROOT</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">all</span><span class="p">:</span>
+        <span class="n">scans</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">lxp</span><span class="o">.</span><span class="n">CZ_FIRST_SCAN</span><span class="p">,</span> <span class="n">lxp</span><span class="o">.</span><span class="n">CZ_LAST_SCAN</span> <span class="o">+</span> <span class="mi">1</span><span class="p">))</span>
+    <span class="k">elif</span> <span class="n">args</span><span class="o">.</span><span class="n">pages</span><span class="p">:</span>
+        <span class="n">scans</span> <span class="o">=</span> <span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">p</span><span class="p">)</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">args</span><span class="o">.</span><span class="n">pages</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">p</span><span class="o">.</span><span class="n">strip</span><span class="p">()]</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">scans</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">lxp</span><span class="o">.</span><span class="n">PURPOSIVE_PAGES</span><span class="p">)</span>
+
+    <span class="n">plaintext</span> <span class="o">=</span> <span class="n">lxp</span><span class="o">.</span><span class="n">DE_PLAINTEXT</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">plaintext</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;no German plaintext at </span><span class="si">{</span><span class="n">plaintext</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">)</span>
+        <span class="k">return</span> <span class="mi">1</span>
+
+    <span class="n">rows</span> <span class="o">=</span> <span class="n">build</span><span class="p">(</span><span class="n">scans</span><span class="p">,</span> <span class="n">plaintext</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">report</span><span class="p">(</span><span class="n">rows</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">write</span><span class="p">:</span>
+        <span class="n">OUT_CSV</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">with</span> <span class="n">OUT_CSV</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;w&quot;</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+            <span class="n">writer</span> <span class="o">=</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictWriter</span><span class="p">(</span><span class="n">fh</span><span class="p">,</span> <span class="n">fieldnames</span><span class="o">=</span><span class="n">FIELDS</span><span class="p">)</span>
+            <span class="n">writer</span><span class="o">.</span><span class="n">writeheader</span><span class="p">()</span>
+            <span class="n">writer</span><span class="o">.</span><span class="n">writerows</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  wrote </span><span class="si">{</span><span class="n">OUT_CSV</span><span class="o">.</span><span class="n">relative_to</span><span class="p">(</span><span class="n">ROOT</span><span class="p">)</span><span class="si">}</span><span class="s2">  (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span><span class="si">}</span><span class="s2"> rows)&quot;</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  (dry run — pass --write to save)&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>

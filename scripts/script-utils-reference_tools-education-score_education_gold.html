@@ -1,0 +1,724 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Score a hand-coded education worksheet against <code>education.py</code>.</p><p class="tldr-facts"><b>Reference tools</b> · v1.0.0 · 210 lines · 2 public functions · 3 constants · used by nothing else · <code>utils/reference_tools/education/score_education_gold.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-reference_tools-education-score_education_gold-human_rung">human_rung</a><a class="chip" href="#fn-utils-reference_tools-education-score_education_gold-main">main</a><a class="chip const" href="#c-utils-reference_tools-education-score_education_gold-ROOT">ROOT</a><a class="chip const" href="#c-utils-reference_tools-education-score_education_gold-GOLD">GOLD</a><a class="chip const" href="#c-utils-reference_tools-education-score_education_gold-RAW">RAW</a></div>
+<h2>How it works</h2><p>Reads a worksheet filled in per <code>education_gold/NAVOD.md</code>, re-parses the same raw strings
+with the live parser, and reports where the two disagree.</p>
+<h4>Three things this does that a naive accuracy would not</h4>
+<p><strong>It reweights.</strong> The sample is disproportionate by design — 40 of 952 <code>unparsed</code> records
+against 90 of 71,622 <code>plain</code> ones. An unweighted mean over the worksheet would describe a
+population that does not exist. Every headline figure is weighted by the true stratum size
+from <code>_frame.csv</code>, so it estimates the accuracy the <em>data</em> has; the per-stratum figures are
+reported beside it, unweighted, because that is where the precision actually is.</p>
+<p><strong>It separates reading from ranking.</strong> The coder names institutions, never a rung. The rung
+is then derived from their institutions with the parser's own <code>INSTITUTIONS</code> and <code>TIE_BREAK</code>.
+So a rung disagreement is reported twice: once as a <em>reading</em> difference (the two disagree
+about which schools are named) and once as a <em>residual</em> — the same institutions placed
+differently, which would be a bug in the ladder code rather than in the dictionary.</p>
+<p><strong>It refuses to score what was not coded.</strong> A blank cell is "not coded", not "no". Blank
+rows are counted and excluded, and the counts are printed, because a worksheet that is 60 %
+filled produces a very confident wrong number if the blanks are read as agreement.</p>
+<p>Usage:
+    python utils/reference_tools/education/score_education_gold.py calibration
+    python utils/reference_tools/education/score_education_gold.py certification</p>
+<p>Emits: nothing — prints the result for <code>reference/VALIDATION_EDUCATION.md</code>. Writes no file
+       and touches no pipeline column.</p>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-reference_tools-education-score_education_gold-human_rung">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">human_rung</span><span class="p">(</span><span class="n">insts</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span></pre>
+<div class="fndoc"><p>Put the coder's institutions on the ladder, using the parser's own table.</p>
+<p>Mirrors <code>parse_education</code>: the continuation school never sets the rung, but floors it
+at Elementary when nothing else is named.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 78–92 (15 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">78</span>
+<span class="normal">79</span>
+<span class="normal">80</span>
+<span class="normal">81</span>
+<span class="normal">82</span>
+<span class="normal">83</span>
+<span class="normal">84</span>
+<span class="normal">85</span>
+<span class="normal">86</span>
+<span class="normal">87</span>
+<span class="normal">88</span>
+<span class="normal">89</span>
+<span class="normal">90</span>
+<span class="normal">91</span>
+<span class="normal">92</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">human_rung</span><span class="p">(</span><span class="n">insts</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Put the coder&#39;s institutions on the ladder, using the parser&#39;s own table.</span>
+
+<span class="sd">    Mirrors `parse_education`: the continuation school never sets the rung, but floors it</span>
+<span class="sd">    at Elementary when nothing else is named.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing.education</span><span class="w"> </span><span class="kn">import</span> <span class="n">INSTITUTIONS</span>
+
+    <span class="n">known</span> <span class="o">=</span> <span class="p">[</span><span class="n">k</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">insts</span> <span class="k">if</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">INSTITUTIONS</span><span class="p">]</span>
+    <span class="n">scored</span> <span class="o">=</span> <span class="p">[</span><span class="n">k</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">known</span> <span class="k">if</span> <span class="n">INSTITUTIONS</span><span class="p">[</span><span class="n">k</span><span class="p">][</span><span class="mi">2</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">scored</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">max</span><span class="p">(</span><span class="n">INSTITUTIONS</span><span class="p">[</span><span class="n">k</span><span class="p">][</span><span class="mi">2</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">scored</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">INSTITUTIONS</span><span class="p">[</span><span class="n">k</span><span class="p">][</span><span class="mi">3</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;continuation&quot;</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">known</span><span class="p">):</span>
+        <span class="k">return</span> <span class="mi">1</span>
+    <span class="k">return</span> <span class="kc">None</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-education-score_education_gold-main">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 95–206 (112 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">()</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;half&quot;</span><span class="p">,</span> <span class="n">choices</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;calibration&quot;</span><span class="p">,</span> <span class="s2">&quot;certification&quot;</span><span class="p">])</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--worksheet&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="n">Path</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;override the worksheet path (used to smoke-test the scorer &quot;</span>
+                         <span class="s2">&quot;without touching a real, sealed sheet)&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing.education</span><span class="w"> </span><span class="kn">import</span> <span class="n">parse_education</span><span class="p">,</span> <span class="n">INSTITUTIONS</span>
+
+    <span class="n">sheet</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">worksheet</span> <span class="ow">or</span> <span class="p">(</span><span class="n">GOLD</span> <span class="o">/</span> <span class="n">args</span><span class="o">.</span><span class="n">half</span> <span class="o">/</span> <span class="s2">&quot;worksheet.csv&quot;</span><span class="p">),</span>
+                        <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span>
+    <span class="n">frame</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">GOLD</span> <span class="o">/</span> <span class="s2">&quot;_frame.csv&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;record_id&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">})</span>
+    <span class="n">raw</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">RAW</span><span class="p">,</span> <span class="n">usecols</span><span class="o">=</span><span class="p">[</span><span class="n">ID</span><span class="p">,</span> <span class="n">FIELD</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span>
+        <span class="n">columns</span><span class="o">=</span><span class="p">{</span><span class="n">ID</span><span class="p">:</span> <span class="s2">&quot;record_id&quot;</span><span class="p">,</span> <span class="n">FIELD</span><span class="p">:</span> <span class="s2">&quot;vzdelani_raw&quot;</span><span class="p">})</span>
+
+    <span class="n">df</span> <span class="o">=</span> <span class="p">(</span><span class="n">sheet</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span><span class="n">frame</span><span class="p">[[</span><span class="s2">&quot;record_id&quot;</span><span class="p">,</span> <span class="s2">&quot;stratum&quot;</span><span class="p">,</span> <span class="s2">&quot;stratum_size&quot;</span><span class="p">]],</span> <span class="n">on</span><span class="o">=</span><span class="s2">&quot;record_id&quot;</span><span class="p">,</span>
+                      <span class="n">how</span><span class="o">=</span><span class="s2">&quot;left&quot;</span><span class="p">)</span>
+               <span class="o">.</span><span class="n">merge</span><span class="p">(</span><span class="n">raw</span><span class="p">,</span> <span class="n">on</span><span class="o">=</span><span class="s2">&quot;record_id&quot;</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;left&quot;</span><span class="p">))</span>
+
+    <span class="n">coded</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;instituce&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span> <span class="o">|</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;poznamka&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">blank</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">coded</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">len</span><span class="p">(</span><span class="n">coded</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">half</span><span class="si">}</span><span class="s2">: nothing coded yet — 0 of </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">}</span><span class="s2"> rows filled in.&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Fill in the worksheet per education_gold/NAVOD.md, then re-run.&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="mi">0</span>
+
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">coded</span><span class="o">.</span><span class="n">itertuples</span><span class="p">():</span>
+        <span class="n">parsed</span> <span class="o">=</span> <span class="n">parse_education</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">vzdelani_raw</span><span class="p">)</span>
+        <span class="n">p_inst</span> <span class="o">=</span> <span class="p">([</span><span class="n">k</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">parsed</span><span class="p">[</span><span class="s2">&quot;educ_institutions&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;|&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">k</span><span class="p">]</span>
+                  <span class="k">if</span> <span class="n">parsed</span> <span class="k">else</span> <span class="p">[])</span>
+        <span class="n">h_inst</span> <span class="o">=</span> <span class="n">_tokens</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">instituce</span><span class="p">)</span>
+        <span class="n">unknown</span> <span class="o">=</span> <span class="p">[</span><span class="n">k</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">h_inst</span> <span class="k">if</span> <span class="n">k</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">INSTITUTIONS</span><span class="p">]</span>
+        <span class="n">h_years</span><span class="p">,</span> <span class="n">p_years</span> <span class="o">=</span> <span class="n">_years</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">roky</span><span class="p">),</span> <span class="p">{}</span>
+        <span class="k">if</span> <span class="n">parsed</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">slot</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;elementary&quot;</span><span class="p">,</span> <span class="s2">&quot;burgher&quot;</span><span class="p">,</span> <span class="s2">&quot;continuation&quot;</span><span class="p">):</span>
+                <span class="n">v</span> <span class="o">=</span> <span class="n">parsed</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;educ_years_</span><span class="si">{</span><span class="n">slot</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span>
+                <span class="k">if</span> <span class="n">v</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">p_years</span><span class="p">[</span><span class="n">slot</span><span class="p">]</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+        <span class="n">h_ap</span><span class="p">,</span> <span class="n">p_ap</span> <span class="o">=</span> <span class="n">_tri</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">ucen</span><span class="p">),</span> <span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">parsed</span><span class="p">[</span><span class="s2">&quot;educ_apprentice&quot;</span><span class="p">])</span> <span class="k">if</span> <span class="n">parsed</span> <span class="k">else</span> <span class="kc">False</span><span class="p">)</span>
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
+            <span class="s2">&quot;record_id&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">record_id</span><span class="p">,</span> <span class="s2">&quot;stratum&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">stratum</span><span class="p">,</span>
+            <span class="s2">&quot;stratum_size&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">stratum_size</span><span class="p">,</span> <span class="s2">&quot;vzdelani&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">vzdelani_raw</span><span class="p">,</span>
+            <span class="s2">&quot;inst_match&quot;</span><span class="p">:</span> <span class="nb">set</span><span class="p">(</span><span class="n">h_inst</span><span class="p">)</span> <span class="o">==</span> <span class="nb">set</span><span class="p">(</span><span class="n">p_inst</span><span class="p">),</span>
+            <span class="s2">&quot;rung_match&quot;</span><span class="p">:</span> <span class="n">human_rung</span><span class="p">(</span><span class="n">h_inst</span><span class="p">)</span> <span class="o">==</span> <span class="p">(</span><span class="n">parsed</span><span class="p">[</span><span class="s2">&quot;educ_ord&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="n">parsed</span> <span class="k">else</span> <span class="kc">None</span><span class="p">),</span>
+            <span class="s2">&quot;years_match&quot;</span><span class="p">:</span> <span class="n">h_years</span> <span class="o">==</span> <span class="n">p_years</span><span class="p">,</span>
+            <span class="s2">&quot;appr_match&quot;</span><span class="p">:</span> <span class="kc">None</span> <span class="k">if</span> <span class="n">h_ap</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="p">(</span><span class="n">h_ap</span> <span class="o">==</span> <span class="n">p_ap</span><span class="p">),</span>
+            <span class="s2">&quot;human&quot;</span><span class="p">:</span> <span class="s2">&quot;|&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">h_inst</span><span class="p">),</span> <span class="s2">&quot;parser&quot;</span><span class="p">:</span> <span class="s2">&quot;|&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">p_inst</span><span class="p">),</span>
+            <span class="s2">&quot;unknown_token&quot;</span><span class="p">:</span> <span class="s2">&quot;,&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">unknown</span><span class="p">),</span>
+        <span class="p">})</span>
+    <span class="n">res</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">weighted</span><span class="p">(</span><span class="n">col</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+        <span class="n">d</span> <span class="o">=</span> <span class="n">res</span><span class="p">[</span><span class="n">res</span><span class="p">[</span><span class="n">col</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">len</span><span class="p">(</span><span class="n">d</span><span class="p">):</span>
+            <span class="k">return</span> <span class="nb">float</span><span class="p">(</span><span class="s2">&quot;nan&quot;</span><span class="p">)</span>
+        <span class="n">per</span> <span class="o">=</span> <span class="n">d</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;stratum&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">agg</span><span class="p">(</span><span class="n">acc</span><span class="o">=</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="s2">&quot;mean&quot;</span><span class="p">),</span> <span class="n">size</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;stratum_size&quot;</span><span class="p">,</span> <span class="s2">&quot;first&quot;</span><span class="p">))</span>
+        <span class="k">return</span> <span class="nb">float</span><span class="p">((</span><span class="n">per</span><span class="p">[</span><span class="s2">&quot;acc&quot;</span><span class="p">]</span> <span class="o">*</span> <span class="n">per</span><span class="p">[</span><span class="s2">&quot;size&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="o">/</span> <span class="n">per</span><span class="p">[</span><span class="s2">&quot;size&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">74</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Education hand-coding — </span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">half</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">74</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;rows in worksheet ... </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;coded ............... </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">coded</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;not yet coded ....... </span><span class="si">{</span><span class="n">blank</span><span class="si">}</span><span class="s2">   (excluded, not counted as agreement)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Per stratum (unweighted — this is where the precision is):&quot;</span><span class="p">)</span>
+    <span class="n">per</span> <span class="o">=</span> <span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;stratum&quot;</span><span class="p">)</span>
+              <span class="o">.</span><span class="n">agg</span><span class="p">(</span><span class="n">n</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;inst_match&quot;</span><span class="p">,</span> <span class="s2">&quot;size&quot;</span><span class="p">),</span>
+                   <span class="n">institutions</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;inst_match&quot;</span><span class="p">,</span> <span class="s2">&quot;mean&quot;</span><span class="p">),</span>
+                   <span class="n">rung</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;rung_match&quot;</span><span class="p">,</span> <span class="s2">&quot;mean&quot;</span><span class="p">),</span>
+                   <span class="n">years</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;years_match&quot;</span><span class="p">,</span> <span class="s2">&quot;mean&quot;</span><span class="p">))</span>
+              <span class="o">.</span><span class="n">sort_values</span><span class="p">(</span><span class="s2">&quot;n&quot;</span><span class="p">,</span> <span class="n">ascending</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
+    <span class="nb">print</span><span class="p">((</span><span class="n">per</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="o">**</span><span class="p">{</span><span class="n">c</span><span class="p">:</span> <span class="p">(</span><span class="n">per</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">*</span> <span class="mi">100</span><span class="p">)</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+                         <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;institutions&quot;</span><span class="p">,</span> <span class="s2">&quot;rung&quot;</span><span class="p">,</span> <span class="s2">&quot;years&quot;</span><span class="p">)}))</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Record-weighted (reweighted to the true stratum sizes — the headline):&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">col</span> <span class="ow">in</span> <span class="p">((</span><span class="s2">&quot;institutions read identically&quot;</span><span class="p">,</span> <span class="s2">&quot;inst_match&quot;</span><span class="p">),</span>
+                       <span class="p">(</span><span class="s2">&quot;rung agrees&quot;</span><span class="p">,</span> <span class="s2">&quot;rung_match&quot;</span><span class="p">),</span>
+                       <span class="p">(</span><span class="s2">&quot;years agree&quot;</span><span class="p">,</span> <span class="s2">&quot;years_match&quot;</span><span class="p">),</span>
+                       <span class="p">(</span><span class="s2">&quot;apprentice flag agrees&quot;</span><span class="p">,</span> <span class="s2">&quot;appr_match&quot;</span><span class="p">)):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   </span><span class="si">{</span><span class="n">label</span><span class="si">:</span><span class="s2">32s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="mi">100</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">weighted</span><span class="p">(</span><span class="n">col</span><span class="p">)</span><span class="si">:</span><span class="s2">5.1f</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="c1"># A rung that agrees while the institutions differ, or vice versa, is the interesting</span>
+    <span class="c1"># cell: it separates a dictionary problem from a ladder problem.</span>
+    <span class="n">reading</span> <span class="o">=</span> <span class="n">res</span><span class="p">[</span><span class="o">~</span><span class="n">res</span><span class="p">[</span><span class="s2">&quot;inst_match&quot;</span><span class="p">]]</span>
+    <span class="n">ladder</span> <span class="o">=</span> <span class="n">res</span><span class="p">[</span><span class="n">res</span><span class="p">[</span><span class="s2">&quot;inst_match&quot;</span><span class="p">]</span> <span class="o">&amp;</span> <span class="o">~</span><span class="n">res</span><span class="p">[</span><span class="s2">&quot;rung_match&quot;</span><span class="p">]]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Disagreements: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">reading</span><span class="p">)</span><span class="si">}</span><span class="s2"> on the reading, </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">ladder</span><span class="p">)</span><span class="si">}</span><span class="s2"> on the ladder &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;alone (same institutions, different rung).&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">ladder</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   ⚠ A ladder-only disagreement is a bug in the ranking code, not in the&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;     dictionary. These should be zero; investigate before anything else.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="n">unk</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">({</span><span class="n">t</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">res</span><span class="p">[</span><span class="s2">&quot;unknown_token&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">s</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">t</span><span class="p">})</span>
+    <span class="k">if</span> <span class="n">unk</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Tokens the coder used that are not in INSTITUTIONS: </span><span class="si">{</span><span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">unk</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   (either a typo, or a school the ladder has no place for — a finding)&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">()</span>
+
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">reading</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Every reading disagreement, worst stratum first:&quot;</span><span class="p">)</span>
+        <span class="n">show</span> <span class="o">=</span> <span class="n">reading</span><span class="o">.</span><span class="n">sort_values</span><span class="p">(</span><span class="s2">&quot;stratum&quot;</span><span class="p">)[</span>
+            <span class="p">[</span><span class="s2">&quot;stratum&quot;</span><span class="p">,</span> <span class="s2">&quot;vzdelani&quot;</span><span class="p">,</span> <span class="s2">&quot;human&quot;</span><span class="p">,</span> <span class="s2">&quot;parser&quot;</span><span class="p">]]</span>
+        <span class="k">with</span> <span class="n">pd</span><span class="o">.</span><span class="n">option_context</span><span class="p">(</span><span class="s2">&quot;display.max_colwidth&quot;</span><span class="p">,</span> <span class="mi">44</span><span class="p">,</span> <span class="s2">&quot;display.width&quot;</span><span class="p">,</span> <span class="mi">200</span><span class="p">):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">show</span><span class="o">.</span><span class="n">to_string</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
+    <span class="k">return</span> <span class="mi">0</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-reference_tools-education-score_education_gold-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-education-score_education_gold-GOLD"><pre class="sig">GOLD<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;reference&#39;</span> <span class="o">/</span> <span class="s1">&#39;education&#39;</span> <span class="o">/</span> <span class="s1">&#39;education_gold&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-education-score_education_gold-RAW"><pre class="sig">RAW<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;data&#39;</span> <span class="o">/</span> <span class="s1">&#39;raw&#39;</span> <span class="o">/</span> <span class="s1">&#39;legionnaires&#39;</span> <span class="o">/</span> <span class="s1">&#39;legionnaires.csv&#39;</span>
+</pre></div>
+</details></div>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/reference_tools/education/score_education_gold.py · 210 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;Score a hand-coded education worksheet against `education.py`.</span>
+
+<span class="sd">Reads a worksheet filled in per `education_gold/NAVOD.md`, re-parses the same raw strings</span>
+<span class="sd">with the live parser, and reports where the two disagree.</span>
+
+<span class="sd">Three things this does that a naive accuracy would not</span>
+<span class="sd">------------------------------------------------------</span>
+<span class="sd">**It reweights.** The sample is disproportionate by design — 40 of 952 `unparsed` records</span>
+<span class="sd">against 90 of 71,622 `plain` ones. An unweighted mean over the worksheet would describe a</span>
+<span class="sd">population that does not exist. Every headline figure is weighted by the true stratum size</span>
+<span class="sd">from `_frame.csv`, so it estimates the accuracy the *data* has; the per-stratum figures are</span>
+<span class="sd">reported beside it, unweighted, because that is where the precision actually is.</span>
+
+<span class="sd">**It separates reading from ranking.** The coder names institutions, never a rung. The rung</span>
+<span class="sd">is then derived from their institutions with the parser&#39;s own `INSTITUTIONS` and `TIE_BREAK`.</span>
+<span class="sd">So a rung disagreement is reported twice: once as a *reading* difference (the two disagree</span>
+<span class="sd">about which schools are named) and once as a *residual* — the same institutions placed</span>
+<span class="sd">differently, which would be a bug in the ladder code rather than in the dictionary.</span>
+
+<span class="sd">**It refuses to score what was not coded.** A blank cell is &quot;not coded&quot;, not &quot;no&quot;. Blank</span>
+<span class="sd">rows are counted and excluded, and the counts are printed, because a worksheet that is 60 %</span>
+<span class="sd">filled produces a very confident wrong number if the blanks are read as agreement.</span>
+
+<span class="sd">Usage:</span>
+<span class="sd">    python utils/reference_tools/education/score_education_gold.py calibration</span>
+<span class="sd">    python utils/reference_tools/education/score_education_gold.py certification</span>
+
+<span class="sd">Emits: nothing — prints the result for `reference/VALIDATION_EDUCATION.md`. Writes no file</span>
+<span class="sd">       and touches no pipeline column.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">))</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.0.0&quot;</span>
+
+<span class="n">GOLD</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;education&quot;</span> <span class="o">/</span> <span class="s2">&quot;education_gold&quot;</span>
+<span class="n">RAW</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;data&quot;</span> <span class="o">/</span> <span class="s2">&quot;raw&quot;</span> <span class="o">/</span> <span class="s2">&quot;legionnaires&quot;</span> <span class="o">/</span> <span class="s2">&quot;legionnaires.csv&quot;</span>
+<span class="n">FIELD</span><span class="p">,</span> <span class="n">ID</span> <span class="o">=</span> <span class="s2">&quot;Vzdělání&quot;</span><span class="p">,</span> <span class="s2">&quot;ID&quot;</span>
+
+<span class="n">YES</span><span class="p">,</span> <span class="n">NO</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;a&quot;</span><span class="p">,</span> <span class="s2">&quot;y&quot;</span><span class="p">,</span> <span class="s2">&quot;ano&quot;</span><span class="p">,</span> <span class="s2">&quot;yes&quot;</span><span class="p">,</span> <span class="s2">&quot;1&quot;</span><span class="p">,</span> <span class="s2">&quot;true&quot;</span><span class="p">},</span> <span class="p">{</span><span class="s2">&quot;n&quot;</span><span class="p">,</span> <span class="s2">&quot;ne&quot;</span><span class="p">,</span> <span class="s2">&quot;no&quot;</span><span class="p">,</span> <span class="s2">&quot;0&quot;</span><span class="p">,</span> <span class="s2">&quot;false&quot;</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_tokens</span><span class="p">(</span><span class="n">cell</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">cell</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">cell</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+        <span class="k">return</span> <span class="p">[]</span>
+    <span class="k">return</span> <span class="p">[</span><span class="n">t</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">cell</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;|&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">t</span><span class="o">.</span><span class="n">strip</span><span class="p">()]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_years</span><span class="p">(</span><span class="n">cell</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">part</span> <span class="ow">in</span> <span class="n">_tokens</span><span class="p">(</span><span class="n">cell</span><span class="p">):</span>
+        <span class="k">if</span> <span class="s2">&quot;=&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">part</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">k</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">v</span> <span class="o">=</span> <span class="n">part</span><span class="o">.</span><span class="n">partition</span><span class="p">(</span><span class="s2">&quot;=&quot;</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">out</span><span class="p">[</span><span class="n">k</span><span class="o">.</span><span class="n">strip</span><span class="p">()]</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+            <span class="k">pass</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_tri</span><span class="p">(</span><span class="n">cell</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;&#39;a&#39;/&#39;n&#39; -&gt; True/False; anything else (including blank and &#39;?&#39;) -&gt; None.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">cell</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">v</span> <span class="o">=</span> <span class="n">cell</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+    <span class="k">return</span> <span class="kc">True</span> <span class="k">if</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">YES</span> <span class="k">else</span> <span class="kc">False</span> <span class="k">if</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">NO</span> <span class="k">else</span> <span class="kc">None</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">human_rung</span><span class="p">(</span><span class="n">insts</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Put the coder&#39;s institutions on the ladder, using the parser&#39;s own table.</span>
+
+<span class="sd">    Mirrors `parse_education`: the continuation school never sets the rung, but floors it</span>
+<span class="sd">    at Elementary when nothing else is named.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing.education</span><span class="w"> </span><span class="kn">import</span> <span class="n">INSTITUTIONS</span>
+
+    <span class="n">known</span> <span class="o">=</span> <span class="p">[</span><span class="n">k</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">insts</span> <span class="k">if</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">INSTITUTIONS</span><span class="p">]</span>
+    <span class="n">scored</span> <span class="o">=</span> <span class="p">[</span><span class="n">k</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">known</span> <span class="k">if</span> <span class="n">INSTITUTIONS</span><span class="p">[</span><span class="n">k</span><span class="p">][</span><span class="mi">2</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">scored</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">max</span><span class="p">(</span><span class="n">INSTITUTIONS</span><span class="p">[</span><span class="n">k</span><span class="p">][</span><span class="mi">2</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">scored</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">INSTITUTIONS</span><span class="p">[</span><span class="n">k</span><span class="p">][</span><span class="mi">3</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;continuation&quot;</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">known</span><span class="p">):</span>
+        <span class="k">return</span> <span class="mi">1</span>
+    <span class="k">return</span> <span class="kc">None</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">()</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;half&quot;</span><span class="p">,</span> <span class="n">choices</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;calibration&quot;</span><span class="p">,</span> <span class="s2">&quot;certification&quot;</span><span class="p">])</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--worksheet&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="n">Path</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;override the worksheet path (used to smoke-test the scorer &quot;</span>
+                         <span class="s2">&quot;without touching a real, sealed sheet)&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing.education</span><span class="w"> </span><span class="kn">import</span> <span class="n">parse_education</span><span class="p">,</span> <span class="n">INSTITUTIONS</span>
+
+    <span class="n">sheet</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">worksheet</span> <span class="ow">or</span> <span class="p">(</span><span class="n">GOLD</span> <span class="o">/</span> <span class="n">args</span><span class="o">.</span><span class="n">half</span> <span class="o">/</span> <span class="s2">&quot;worksheet.csv&quot;</span><span class="p">),</span>
+                        <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span>
+    <span class="n">frame</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">GOLD</span> <span class="o">/</span> <span class="s2">&quot;_frame.csv&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;record_id&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">})</span>
+    <span class="n">raw</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">RAW</span><span class="p">,</span> <span class="n">usecols</span><span class="o">=</span><span class="p">[</span><span class="n">ID</span><span class="p">,</span> <span class="n">FIELD</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span>
+        <span class="n">columns</span><span class="o">=</span><span class="p">{</span><span class="n">ID</span><span class="p">:</span> <span class="s2">&quot;record_id&quot;</span><span class="p">,</span> <span class="n">FIELD</span><span class="p">:</span> <span class="s2">&quot;vzdelani_raw&quot;</span><span class="p">})</span>
+
+    <span class="n">df</span> <span class="o">=</span> <span class="p">(</span><span class="n">sheet</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span><span class="n">frame</span><span class="p">[[</span><span class="s2">&quot;record_id&quot;</span><span class="p">,</span> <span class="s2">&quot;stratum&quot;</span><span class="p">,</span> <span class="s2">&quot;stratum_size&quot;</span><span class="p">]],</span> <span class="n">on</span><span class="o">=</span><span class="s2">&quot;record_id&quot;</span><span class="p">,</span>
+                      <span class="n">how</span><span class="o">=</span><span class="s2">&quot;left&quot;</span><span class="p">)</span>
+               <span class="o">.</span><span class="n">merge</span><span class="p">(</span><span class="n">raw</span><span class="p">,</span> <span class="n">on</span><span class="o">=</span><span class="s2">&quot;record_id&quot;</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;left&quot;</span><span class="p">))</span>
+
+    <span class="n">coded</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;instituce&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span> <span class="o">|</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;poznamka&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">blank</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">coded</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">len</span><span class="p">(</span><span class="n">coded</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">half</span><span class="si">}</span><span class="s2">: nothing coded yet — 0 of </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">}</span><span class="s2"> rows filled in.&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Fill in the worksheet per education_gold/NAVOD.md, then re-run.&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="mi">0</span>
+
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">coded</span><span class="o">.</span><span class="n">itertuples</span><span class="p">():</span>
+        <span class="n">parsed</span> <span class="o">=</span> <span class="n">parse_education</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">vzdelani_raw</span><span class="p">)</span>
+        <span class="n">p_inst</span> <span class="o">=</span> <span class="p">([</span><span class="n">k</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">parsed</span><span class="p">[</span><span class="s2">&quot;educ_institutions&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;|&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">k</span><span class="p">]</span>
+                  <span class="k">if</span> <span class="n">parsed</span> <span class="k">else</span> <span class="p">[])</span>
+        <span class="n">h_inst</span> <span class="o">=</span> <span class="n">_tokens</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">instituce</span><span class="p">)</span>
+        <span class="n">unknown</span> <span class="o">=</span> <span class="p">[</span><span class="n">k</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">h_inst</span> <span class="k">if</span> <span class="n">k</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">INSTITUTIONS</span><span class="p">]</span>
+        <span class="n">h_years</span><span class="p">,</span> <span class="n">p_years</span> <span class="o">=</span> <span class="n">_years</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">roky</span><span class="p">),</span> <span class="p">{}</span>
+        <span class="k">if</span> <span class="n">parsed</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">slot</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;elementary&quot;</span><span class="p">,</span> <span class="s2">&quot;burgher&quot;</span><span class="p">,</span> <span class="s2">&quot;continuation&quot;</span><span class="p">):</span>
+                <span class="n">v</span> <span class="o">=</span> <span class="n">parsed</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;educ_years_</span><span class="si">{</span><span class="n">slot</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span>
+                <span class="k">if</span> <span class="n">v</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">p_years</span><span class="p">[</span><span class="n">slot</span><span class="p">]</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+        <span class="n">h_ap</span><span class="p">,</span> <span class="n">p_ap</span> <span class="o">=</span> <span class="n">_tri</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">ucen</span><span class="p">),</span> <span class="p">(</span><span class="nb">bool</span><span class="p">(</span><span class="n">parsed</span><span class="p">[</span><span class="s2">&quot;educ_apprentice&quot;</span><span class="p">])</span> <span class="k">if</span> <span class="n">parsed</span> <span class="k">else</span> <span class="kc">False</span><span class="p">)</span>
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
+            <span class="s2">&quot;record_id&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">record_id</span><span class="p">,</span> <span class="s2">&quot;stratum&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">stratum</span><span class="p">,</span>
+            <span class="s2">&quot;stratum_size&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">stratum_size</span><span class="p">,</span> <span class="s2">&quot;vzdelani&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">vzdelani_raw</span><span class="p">,</span>
+            <span class="s2">&quot;inst_match&quot;</span><span class="p">:</span> <span class="nb">set</span><span class="p">(</span><span class="n">h_inst</span><span class="p">)</span> <span class="o">==</span> <span class="nb">set</span><span class="p">(</span><span class="n">p_inst</span><span class="p">),</span>
+            <span class="s2">&quot;rung_match&quot;</span><span class="p">:</span> <span class="n">human_rung</span><span class="p">(</span><span class="n">h_inst</span><span class="p">)</span> <span class="o">==</span> <span class="p">(</span><span class="n">parsed</span><span class="p">[</span><span class="s2">&quot;educ_ord&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="n">parsed</span> <span class="k">else</span> <span class="kc">None</span><span class="p">),</span>
+            <span class="s2">&quot;years_match&quot;</span><span class="p">:</span> <span class="n">h_years</span> <span class="o">==</span> <span class="n">p_years</span><span class="p">,</span>
+            <span class="s2">&quot;appr_match&quot;</span><span class="p">:</span> <span class="kc">None</span> <span class="k">if</span> <span class="n">h_ap</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="p">(</span><span class="n">h_ap</span> <span class="o">==</span> <span class="n">p_ap</span><span class="p">),</span>
+            <span class="s2">&quot;human&quot;</span><span class="p">:</span> <span class="s2">&quot;|&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">h_inst</span><span class="p">),</span> <span class="s2">&quot;parser&quot;</span><span class="p">:</span> <span class="s2">&quot;|&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">p_inst</span><span class="p">),</span>
+            <span class="s2">&quot;unknown_token&quot;</span><span class="p">:</span> <span class="s2">&quot;,&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">unknown</span><span class="p">),</span>
+        <span class="p">})</span>
+    <span class="n">res</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">weighted</span><span class="p">(</span><span class="n">col</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+        <span class="n">d</span> <span class="o">=</span> <span class="n">res</span><span class="p">[</span><span class="n">res</span><span class="p">[</span><span class="n">col</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">len</span><span class="p">(</span><span class="n">d</span><span class="p">):</span>
+            <span class="k">return</span> <span class="nb">float</span><span class="p">(</span><span class="s2">&quot;nan&quot;</span><span class="p">)</span>
+        <span class="n">per</span> <span class="o">=</span> <span class="n">d</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;stratum&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">agg</span><span class="p">(</span><span class="n">acc</span><span class="o">=</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="s2">&quot;mean&quot;</span><span class="p">),</span> <span class="n">size</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;stratum_size&quot;</span><span class="p">,</span> <span class="s2">&quot;first&quot;</span><span class="p">))</span>
+        <span class="k">return</span> <span class="nb">float</span><span class="p">((</span><span class="n">per</span><span class="p">[</span><span class="s2">&quot;acc&quot;</span><span class="p">]</span> <span class="o">*</span> <span class="n">per</span><span class="p">[</span><span class="s2">&quot;size&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="o">/</span> <span class="n">per</span><span class="p">[</span><span class="s2">&quot;size&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">74</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Education hand-coding — </span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">half</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">74</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;rows in worksheet ... </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;coded ............... </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">coded</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;not yet coded ....... </span><span class="si">{</span><span class="n">blank</span><span class="si">}</span><span class="s2">   (excluded, not counted as agreement)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Per stratum (unweighted — this is where the precision is):&quot;</span><span class="p">)</span>
+    <span class="n">per</span> <span class="o">=</span> <span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;stratum&quot;</span><span class="p">)</span>
+              <span class="o">.</span><span class="n">agg</span><span class="p">(</span><span class="n">n</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;inst_match&quot;</span><span class="p">,</span> <span class="s2">&quot;size&quot;</span><span class="p">),</span>
+                   <span class="n">institutions</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;inst_match&quot;</span><span class="p">,</span> <span class="s2">&quot;mean&quot;</span><span class="p">),</span>
+                   <span class="n">rung</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;rung_match&quot;</span><span class="p">,</span> <span class="s2">&quot;mean&quot;</span><span class="p">),</span>
+                   <span class="n">years</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;years_match&quot;</span><span class="p">,</span> <span class="s2">&quot;mean&quot;</span><span class="p">))</span>
+              <span class="o">.</span><span class="n">sort_values</span><span class="p">(</span><span class="s2">&quot;n&quot;</span><span class="p">,</span> <span class="n">ascending</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
+    <span class="nb">print</span><span class="p">((</span><span class="n">per</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="o">**</span><span class="p">{</span><span class="n">c</span><span class="p">:</span> <span class="p">(</span><span class="n">per</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">*</span> <span class="mi">100</span><span class="p">)</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+                         <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;institutions&quot;</span><span class="p">,</span> <span class="s2">&quot;rung&quot;</span><span class="p">,</span> <span class="s2">&quot;years&quot;</span><span class="p">)}))</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Record-weighted (reweighted to the true stratum sizes — the headline):&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">col</span> <span class="ow">in</span> <span class="p">((</span><span class="s2">&quot;institutions read identically&quot;</span><span class="p">,</span> <span class="s2">&quot;inst_match&quot;</span><span class="p">),</span>
+                       <span class="p">(</span><span class="s2">&quot;rung agrees&quot;</span><span class="p">,</span> <span class="s2">&quot;rung_match&quot;</span><span class="p">),</span>
+                       <span class="p">(</span><span class="s2">&quot;years agree&quot;</span><span class="p">,</span> <span class="s2">&quot;years_match&quot;</span><span class="p">),</span>
+                       <span class="p">(</span><span class="s2">&quot;apprentice flag agrees&quot;</span><span class="p">,</span> <span class="s2">&quot;appr_match&quot;</span><span class="p">)):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   </span><span class="si">{</span><span class="n">label</span><span class="si">:</span><span class="s2">32s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="mi">100</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">weighted</span><span class="p">(</span><span class="n">col</span><span class="p">)</span><span class="si">:</span><span class="s2">5.1f</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="c1"># A rung that agrees while the institutions differ, or vice versa, is the interesting</span>
+    <span class="c1"># cell: it separates a dictionary problem from a ladder problem.</span>
+    <span class="n">reading</span> <span class="o">=</span> <span class="n">res</span><span class="p">[</span><span class="o">~</span><span class="n">res</span><span class="p">[</span><span class="s2">&quot;inst_match&quot;</span><span class="p">]]</span>
+    <span class="n">ladder</span> <span class="o">=</span> <span class="n">res</span><span class="p">[</span><span class="n">res</span><span class="p">[</span><span class="s2">&quot;inst_match&quot;</span><span class="p">]</span> <span class="o">&amp;</span> <span class="o">~</span><span class="n">res</span><span class="p">[</span><span class="s2">&quot;rung_match&quot;</span><span class="p">]]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Disagreements: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">reading</span><span class="p">)</span><span class="si">}</span><span class="s2"> on the reading, </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">ladder</span><span class="p">)</span><span class="si">}</span><span class="s2"> on the ladder &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;alone (same institutions, different rung).&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">ladder</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   ⚠ A ladder-only disagreement is a bug in the ranking code, not in the&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;     dictionary. These should be zero; investigate before anything else.&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+    <span class="n">unk</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">({</span><span class="n">t</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">res</span><span class="p">[</span><span class="s2">&quot;unknown_token&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">s</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">t</span><span class="p">})</span>
+    <span class="k">if</span> <span class="n">unk</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Tokens the coder used that are not in INSTITUTIONS: </span><span class="si">{</span><span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">unk</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   (either a typo, or a school the ladder has no place for — a finding)&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">()</span>
+
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">reading</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Every reading disagreement, worst stratum first:&quot;</span><span class="p">)</span>
+        <span class="n">show</span> <span class="o">=</span> <span class="n">reading</span><span class="o">.</span><span class="n">sort_values</span><span class="p">(</span><span class="s2">&quot;stratum&quot;</span><span class="p">)[</span>
+            <span class="p">[</span><span class="s2">&quot;stratum&quot;</span><span class="p">,</span> <span class="s2">&quot;vzdelani&quot;</span><span class="p">,</span> <span class="s2">&quot;human&quot;</span><span class="p">,</span> <span class="s2">&quot;parser&quot;</span><span class="p">]]</span>
+        <span class="k">with</span> <span class="n">pd</span><span class="o">.</span><span class="n">option_context</span><span class="p">(</span><span class="s2">&quot;display.max_colwidth&quot;</span><span class="p">,</span> <span class="mi">44</span><span class="p">,</span> <span class="s2">&quot;display.width&quot;</span><span class="p">,</span> <span class="mi">200</span><span class="p">):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">show</span><span class="o">.</span><span class="n">to_string</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
+    <span class="k">return</span> <span class="mi">0</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>

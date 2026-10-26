@@ -1,0 +1,1647 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Harmonises the <a class="cite" data-ref="rumpler_seger_2010" href="#references" onclick="return bibGo(event)">Rumpler-Seger</a> / <a class="cite" data-ref="mpidr_2012" href="#references" onclick="return bibGo(event)">MPIDR</a> census workbooks in <code>data/raw/census/</code> and joins
+them to <code>utils.parsing.districts</code> (<code>districts_1910</code>) by <strong>exact unit code</strong> — the
+census <code>IDCourtdistr</code> equals our <code>court_id</code> (339/339) and <code>IDPoldistrict</code> equals our
+<code>okres_id</code> (<code>region·1000 + district</code>). No name matching.</p><p class="tldr-facts"><b>Geography &amp; census</b> · v1.3.0 · 507 lines · 8 public functions · 3 constants · used by <code>02_data_cleaning.ipynb</code>, <code>03_visualisation.ipynb</code>, <code>utils/parsing/census_labels.py</code> +1 · <code>utils/parsing/census.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-parsing-census-load_census_file">load_census_file</a><a class="chip" href="#fn-utils-parsing-census-build_census_panel">build_census_panel</a><a class="chip" href="#fn-utils-parsing-census-okres_census_crosswalk">okres_census_crosswalk</a><a class="chip" href="#fn-utils-parsing-census-pool_twin_okresy">pool_twin_okresy</a><a class="chip" href="#fn-utils-parsing-census-blank_twin_members">blank_twin_members</a><a class="chip" href="#fn-utils-parsing-census-build_census_panels">build_census_panels</a><a class="chip" href="#fn-utils-parsing-census-add_census_okres_id">add_census_okres_id</a><a class="chip" href="#fn-utils-parsing-census-census_report">census_report</a><a class="chip const" href="#c-utils-parsing-census-CZECH_LAND_CODES">CZECH_LAND_CODES</a><a class="chip const" href="#c-utils-parsing-census-STEM_PREFIX">STEM_PREFIX</a><a class="chip const" href="#c-utils-parsing-census-FILE_PREFIX">FILE_PREFIX</a></div>
+<h2>How it works</h2><p>Each workbook has a data sheet (ID columns + value columns) and a <em>Variable Names</em> sheet
+giving the <strong>multi-row, merged-cell German header</strong> for each value column. Value columns are
+named by topic + index (<code>Religion1..18</code>, <code>Umgspr1..11</code>, <code>Gebor1..</code>, <code>Beruf1..</code> …) —
+the one exception is the district-court justice caseload file, whose columns are generic
+<code>V1..V91</code>.</p>
+<h4>Naming (<code>_column_names</code>)</h4>
+<p>The <em>Variable Names</em> sheet is read with <code>openpyxl</code> so merged cells are expanded
+<strong>exactly</strong> (a de-merged pandas read would let a deep label such as
+<code>helvetischen Bekenntnisses</code> bleed into the next column). Each value column becomes
+<code>{prefix}_{leaf}</code> where:</p>
+<ul>
+<li><code>prefix</code> comes from the value column's own stem via <code>STEM_PREFIX</code>
+  (<code>Religion→rel</code>, <code>Umgspr→umgspr</code>, …), falling back to a filename topic
+  (<code>FILE_PREFIX</code>) for the generic-<code>V</code> justice file — so a mixed workbook
+  (Religion + Umgangssprache) keeps each family correctly labelled;</li>
+<li><code>leaf</code> is the merged header path with the redundant top <strong>category</strong> removed: within
+  each prefix group the longest common leading label sequence (e.g.
+  <code>Anwesende Bevölkerung nach der Religion</code>) is trimmed, leaving the discriminating tail
+  (<code>roemisch_katholisch</code>, <code>deutsch</code>, <code>bohmisch_mahrisch_slowakisch</code>) while keeping a
+  genuinely discriminating top label where it varies (<code>lebendgeborene</code> vs <code>totgeborene</code>).</li>
+</ul>
+<p><code>load_census_file</code> filters to the Czech crown lands and returns a tidy frame keyed by
+<code>court_id</code> (934-level files) or <code>okres_id</code> (406-level files). <code>build_census_panel</code>
+loads every Cisleithanian file, aggregates 934-level counts up to the okres, and returns one
+<strong>okres-level</strong> covariate table (158 Czech-lands okresy) — the join target for
+legionnaire/habsburg <code>birth_okres</code>. Hungarian and regional-court (72-level) files are skipped.
+As a final step the German covariate names are <strong>renamed to English</strong> by
+<code>utils.parsing.census_labels</code> (<code>lang_czech</code>, <code>rel_jewish</code>, <code>literacy_rate</code> …), with
+derived shares/rates added; the German→English crosswalk is <code>reference/census_column_labels.csv</code>.</p>
+<h4>Usage</h4>
+<pre><code>from utils.parsing import census as cz
+panel = cz.build_census_panel(CENSUS_DIR, districts_1910)   # okres-level covariates
+cz.census_report(panel)
+</code></pre>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-parsing-census-load_census_file">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">load_census_file</span><span class="p">(</span><span class="n">path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span></pre>
+<div class="fndoc"><p>Load one census workbook → (tidy Czech-lands frame, level).</p>
+<p><code>level</code> is <code>"court"</code> (keyed <code>court_id</code> = <code>IDCourtdistr</code>) or <code>"okres"</code>
+(keyed <code>okres_id</code> = <code>IDPoldistrict</code>). Value columns are renamed via
+<code>_column_names</code>; ID/name columns are dropped except the key.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 215–266 (52 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">load_census_file</span><span class="p">(</span><span class="n">path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Load one census workbook → (tidy Czech-lands frame, level).</span>
+
+<span class="sd">    ``level`` is ``&quot;court&quot;`` (keyed ``court_id`` = ``IDCourtdistr``) or ``&quot;okres&quot;``</span>
+<span class="sd">    (keyed ``okres_id`` = ``IDPoldistrict``). Value columns are renamed via</span>
+<span class="sd">    :func:`_column_names`; ID/name columns are dropped except the key.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="n">xl</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">ExcelFile</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">xl</span><span class="o">.</span><span class="n">parse</span><span class="p">(</span><span class="n">xl</span><span class="o">.</span><span class="n">sheet_names</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+
+    <span class="k">if</span> <span class="s2">&quot;IDCourtdistr&quot;</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="n">level</span><span class="p">,</span> <span class="n">key_src</span> <span class="o">=</span> <span class="s2">&quot;court&quot;</span><span class="p">,</span> <span class="s2">&quot;IDCourtdistr&quot;</span>
+    <span class="k">elif</span> <span class="s2">&quot;IDPoldistrict&quot;</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="n">level</span><span class="p">,</span> <span class="n">key_src</span> <span class="o">=</span> <span class="s2">&quot;okres&quot;</span><span class="p">,</span> <span class="s2">&quot;IDPoldistrict&quot;</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">path</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">: no IDCourtdistr/IDPoldistrict key column&quot;</span><span class="p">)</span>
+
+    <span class="n">id_cols</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">columns</span>
+               <span class="k">if</span> <span class="nb">str</span><span class="p">(</span><span class="n">c</span><span class="p">)</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;ID&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;Name&quot;</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">c</span><span class="p">)</span> <span class="ow">or</span> <span class="n">c</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;N&quot;</span><span class="p">,</span> <span class="s2">&quot;Place&quot;</span><span class="p">)]</span>
+    <span class="c1"># value columns: drop id columns and stray blank-header cells (pandas &quot;Unnamed: N&quot;,</span>
+    <span class="c1"># empty/NaN headers) that carry no variable-sheet entry</span>
+    <span class="n">val_cols</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">columns</span>
+                <span class="k">if</span> <span class="n">c</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">id_cols</span>
+                <span class="ow">and</span> <span class="ow">not</span> <span class="nb">str</span><span class="p">(</span><span class="n">c</span><span class="p">)</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;Unnamed&quot;</span><span class="p">)</span>
+                <span class="ow">and</span> <span class="nb">str</span><span class="p">(</span><span class="n">c</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;nan&quot;</span><span class="p">)]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">val_cols</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">path</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">: no value columns&quot;</span><span class="p">)</span>
+
+    <span class="c1"># crown-land filter (Czech lands): use IDCrownland if present, else first 3 digits of the key</span>
+    <span class="k">if</span> <span class="s2">&quot;IDCrownland&quot;</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="n">land</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="s2">&quot;IDCrownland&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_land3</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">land</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="n">key_src</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_land3</span><span class="p">)</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="n">land</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">CZECH_LAND_CODES</span><span class="p">)]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+
+    <span class="c1"># build value-column names from the merged Variable-Names sheet</span>
+    <span class="n">var_sheet</span> <span class="o">=</span> <span class="nb">next</span><span class="p">((</span><span class="n">s</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">xl</span><span class="o">.</span><span class="n">sheet_names</span> <span class="k">if</span> <span class="s2">&quot;variable&quot;</span> <span class="ow">in</span> <span class="n">s</span><span class="o">.</span><span class="n">lower</span><span class="p">()),</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="n">prefixes</span> <span class="o">=</span> <span class="p">{</span><span class="nb">str</span><span class="p">(</span><span class="n">c</span><span class="p">):</span> <span class="n">_prefix_for</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">path</span><span class="o">.</span><span class="n">name</span><span class="p">)</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">val_cols</span><span class="p">}</span>
+    <span class="k">if</span> <span class="n">var_sheet</span><span class="p">:</span>
+        <span class="n">varparts</span> <span class="o">=</span> <span class="n">_expand_varsheet</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">var_sheet</span><span class="p">,</span> <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">c</span><span class="p">)</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">val_cols</span><span class="p">])</span>
+        <span class="n">varparts</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">varparts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="p">[])</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">map</span><span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">val_cols</span><span class="p">)}</span>
+        <span class="n">rename</span> <span class="o">=</span> <span class="n">_column_names</span><span class="p">(</span><span class="n">varparts</span><span class="p">,</span> <span class="n">prefixes</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">rename</span> <span class="o">=</span> <span class="p">{</span><span class="nb">str</span><span class="p">(</span><span class="n">c</span><span class="p">):</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">prefixes</span><span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">c</span><span class="p">)]</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">_clean_name</span><span class="p">(</span><span class="n">c</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">val_cols</span><span class="p">}</span>
+
+    <span class="n">out</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">({</span><span class="s2">&quot;unit_id&quot;</span><span class="p">:</span> <span class="n">data</span><span class="p">[</span><span class="n">key_src</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;Int64&quot;</span><span class="p">)})</span>
+    <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">val_cols</span><span class="p">:</span>
+        <span class="n">out</span><span class="p">[</span><span class="n">rename</span><span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">c</span><span class="p">)]]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_numeric</span><span class="p">(</span><span class="n">data</span><span class="p">[</span><span class="n">c</span><span class="p">],</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;coerce&quot;</span><span class="p">)</span>
+    <span class="c1"># collapse duplicate unit rows (e.g. several Sparkassen per court) by sum</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;unit_id&quot;</span><span class="p">,</span> <span class="n">as_index</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">min_count</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span><span class="p">,</span> <span class="n">level</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-census-build_census_panel">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">build_census_panel</span><span class="p">(</span><span class="n">census_dir</span><span class="p">,</span> <span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Load all Cisleithanian census files → one <strong>okres-level</strong> covariate panel.</p>
+<p>Court-level (934) files are summed up to their okres (<code>court_id // 1000</code> =
+<code>IDPoldistrict</code>). The result is joined to the okres identity from <em>districts</em>
+(one row per Czech-lands political okres) on <code>okres_id</code>.</p>
+<p>City/rural twins are a <strong>structural gap in the court-level sources</strong>, and it is handled here
+rather than left for the reader. A statutory city had no Gerichtsbezirk of its own: the city
+and the rural seat court around it were one court, and the census keeps one row for it —
+<code>Iglau/Jihlava Stadt</code>, <code>Olmuetz/Olomouc Stadt</code>. The backbone splits that court in two so
+it can nest inside two okresy, so <code>court_id // 1000</code> dumps the <strong>pair's</strong> total onto
+whichever member the id encodes and leaves the other empty. The result is not coarse, it is
+<em>mislabelled</em>: <code>Opava (město)</code> would read 0.463 Czech-speaking, which is Gerichtsbezirk
+Troppau — city plus ring — while <code>Opava</code> would read 0.069, which is only Odry and Vítkov.</p>
+<p>Every twin okres missing its own <strong>seat</strong> court in a given file is recorded, with that file's
+columns, in <code>panel.attrs["twin_suppressed"]</code>. Nine of the ten pairs are flagged in the
+Religion/Umgangssprache source; Brno is not (it has genuine <code>Brno Stadt</code> and <code>Brno Land</code>
+court rows) and keeps its values throughout.</p>
+<p>The panel this returns is <strong>unblanked</strong> — it still carries the merged value on whichever
+member absorbed it, because that value is the pair's total and <code>pool_twin_okresy</code> needs
+it. Use <code>build_census_panels</code> to get the pair of frames actually meant for use: the
+member-level panel with the twins blanked, and the pooled 148-row panel.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 294–374 (81 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span>
+<span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span>
+<span class="normal">337</span>
+<span class="normal">338</span>
+<span class="normal">339</span>
+<span class="normal">340</span>
+<span class="normal">341</span>
+<span class="normal">342</span>
+<span class="normal">343</span>
+<span class="normal">344</span>
+<span class="normal">345</span>
+<span class="normal">346</span>
+<span class="normal">347</span>
+<span class="normal">348</span>
+<span class="normal">349</span>
+<span class="normal">350</span>
+<span class="normal">351</span>
+<span class="normal">352</span>
+<span class="normal">353</span>
+<span class="normal">354</span>
+<span class="normal">355</span>
+<span class="normal">356</span>
+<span class="normal">357</span>
+<span class="normal">358</span>
+<span class="normal">359</span>
+<span class="normal">360</span>
+<span class="normal">361</span>
+<span class="normal">362</span>
+<span class="normal">363</span>
+<span class="normal">364</span>
+<span class="normal">365</span>
+<span class="normal">366</span>
+<span class="normal">367</span>
+<span class="normal">368</span>
+<span class="normal">369</span>
+<span class="normal">370</span>
+<span class="normal">371</span>
+<span class="normal">372</span>
+<span class="normal">373</span>
+<span class="normal">374</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">build_census_panel</span><span class="p">(</span><span class="n">census_dir</span><span class="p">,</span> <span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Load all Cisleithanian census files → one **okres-level** covariate panel.</span>
+
+<span class="sd">    Court-level (934) files are summed up to their okres (``court_id // 1000`` =</span>
+<span class="sd">    ``IDPoldistrict``). The result is joined to the okres identity from *districts*</span>
+<span class="sd">    (one row per Czech-lands political okres) on ``okres_id``.</span>
+
+<span class="sd">    City/rural twins are a **structural gap in the court-level sources**, and it is handled here</span>
+<span class="sd">    rather than left for the reader. A statutory city had no Gerichtsbezirk of its own: the city</span>
+<span class="sd">    and the rural seat court around it were one court, and the census keeps one row for it —</span>
+<span class="sd">    ``Iglau/Jihlava Stadt``, ``Olmuetz/Olomouc Stadt``. The backbone splits that court in two so</span>
+<span class="sd">    it can nest inside two okresy, so ``court_id // 1000`` dumps the **pair&#39;s** total onto</span>
+<span class="sd">    whichever member the id encodes and leaves the other empty. The result is not coarse, it is</span>
+<span class="sd">    *mislabelled*: ``Opava (město)`` would read 0.463 Czech-speaking, which is Gerichtsbezirk</span>
+<span class="sd">    Troppau — city plus ring — while ``Opava`` would read 0.069, which is only Odry and Vítkov.</span>
+
+<span class="sd">    Every twin okres missing its own **seat** court in a given file is recorded, with that file&#39;s</span>
+<span class="sd">    columns, in ``panel.attrs[&quot;twin_suppressed&quot;]``. Nine of the ten pairs are flagged in the</span>
+<span class="sd">    Religion/Umgangssprache source; Brno is not (it has genuine ``Brno Stadt`` and ``Brno Land``</span>
+<span class="sd">    court rows) and keeps its values throughout.</span>
+
+<span class="sd">    The panel this returns is **unblanked** — it still carries the merged value on whichever</span>
+<span class="sd">    member absorbed it, because that value is the pair&#39;s total and :func:`pool_twin_okresy` needs</span>
+<span class="sd">    it. Use :func:`build_census_panels` to get the pair of frames actually meant for use: the</span>
+<span class="sd">    member-level panel with the twins blanked, and the pooled 148-row panel.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">census_dir</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">census_dir</span><span class="p">)</span>
+    <span class="n">okres</span> <span class="o">=</span> <span class="p">(</span><span class="n">districts</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;okres_code&quot;</span><span class="p">)[[</span><span class="s2">&quot;land&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_code&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_de&quot;</span><span class="p">]]</span>
+             <span class="o">.</span><span class="n">copy</span><span class="p">())</span>
+    <span class="n">okres</span><span class="p">[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">okres</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_okres_id</span><span class="p">)</span>
+    <span class="n">panel</span> <span class="o">=</span> <span class="n">okres</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;okres_id&quot;</span><span class="p">)</span>
+
+    <span class="n">twins</span> <span class="o">=</span> <span class="n">rg</span><span class="o">.</span><span class="n">build_twin_pairs</span><span class="p">(</span><span class="n">districts</span><span class="p">)</span>
+    <span class="n">seats</span> <span class="o">=</span> <span class="n">_seat_courts</span><span class="p">(</span><span class="n">districts</span><span class="p">)</span>
+    <span class="n">suppressed</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]]</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="n">loaded</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">census_dir</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">&quot;*.xlsx&quot;</span><span class="p">)):</span>
+        <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">s</span> <span class="ow">in</span> <span class="n">f</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">_SKIP_SUBSTR</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">tidy</span><span class="p">,</span> <span class="n">level</span> <span class="o">=</span> <span class="n">load_census_file</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>                       <span class="c1"># noqa: BLE001 — report &amp; continue</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  [skip] </span><span class="si">{</span><span class="n">f</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">continue</span>
+        <span class="k">if</span> <span class="n">level</span> <span class="o">==</span> <span class="s2">&quot;court&quot;</span><span class="p">:</span>
+            <span class="n">have</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">tidy</span><span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">dropna</span><span class="p">()</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">))</span>
+            <span class="n">tidy</span><span class="p">[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">tidy</span><span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">]</span> <span class="o">//</span> <span class="mi">1000</span>     <span class="c1"># court_id → IDPoldistrict</span>
+            <span class="n">tidy</span> <span class="o">=</span> <span class="n">tidy</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="s2">&quot;unit_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;okres_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">min_count</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+            <span class="c1"># a twin okres missing its own SEAT court here → the pair was merged upstream, so</span>
+            <span class="c1"># neither member&#39;s value is attributable. Recorded, not blanked: the value that</span>
+            <span class="c1"># survived is the pair total, which pool_twin_okresy still needs.</span>
+            <span class="n">bad</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+            <span class="k">for</span> <span class="n">oid</span><span class="p">,</span> <span class="p">(</span><span class="n">rural</span><span class="p">,</span> <span class="n">city</span><span class="p">,</span> <span class="n">_keys</span><span class="p">)</span> <span class="ow">in</span> <span class="n">twins</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="k">if</span> <span class="n">seats</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">oid</span><span class="p">,</span> <span class="nb">set</span><span class="p">())</span> <span class="o">-</span> <span class="n">have</span><span class="p">:</span>
+                    <span class="n">bad</span> <span class="o">|=</span> <span class="p">{</span><span class="n">rural</span><span class="p">,</span> <span class="n">city</span><span class="p">}</span>
+            <span class="k">if</span> <span class="n">bad</span><span class="p">:</span>
+                <span class="n">suppressed</span><span class="p">[</span><span class="n">f</span><span class="o">.</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="n">bad</span><span class="p">),</span> <span class="nb">list</span><span class="p">(</span><span class="n">tidy</span><span class="o">.</span><span class="n">columns</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">tidy</span> <span class="o">=</span> <span class="n">tidy</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;unit_id&quot;</span><span class="p">:</span> <span class="s2">&quot;okres_id&quot;</span><span class="p">})</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;okres_id&quot;</span><span class="p">)</span>
+        <span class="n">dup</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">tidy</span><span class="o">.</span><span class="n">columns</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">panel</span><span class="o">.</span><span class="n">columns</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">dup</span><span class="p">:</span>
+            <span class="c1"># a later file re-producing an already-loaded column name would silently</span>
+            <span class="c1"># shadow it — drop and SAY so, so a genuine cross-file collision is visible</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  [dup ] </span><span class="si">{</span><span class="n">f</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">: dropping </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">dup</span><span class="p">)</span><span class="si">}</span><span class="s2"> column(s) already loaded: &quot;</span>
+                  <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="nb">str</span><span class="p">,</span><span class="w"> </span><span class="n">dup</span><span class="p">[:</span><span class="mi">6</span><span class="p">]))</span><span class="si">}{</span><span class="s1">&#39; …&#39;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="n">dup</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">6</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="n">tidy</span> <span class="o">=</span> <span class="n">tidy</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="n">dup</span><span class="p">)</span>
+        <span class="n">panel</span> <span class="o">=</span> <span class="n">panel</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">tidy</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;left&quot;</span><span class="p">)</span>
+        <span class="n">loaded</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">f</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">level</span><span class="p">,</span> <span class="n">tidy</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]))</span>
+
+    <span class="n">panel</span> <span class="o">=</span> <span class="n">panel</span><span class="o">.</span><span class="n">reset_index</span><span class="p">()</span>
+    <span class="n">loaded_meta</span> <span class="o">=</span> <span class="n">loaded</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing</span><span class="w"> </span><span class="kn">import</span> <span class="n">census_labels</span> <span class="k">as</span> <span class="n">_cl</span>          <span class="c1"># English labels + derived shares</span>
+    <span class="n">rename</span> <span class="o">=</span> <span class="n">_cl</span><span class="o">.</span><span class="n">english_rename_map</span><span class="p">(</span><span class="n">panel</span><span class="p">,</span> <span class="s2">&quot;cis&quot;</span><span class="p">)</span>           <span class="c1"># carry the flags through the rename</span>
+    <span class="n">panel</span> <span class="o">=</span> <span class="n">_cl</span><span class="o">.</span><span class="n">to_english_census</span><span class="p">(</span><span class="n">panel</span><span class="p">,</span> <span class="s2">&quot;cis&quot;</span><span class="p">)</span>
+    <span class="n">panel</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;loaded&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">loaded_meta</span>
+    <span class="n">panel</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;twin_suppressed&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="n">name</span><span class="p">:</span> <span class="p">(</span><span class="n">oids</span><span class="p">,</span> <span class="p">[</span><span class="n">rename</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">c</span><span class="p">)</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cols</span><span class="p">])</span>
+        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="p">(</span><span class="n">oids</span><span class="p">,</span> <span class="n">cols</span><span class="p">)</span> <span class="ow">in</span> <span class="n">suppressed</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="n">panel</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-census-okres_census_crosswalk">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">okres_census_crosswalk</span><span class="p">(</span><span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p><code>okres_id → census_okres_id</code> (+ <code>twin_pooled</code>, <code>twin_role</code>), one row per okres.</p>
+<p>The identity map everywhere except the twenty city/rural twin members, which both point at
+the <strong>rural</strong> member's id — the pooled unit. Written to <code>data/final/geo/</code> so an analysis
+can join on it without re-deriving the pairs.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code></p>
+<details><summary>source · lines 389–408 (20 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">389</span>
+<span class="normal">390</span>
+<span class="normal">391</span>
+<span class="normal">392</span>
+<span class="normal">393</span>
+<span class="normal">394</span>
+<span class="normal">395</span>
+<span class="normal">396</span>
+<span class="normal">397</span>
+<span class="normal">398</span>
+<span class="normal">399</span>
+<span class="normal">400</span>
+<span class="normal">401</span>
+<span class="normal">402</span>
+<span class="normal">403</span>
+<span class="normal">404</span>
+<span class="normal">405</span>
+<span class="normal">406</span>
+<span class="normal">407</span>
+<span class="normal">408</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">okres_census_crosswalk</span><span class="p">(</span><span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``okres_id → census_okres_id`` (+ ``twin_pooled``, ``twin_role``), one row per okres.</span>
+
+<span class="sd">    The identity map everywhere except the twenty city/rural twin members, which both point at</span>
+<span class="sd">    the **rural** member&#39;s id — the pooled unit. Written to ``data/final/geo/`` so an analysis</span>
+<span class="sd">    can join on it without re-deriving the pairs.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">twins</span> <span class="o">=</span> <span class="n">rg</span><span class="o">.</span><span class="n">build_twin_pairs</span><span class="p">(</span><span class="n">districts</span><span class="p">)</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">code</span> <span class="ow">in</span> <span class="n">districts</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">():</span>
+        <span class="n">oid</span> <span class="o">=</span> <span class="n">_okres_id</span><span class="p">(</span><span class="n">code</span><span class="p">)</span>
+        <span class="n">entry</span> <span class="o">=</span> <span class="n">twins</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">oid</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">entry</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;okres_id&quot;</span><span class="p">:</span> <span class="n">oid</span><span class="p">,</span> <span class="s2">&quot;census_okres_id&quot;</span><span class="p">:</span> <span class="n">oid</span><span class="p">,</span>
+                         <span class="s2">&quot;twin_pooled&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;twin_role&quot;</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">})</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">rural</span><span class="p">,</span> <span class="n">city</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">entry</span>
+            <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;okres_id&quot;</span><span class="p">:</span> <span class="n">oid</span><span class="p">,</span> <span class="s2">&quot;census_okres_id&quot;</span><span class="p">:</span> <span class="n">rural</span><span class="p">,</span> <span class="s2">&quot;twin_pooled&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+                         <span class="s2">&quot;twin_role&quot;</span><span class="p">:</span> <span class="s2">&quot;city&quot;</span> <span class="k">if</span> <span class="n">oid</span> <span class="o">==</span> <span class="n">city</span> <span class="k">else</span> <span class="s2">&quot;ring&quot;</span><span class="p">})</span>
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span><span class="o">.</span><span class="n">sort_values</span><span class="p">(</span><span class="s2">&quot;okres_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-census-pool_twin_okresy">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">pool_twin_okresy</span><span class="p">(</span><span class="n">panel</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Collapse each city/rural twin pair into one unit → the <strong>148-row</strong> analytical panel.</p>
+<p>This is the baseline unit for a district-level covariate merge, not a robustness variant:
+for nine of the ten pairs the court-level sources do not split city from ring at all
+(<code>build_census_panel</code>), so the pair is the finest unit on which language, religion and
+the justice caseload are defined. The okres-level (406) sources <em>do</em> split all ten, and those
+columns survive at member level in the un-pooled panel for anyone who wants them.</p>
+<p>Counts are summed with <code>min_count=1</code> — so a pair whose total sits on one row and <code>&amp;lt;NA&amp;gt;</code>
+on the other recovers the total, and a pair with no data at all stays <code>&amp;lt;NA&amp;gt;</code> — and every
+share is then <strong>re-derived from the pooled counts</strong> by <code>census_labels.add_shares_cis</code>.
+Identity (code, names, land) comes from the rural member, which is also the pooled id.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 411–442 (32 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">411</span>
+<span class="normal">412</span>
+<span class="normal">413</span>
+<span class="normal">414</span>
+<span class="normal">415</span>
+<span class="normal">416</span>
+<span class="normal">417</span>
+<span class="normal">418</span>
+<span class="normal">419</span>
+<span class="normal">420</span>
+<span class="normal">421</span>
+<span class="normal">422</span>
+<span class="normal">423</span>
+<span class="normal">424</span>
+<span class="normal">425</span>
+<span class="normal">426</span>
+<span class="normal">427</span>
+<span class="normal">428</span>
+<span class="normal">429</span>
+<span class="normal">430</span>
+<span class="normal">431</span>
+<span class="normal">432</span>
+<span class="normal">433</span>
+<span class="normal">434</span>
+<span class="normal">435</span>
+<span class="normal">436</span>
+<span class="normal">437</span>
+<span class="normal">438</span>
+<span class="normal">439</span>
+<span class="normal">440</span>
+<span class="normal">441</span>
+<span class="normal">442</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">pool_twin_okresy</span><span class="p">(</span><span class="n">panel</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Collapse each city/rural twin pair into one unit → the **148-row** analytical panel.</span>
+
+<span class="sd">    This is the baseline unit for a district-level covariate merge, not a robustness variant:</span>
+<span class="sd">    for nine of the ten pairs the court-level sources do not split city from ring at all</span>
+<span class="sd">    (:func:`build_census_panel`), so the pair is the finest unit on which language, religion and</span>
+<span class="sd">    the justice caseload are defined. The okres-level (406) sources *do* split all ten, and those</span>
+<span class="sd">    columns survive at member level in the un-pooled panel for anyone who wants them.</span>
+
+<span class="sd">    Counts are summed with ``min_count=1`` — so a pair whose total sits on one row and ``&lt;NA&gt;``</span>
+<span class="sd">    on the other recovers the total, and a pair with no data at all stays ``&lt;NA&gt;`` — and every</span>
+<span class="sd">    share is then **re-derived from the pooled counts** by ``census_labels.add_shares_cis``.</span>
+<span class="sd">    Identity (code, names, land) comes from the rural member, which is also the pooled id.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing</span><span class="w"> </span><span class="kn">import</span> <span class="n">census_labels</span> <span class="k">as</span> <span class="n">_cl</span>
+
+    <span class="n">xw</span> <span class="o">=</span> <span class="n">okres_census_crosswalk</span><span class="p">(</span><span class="n">districts</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;okres_id&quot;</span><span class="p">)[</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">]</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">panel</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">xw</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+
+    <span class="n">ident</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;land&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_code&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_de&quot;</span><span class="p">]</span>
+    <span class="n">skip</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">ident</span><span class="p">)</span> <span class="o">|</span> <span class="p">{</span><span class="s2">&quot;okres_id&quot;</span><span class="p">,</span> <span class="s2">&quot;census_okres_id&quot;</span><span class="p">}</span> <span class="o">|</span> <span class="nb">set</span><span class="p">(</span><span class="n">_derived_columns</span><span class="p">(</span><span class="n">out</span><span class="p">))</span>
+    <span class="n">counts</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">out</span><span class="o">.</span><span class="n">columns</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">skip</span><span class="p">]</span>
+
+    <span class="n">agg</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">)[</span><span class="n">counts</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">min_count</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">idr</span> <span class="o">=</span> <span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">]]</span>
+           <span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">)[</span><span class="n">ident</span><span class="p">])</span>
+    <span class="n">pooled</span> <span class="o">=</span> <span class="n">idr</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">agg</span><span class="p">)</span><span class="o">.</span><span class="n">reset_index</span><span class="p">()</span>
+
+    <span class="n">twins</span> <span class="o">=</span> <span class="n">rg</span><span class="o">.</span><span class="n">build_twin_pairs</span><span class="p">(</span><span class="n">districts</span><span class="p">)</span>
+    <span class="n">pooled</span><span class="p">[</span><span class="s2">&quot;twin_pooled&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pooled</span><span class="p">[</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">({</span><span class="n">e</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">twins</span><span class="o">.</span><span class="n">values</span><span class="p">()})</span>
+    <span class="k">return</span> <span class="n">_cl</span><span class="o">.</span><span class="n">add_shares_cis</span><span class="p">(</span><span class="n">pooled</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-census-blank_twin_members">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">blank_twin_members</span><span class="p">(</span><span class="n">panel</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Blank the court-derived columns on the twin members the source could not separate.</p>
+<p>Reads <code>panel.attrs["twin_suppressed"]</code> (set by <code>build_census_panel</code>) and sets those
+columns to <code>&amp;lt;NA&amp;gt;</code> on <strong>both</strong> members of every affected pair. The value being removed is
+not merely coarse — it is attached to the wrong unit — so leaving it in place would be worse
+than leaving a hole. Shares are re-derived afterwards so no stale ratio survives its counts.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 445–464 (20 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">445</span>
+<span class="normal">446</span>
+<span class="normal">447</span>
+<span class="normal">448</span>
+<span class="normal">449</span>
+<span class="normal">450</span>
+<span class="normal">451</span>
+<span class="normal">452</span>
+<span class="normal">453</span>
+<span class="normal">454</span>
+<span class="normal">455</span>
+<span class="normal">456</span>
+<span class="normal">457</span>
+<span class="normal">458</span>
+<span class="normal">459</span>
+<span class="normal">460</span>
+<span class="normal">461</span>
+<span class="normal">462</span>
+<span class="normal">463</span>
+<span class="normal">464</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">blank_twin_members</span><span class="p">(</span><span class="n">panel</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Blank the court-derived columns on the twin members the source could not separate.</span>
+
+<span class="sd">    Reads ``panel.attrs[&quot;twin_suppressed&quot;]`` (set by :func:`build_census_panel`) and sets those</span>
+<span class="sd">    columns to ``&lt;NA&gt;`` on **both** members of every affected pair. The value being removed is</span>
+<span class="sd">    not merely coarse — it is attached to the wrong unit — so leaving it in place would be worse</span>
+<span class="sd">    than leaving a hole. Shares are re-derived afterwards so no stale ratio survives its counts.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing</span><span class="w"> </span><span class="kn">import</span> <span class="n">census_labels</span> <span class="k">as</span> <span class="n">_cl</span>
+
+    <span class="n">out</span> <span class="o">=</span> <span class="n">panel</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">oids</span><span class="p">,</span> <span class="n">cols</span> <span class="ow">in</span> <span class="n">panel</span><span class="o">.</span><span class="n">attrs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;twin_suppressed&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+        <span class="n">cols</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cols</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">out</span><span class="o">.</span><span class="n">columns</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">cols</span><span class="p">:</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">oids</span><span class="p">),</span> <span class="n">cols</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="s2">&quot;nan&quot;</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="n">_derived_columns</span><span class="p">(</span><span class="n">out</span><span class="p">),</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;ignore&quot;</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">_cl</span><span class="o">.</span><span class="n">add_shares_cis</span><span class="p">(</span><span class="n">out</span><span class="p">)</span>
+    <span class="n">out</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;twin_suppressed&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">panel</span><span class="o">.</span><span class="n">attrs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;twin_suppressed&quot;</span><span class="p">,</span> <span class="p">{})</span>
+    <span class="n">out</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;loaded&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">panel</span><span class="o">.</span><span class="n">attrs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;loaded&quot;</span><span class="p">,</span> <span class="p">[])</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-census-build_census_panels">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">build_census_panels</span><span class="p">(</span><span class="n">census_dir</span><span class="p">,</span> <span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]</span></pre>
+<div class="fndoc"><p>The two okres-level census frames the pipeline actually uses.</p>
+<p>Returns <code>(member, pooled)</code>:</p>
+<ul>
+<li><strong>member</strong> — 158 rows, one per political okres, with the court-derived columns blanked on
+  the eighteen twin members the source merges. Okres-level (406) covariates — literacy,
+  illegitimacy, occupation, livestock, population — remain valid for all twenty.</li>
+<li><strong>pooled</strong> — 148 rows, each city/rural pair collapsed onto the rural member's id, counts
+  summed and shares re-derived. <strong>This is the baseline unit</strong> for a covariate merge; join it
+  on <code>{prefix}_census_okres_id</code> (<code>add_census_okres_id</code>).</li>
+</ul></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code></p>
+<details><summary>source · lines 467–481 (15 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">467</span>
+<span class="normal">468</span>
+<span class="normal">469</span>
+<span class="normal">470</span>
+<span class="normal">471</span>
+<span class="normal">472</span>
+<span class="normal">473</span>
+<span class="normal">474</span>
+<span class="normal">475</span>
+<span class="normal">476</span>
+<span class="normal">477</span>
+<span class="normal">478</span>
+<span class="normal">479</span>
+<span class="normal">480</span>
+<span class="normal">481</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">build_census_panels</span><span class="p">(</span><span class="n">census_dir</span><span class="p">,</span> <span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span>
+                        <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The two okres-level census frames the pipeline actually uses.</span>
+
+<span class="sd">    Returns ``(member, pooled)``:</span>
+
+<span class="sd">    * **member** — 158 rows, one per political okres, with the court-derived columns blanked on</span>
+<span class="sd">      the eighteen twin members the source merges. Okres-level (406) covariates — literacy,</span>
+<span class="sd">      illegitimacy, occupation, livestock, population — remain valid for all twenty.</span>
+<span class="sd">    * **pooled** — 148 rows, each city/rural pair collapsed onto the rural member&#39;s id, counts</span>
+<span class="sd">      summed and shares re-derived. **This is the baseline unit** for a covariate merge; join it</span>
+<span class="sd">      on ``{prefix}_census_okres_id`` (:func:`add_census_okres_id`).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">raw</span> <span class="o">=</span> <span class="n">build_census_panel</span><span class="p">(</span><span class="n">census_dir</span><span class="p">,</span> <span class="n">districts</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">blank_twin_members</span><span class="p">(</span><span class="n">raw</span><span class="p">),</span> <span class="n">pool_twin_okresy</span><span class="p">(</span><span class="n">raw</span><span class="p">,</span> <span class="n">districts</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-census-add_census_okres_id">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">add_census_okres_id</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">prefix</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;birth&#39;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Add <code>{prefix}_census_okres_id</code> — the unit to merge the pooled census panel on.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code></p>
+<details><summary>source · lines 484–490 (7 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">484</span>
+<span class="normal">485</span>
+<span class="normal">486</span>
+<span class="normal">487</span>
+<span class="normal">488</span>
+<span class="normal">489</span>
+<span class="normal">490</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">add_census_okres_id</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+                        <span class="n">prefix</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;birth&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Add ``{prefix}_census_okres_id`` — the unit to merge the pooled census panel on.&quot;&quot;&quot;</span>
+    <span class="n">xw</span> <span class="o">=</span> <span class="n">okres_census_crosswalk</span><span class="p">(</span><span class="n">districts</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;okres_id&quot;</span><span class="p">)[</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">]</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">out</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">prefix</span><span class="si">}</span><span class="s2">_census_okres_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">prefix</span><span class="si">}</span><span class="s2">_okres_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">xw</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-census-census_report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">census_report</span><span class="p">(</span><span class="n">panel</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span></pre>
+<div class="fndoc"><p>Print coverage: okresy, covariate count, and which files loaded.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code></p>
+<details><summary>source · lines 493–507 (15 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">493</span>
+<span class="normal">494</span>
+<span class="normal">495</span>
+<span class="normal">496</span>
+<span class="normal">497</span>
+<span class="normal">498</span>
+<span class="normal">499</span>
+<span class="normal">500</span>
+<span class="normal">501</span>
+<span class="normal">502</span>
+<span class="normal">503</span>
+<span class="normal">504</span>
+<span class="normal">505</span>
+<span class="normal">506</span>
+<span class="normal">507</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">census_report</span><span class="p">(</span><span class="n">panel</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Print coverage: okresy, covariate count, and which files loaded.&quot;&quot;&quot;</span>
+    <span class="n">covs</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">panel</span><span class="o">.</span><span class="n">columns</span>
+            <span class="k">if</span> <span class="n">c</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;okres_id&quot;</span><span class="p">,</span> <span class="s2">&quot;land&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_code&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_de&quot;</span><span class="p">)]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Census okres panel  (okresy = </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">panel</span><span class="p">)</span><span class="si">}</span><span class="s2">, covariates = </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">covs</span><span class="p">)</span><span class="si">}</span><span class="s2">)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">level</span><span class="p">,</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">panel</span><span class="o">.</span><span class="n">attrs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;loaded&quot;</span><span class="p">,</span> <span class="p">[]):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  [</span><span class="si">{</span><span class="n">level</span><span class="si">:</span><span class="s2">&lt;5</span><span class="si">}</span><span class="s2">] </span><span class="si">{</span><span class="n">n</span><span class="si">:</span><span class="s2">&gt;3</span><span class="si">}</span><span class="s2"> cols  </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">miss</span> <span class="o">=</span> <span class="n">panel</span><span class="p">[</span><span class="n">covs</span><span class="p">]</span><span class="o">.</span><span class="n">isna</span><span class="p">()</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  okresy with no census match: </span><span class="si">{</span><span class="n">miss</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">sup</span> <span class="o">=</span> <span class="n">panel</span><span class="o">.</span><span class="n">attrs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;twin_suppressed&quot;</span><span class="p">,</span> <span class="p">{})</span>
+    <span class="k">if</span> <span class="n">sup</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  city/rural twins the source cannot separate (one court row per pair; the&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  member values are blanked, the pair total survives in the pooled panel):&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="p">(</span><span class="n">oids</span><span class="p">,</span> <span class="n">cols</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">sup</span><span class="o">.</span><span class="n">items</span><span class="p">()):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    [</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">oids</span><span class="p">)</span><span class="si">:</span><span class="s2">&gt;2</span><span class="si">}</span><span class="s2"> okresy · </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">cols</span><span class="p">)</span><span class="si">:</span><span class="s2">&gt;2</span><span class="si">}</span><span class="s2"> cols] </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-parsing-census-CZECH_LAND_CODES"><pre class="sig">CZECH_LAND_CODES<span class="kind">set · 3 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="mi">301</span><span class="p">,</span> <span class="mi">302</span><span class="p">,</span> <span class="mi">303</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-parsing-census-STEM_PREFIX"><pre class="sig">STEM_PREFIX<span class="kind">dict · 15 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;gebor&#39;</span><span class="p">:</span> <span class="s1">&#39;geb&#39;</span><span class="p">,</span> <span class="s1">&#39;gestorbkind&#39;</span><span class="p">:</span> <span class="s1">&#39;gest_kind&#39;</span><span class="p">,</span> <span class="s1">&#39;gestorb&#39;</span><span class="p">:</span> <span class="s1">&#39;gest&#39;</span><span class="p">,</span> <span class="s1">&#39;todesur&#39;</span><span class="p">:</span> <span class="s1">&#39;todes&#39;</span><span class="p">,</span> <span class="s1">&#39;beruf&#39;</span><span class="p">:</span> <span class="s1">&#39;beruf&#39;</span><span class="p">,</span> <span class="s1">&#39;lit&#39;</span><span class="p">:</span> <span class="s1">&#39;bild&#39;</span><span class="p">,</span> <span class="s1">&#39;einwohn&#39;</span><span class="p">:</span> <span class="s1">&#39;pop&#39;</span><span class="p">,</span> <span class="s1">&#39;religion&#39;</span><span class="p">:</span> <span class="s1">&#39;rel&#39;</span><span class="p">,</span> <span class="s1">&#39;umgspr&#39;</span><span class="p">:</span> <span class="s1">&#39;umgspr&#39;</span><span class="p">,</span> <span class="s1">&#39;grossvieh&#39;</span><span class="p">:</span> <span class="s1">&#39;vieh_gross&#39;</span><span class="p">,</span> <span class="s1">&#39;kleinvieh&#39;</span><span class="p">:</span> <span class="s1">&#39;vieh_klein&#39;</span><span class="p">,</span> <span class="s1">&#39;viehgesamt&#39;</span><span class="p">:</span> <span class="s1">&#39;vieh_ges&#39;</span><span class="p">,</span> <span class="s1">&#39;sparbil&#39;</span><span class="p">:</span> <span class="s1">&#39;spar_bil&#39;</span><span class="p">,</span> <span class="s1">&#39;sparbucher&#39;</span><span class="p">:</span> <span class="s1">&#39;spar_buch&#39;</span><span class="p">,</span> <span class="s1">&#39;pbg&#39;</span><span class="p">:</span> <span class="s1">&#39;just_pers&#39;</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-parsing-census-FILE_PREFIX"><pre class="sig">FILE_PREFIX<span class="kind">tuple · 1 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">((</span><span class="s1">&#39;Justizstatistik Bezirksgericht&#39;</span><span class="p">,</span> <span class="s1">&#39;just_bg&#39;</span><span class="p">),)</span>
+</pre></div>
+</details></div>
+<h2>Used by</h2><p><code>02_data_cleaning.ipynb</code> <code>03_visualisation.ipynb</code> <code>utils/parsing/census_labels.py</code> <code>utils/reference_tools/occupations/run_mosaic_beruf_check.py</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/parsing/census.py · 507 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span>
+<span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span>
+<span class="normal">337</span>
+<span class="normal">338</span>
+<span class="normal">339</span>
+<span class="normal">340</span>
+<span class="normal">341</span>
+<span class="normal">342</span>
+<span class="normal">343</span>
+<span class="normal">344</span>
+<span class="normal">345</span>
+<span class="normal">346</span>
+<span class="normal">347</span>
+<span class="normal">348</span>
+<span class="normal">349</span>
+<span class="normal">350</span>
+<span class="normal">351</span>
+<span class="normal">352</span>
+<span class="normal">353</span>
+<span class="normal">354</span>
+<span class="normal">355</span>
+<span class="normal">356</span>
+<span class="normal">357</span>
+<span class="normal">358</span>
+<span class="normal">359</span>
+<span class="normal">360</span>
+<span class="normal">361</span>
+<span class="normal">362</span>
+<span class="normal">363</span>
+<span class="normal">364</span>
+<span class="normal">365</span>
+<span class="normal">366</span>
+<span class="normal">367</span>
+<span class="normal">368</span>
+<span class="normal">369</span>
+<span class="normal">370</span>
+<span class="normal">371</span>
+<span class="normal">372</span>
+<span class="normal">373</span>
+<span class="normal">374</span>
+<span class="normal">375</span>
+<span class="normal">376</span>
+<span class="normal">377</span>
+<span class="normal">378</span>
+<span class="normal">379</span>
+<span class="normal">380</span>
+<span class="normal">381</span>
+<span class="normal">382</span>
+<span class="normal">383</span>
+<span class="normal">384</span>
+<span class="normal">385</span>
+<span class="normal">386</span>
+<span class="normal">387</span>
+<span class="normal">388</span>
+<span class="normal">389</span>
+<span class="normal">390</span>
+<span class="normal">391</span>
+<span class="normal">392</span>
+<span class="normal">393</span>
+<span class="normal">394</span>
+<span class="normal">395</span>
+<span class="normal">396</span>
+<span class="normal">397</span>
+<span class="normal">398</span>
+<span class="normal">399</span>
+<span class="normal">400</span>
+<span class="normal">401</span>
+<span class="normal">402</span>
+<span class="normal">403</span>
+<span class="normal">404</span>
+<span class="normal">405</span>
+<span class="normal">406</span>
+<span class="normal">407</span>
+<span class="normal">408</span>
+<span class="normal">409</span>
+<span class="normal">410</span>
+<span class="normal">411</span>
+<span class="normal">412</span>
+<span class="normal">413</span>
+<span class="normal">414</span>
+<span class="normal">415</span>
+<span class="normal">416</span>
+<span class="normal">417</span>
+<span class="normal">418</span>
+<span class="normal">419</span>
+<span class="normal">420</span>
+<span class="normal">421</span>
+<span class="normal">422</span>
+<span class="normal">423</span>
+<span class="normal">424</span>
+<span class="normal">425</span>
+<span class="normal">426</span>
+<span class="normal">427</span>
+<span class="normal">428</span>
+<span class="normal">429</span>
+<span class="normal">430</span>
+<span class="normal">431</span>
+<span class="normal">432</span>
+<span class="normal">433</span>
+<span class="normal">434</span>
+<span class="normal">435</span>
+<span class="normal">436</span>
+<span class="normal">437</span>
+<span class="normal">438</span>
+<span class="normal">439</span>
+<span class="normal">440</span>
+<span class="normal">441</span>
+<span class="normal">442</span>
+<span class="normal">443</span>
+<span class="normal">444</span>
+<span class="normal">445</span>
+<span class="normal">446</span>
+<span class="normal">447</span>
+<span class="normal">448</span>
+<span class="normal">449</span>
+<span class="normal">450</span>
+<span class="normal">451</span>
+<span class="normal">452</span>
+<span class="normal">453</span>
+<span class="normal">454</span>
+<span class="normal">455</span>
+<span class="normal">456</span>
+<span class="normal">457</span>
+<span class="normal">458</span>
+<span class="normal">459</span>
+<span class="normal">460</span>
+<span class="normal">461</span>
+<span class="normal">462</span>
+<span class="normal">463</span>
+<span class="normal">464</span>
+<span class="normal">465</span>
+<span class="normal">466</span>
+<span class="normal">467</span>
+<span class="normal">468</span>
+<span class="normal">469</span>
+<span class="normal">470</span>
+<span class="normal">471</span>
+<span class="normal">472</span>
+<span class="normal">473</span>
+<span class="normal">474</span>
+<span class="normal">475</span>
+<span class="normal">476</span>
+<span class="normal">477</span>
+<span class="normal">478</span>
+<span class="normal">479</span>
+<span class="normal">480</span>
+<span class="normal">481</span>
+<span class="normal">482</span>
+<span class="normal">483</span>
+<span class="normal">484</span>
+<span class="normal">485</span>
+<span class="normal">486</span>
+<span class="normal">487</span>
+<span class="normal">488</span>
+<span class="normal">489</span>
+<span class="normal">490</span>
+<span class="normal">491</span>
+<span class="normal">492</span>
+<span class="normal">493</span>
+<span class="normal">494</span>
+<span class="normal">495</span>
+<span class="normal">496</span>
+<span class="normal">497</span>
+<span class="normal">498</span>
+<span class="normal">499</span>
+<span class="normal">500</span>
+<span class="normal">501</span>
+<span class="normal">502</span>
+<span class="normal">503</span>
+<span class="normal">504</span>
+<span class="normal">505</span>
+<span class="normal">506</span>
+<span class="normal">507</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">census.py — 1910/1911 Cisleithanian census loader, joined to the district backbone</span>
+<span class="sd">==================================================================================</span>
+<span class="sd">Harmonises the Rumpler-Seger / MPIDR census workbooks in ``data/raw/census/`` and joins</span>
+<span class="sd">them to :mod:`utils.parsing.districts` (``districts_1910``) by **exact unit code** — the</span>
+<span class="sd">census ``IDCourtdistr`` equals our ``court_id`` (339/339) and ``IDPoldistrict`` equals our</span>
+<span class="sd">``okres_id`` (``region·1000 + district``). No name matching.</span>
+
+<span class="sd">Each workbook has a data sheet (ID columns + value columns) and a *Variable Names* sheet</span>
+<span class="sd">giving the **multi-row, merged-cell German header** for each value column. Value columns are</span>
+<span class="sd">named by topic + index (``Religion1..18``, ``Umgspr1..11``, ``Gebor1..``, ``Beruf1..`` …) —</span>
+<span class="sd">the one exception is the district-court justice caseload file, whose columns are generic</span>
+<span class="sd">``V1..V91``.</span>
+
+<span class="sd">Naming (:func:`_column_names`)</span>
+<span class="sd">------------------------------</span>
+<span class="sd">The *Variable Names* sheet is read with :mod:`openpyxl` so merged cells are expanded</span>
+<span class="sd">**exactly** (a de-merged pandas read would let a deep label such as</span>
+<span class="sd">``helvetischen Bekenntnisses`` bleed into the next column). Each value column becomes</span>
+<span class="sd">``{prefix}_{leaf}`` where:</span>
+
+<span class="sd">* ``prefix`` comes from the value column&#39;s own stem via :data:`STEM_PREFIX`</span>
+<span class="sd">  (``Religion→rel``, ``Umgspr→umgspr``, …), falling back to a filename topic</span>
+<span class="sd">  (:data:`FILE_PREFIX`) for the generic-``V`` justice file — so a mixed workbook</span>
+<span class="sd">  (Religion + Umgangssprache) keeps each family correctly labelled;</span>
+<span class="sd">* ``leaf`` is the merged header path with the redundant top **category** removed: within</span>
+<span class="sd">  each prefix group the longest common leading label sequence (e.g.</span>
+<span class="sd">  ``Anwesende Bevölkerung nach der Religion``) is trimmed, leaving the discriminating tail</span>
+<span class="sd">  (``roemisch_katholisch``, ``deutsch``, ``bohmisch_mahrisch_slowakisch``) while keeping a</span>
+<span class="sd">  genuinely discriminating top label where it varies (``lebendgeborene`` vs ``totgeborene``).</span>
+
+<span class="sd">:func:`load_census_file` filters to the Czech crown lands and returns a tidy frame keyed by</span>
+<span class="sd">``court_id`` (934-level files) or ``okres_id`` (406-level files). :func:`build_census_panel`</span>
+<span class="sd">loads every Cisleithanian file, aggregates 934-level counts up to the okres, and returns one</span>
+<span class="sd">**okres-level** covariate table (158 Czech-lands okresy) — the join target for</span>
+<span class="sd">legionnaire/habsburg ``birth_okres``. Hungarian and regional-court (72-level) files are skipped.</span>
+<span class="sd">As a final step the German covariate names are **renamed to English** by</span>
+<span class="sd">:mod:`utils.parsing.census_labels` (``lang_czech``, ``rel_jewish``, ``literacy_rate`` …), with</span>
+<span class="sd">derived shares/rates added; the German→English crosswalk is `reference/census_column_labels.csv`.</span>
+
+<span class="sd">Usage</span>
+<span class="sd">-----</span>
+<span class="sd">    from utils.parsing import census as cz</span>
+<span class="sd">    panel = cz.build_census_panel(CENSUS_DIR, districts_1910)   # okres-level covariates</span>
+<span class="sd">    cz.census_report(panel)</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">unicodedata</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">openpyxl</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing</span><span class="w"> </span><span class="kn">import</span> <span class="n">records_geo</span> <span class="k">as</span> <span class="n">rg</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.3.0&quot;</span>
+
+<span class="c1"># Czech crown-land census codes (first three digits): Böhmen 301 / Mähren 302 / Schlesien 303.</span>
+<span class="n">CZECH_LAND_CODES</span> <span class="o">=</span> <span class="p">{</span><span class="mi">301</span><span class="p">,</span> <span class="mi">302</span><span class="p">,</span> <span class="mi">303</span><span class="p">}</span>
+
+<span class="c1"># Files to skip: Hungarian (Transleithania), regional-court (72-level, coarser than backbone),</span>
+<span class="c1"># and the code-book itself.</span>
+<span class="n">_SKIP_SUBSTR</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;Justizstatistik HUN&quot;</span><span class="p">,</span> <span class="s2">&quot;Regional courts 72&quot;</span><span class="p">,</span> <span class="s2">&quot;Gerichtshofe&quot;</span><span class="p">,</span> <span class="s2">&quot;Gerichtshoefen&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;CODE file&quot;</span><span class="p">)</span>
+
+<span class="c1"># Value-column stem (digits stripped, cleaned) → short covariate prefix.</span>
+<span class="n">STEM_PREFIX</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;gebor&quot;</span><span class="p">:</span> <span class="s2">&quot;geb&quot;</span><span class="p">,</span>            <span class="c1"># Bewegung der Bevölkerung — Geborene</span>
+    <span class="s2">&quot;gestorbkind&quot;</span><span class="p">:</span> <span class="s2">&quot;gest_kind&quot;</span><span class="p">,</span>  <span class="c1"># Gestorbene Kinder bis 5</span>
+    <span class="s2">&quot;gestorb&quot;</span><span class="p">:</span> <span class="s2">&quot;gest&quot;</span><span class="p">,</span>         <span class="c1"># Gestorbene</span>
+    <span class="s2">&quot;todesur&quot;</span><span class="p">:</span> <span class="s2">&quot;todes&quot;</span><span class="p">,</span>        <span class="c1"># Todesursachen</span>
+    <span class="s2">&quot;beruf&quot;</span><span class="p">:</span> <span class="s2">&quot;beruf&quot;</span><span class="p">,</span>          <span class="c1"># Volkszählung — Beruf</span>
+    <span class="s2">&quot;lit&quot;</span><span class="p">:</span> <span class="s2">&quot;bild&quot;</span><span class="p">,</span>             <span class="c1"># Bildungsgrad (Literaten)</span>
+    <span class="s2">&quot;einwohn&quot;</span><span class="p">:</span> <span class="s2">&quot;pop&quot;</span><span class="p">,</span>          <span class="c1"># Einwohner nach Größenkategorien</span>
+    <span class="s2">&quot;religion&quot;</span><span class="p">:</span> <span class="s2">&quot;rel&quot;</span><span class="p">,</span>         <span class="c1"># Religion</span>
+    <span class="s2">&quot;umgspr&quot;</span><span class="p">:</span> <span class="s2">&quot;umgspr&quot;</span><span class="p">,</span>        <span class="c1"># Umgangssprache</span>
+    <span class="s2">&quot;grossvieh&quot;</span><span class="p">:</span> <span class="s2">&quot;vieh_gross&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;kleinvieh&quot;</span><span class="p">:</span> <span class="s2">&quot;vieh_klein&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;viehgesamt&quot;</span><span class="p">:</span> <span class="s2">&quot;vieh_ges&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;sparbil&quot;</span><span class="p">:</span> <span class="s2">&quot;spar_bil&quot;</span><span class="p">,</span>     <span class="c1"># Sparkassen Bilanzen</span>
+    <span class="s2">&quot;sparbucher&quot;</span><span class="p">:</span> <span class="s2">&quot;spar_buch&quot;</span><span class="p">,</span>  <span class="c1"># Sparkassebücher</span>
+    <span class="s2">&quot;pbg&quot;</span><span class="p">:</span> <span class="s2">&quot;just_pers&quot;</span><span class="p">,</span>        <span class="c1"># Personal bei Bezirksgerichte</span>
+<span class="p">}</span>
+
+<span class="c1"># Fallback prefix by filename substring, used when the stem is generic (e.g. ``V``).</span>
+<span class="n">FILE_PREFIX</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="p">(</span><span class="s2">&quot;Justizstatistik Bezirksgericht&quot;</span><span class="p">,</span> <span class="s2">&quot;just_bg&quot;</span><span class="p">),</span>
+<span class="p">)</span>
+
+
+<span class="c1"># ═══════════════════════════════════════════════════════════════════════════</span>
+<span class="c1"># Header naming (openpyxl merge-expanded)</span>
+<span class="c1"># ═══════════════════════════════════════════════════════════════════════════</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_clean_name</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;snake_case ASCII from a German header fragment (ä→a, ß→ss, spaces→_).&quot;&quot;&quot;</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">s</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;ä&quot;</span><span class="p">,</span> <span class="s2">&quot;a&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;ö&quot;</span><span class="p">,</span> <span class="s2">&quot;o&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;ü&quot;</span><span class="p">,</span> <span class="s2">&quot;u&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;ß&quot;</span><span class="p">,</span> <span class="s2">&quot;ss&quot;</span><span class="p">)</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">unicodedata</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="s2">&quot;NFKD&quot;</span><span class="p">,</span> <span class="n">s</span><span class="p">)</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">unicodedata</span><span class="o">.</span><span class="n">combining</span><span class="p">(</span><span class="n">c</span><span class="p">))</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;[^a-z0-9]+&quot;</span><span class="p">,</span> <span class="s2">&quot;_&quot;</span><span class="p">,</span> <span class="n">s</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">s</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s2">&quot;_&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_stem</span><span class="p">(</span><span class="n">col</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Value-column stem: strip a trailing index (``Religion1`` → ``religion``).&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">_clean_name</span><span class="p">(</span><span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\d+$&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">col</span><span class="p">)))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_prefix_for</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="n">filename</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Covariate prefix for one value column: stem map → filename fallback → cleaned stem.&quot;&quot;&quot;</span>
+    <span class="n">st</span> <span class="o">=</span> <span class="n">_stem</span><span class="p">(</span><span class="n">col</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">st</span> <span class="ow">in</span> <span class="n">STEM_PREFIX</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">STEM_PREFIX</span><span class="p">[</span><span class="n">st</span><span class="p">]</span>
+    <span class="k">for</span> <span class="n">sub</span><span class="p">,</span> <span class="n">pfx</span> <span class="ow">in</span> <span class="n">FILE_PREFIX</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">sub</span> <span class="ow">in</span> <span class="n">filename</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">pfx</span>
+    <span class="k">return</span> <span class="n">st</span> <span class="ow">or</span> <span class="s2">&quot;v&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_expand_varsheet</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">sheet</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">val_ids</span><span class="p">:</span> <span class="nb">list</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return {value-column id → ordered list of merged-header label strings}.</span>
+
+<span class="sd">    Reads with :mod:`openpyxl` and fills every merged range with its top-left value so the</span>
+<span class="sd">    header hierarchy is reconstructed exactly. The header id row (holding ``Religion1`` …) is</span>
+<span class="sd">    located by matching *val_ids*; labels are the rows below it.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">wb</span> <span class="o">=</span> <span class="n">openpyxl</span><span class="o">.</span><span class="n">load_workbook</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">data_only</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">read_only</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">ws</span> <span class="o">=</span> <span class="n">wb</span><span class="p">[</span><span class="n">sheet</span><span class="p">]</span>
+    <span class="n">grid</span> <span class="o">=</span> <span class="p">[[</span><span class="n">c</span><span class="o">.</span><span class="n">value</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">row</span><span class="p">]</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">ws</span><span class="o">.</span><span class="n">iter_rows</span><span class="p">()]</span>
+    <span class="k">for</span> <span class="n">mr</span> <span class="ow">in</span> <span class="n">ws</span><span class="o">.</span><span class="n">merged_cells</span><span class="o">.</span><span class="n">ranges</span><span class="p">:</span>                       <span class="c1"># expand merges exactly</span>
+        <span class="n">tl</span> <span class="o">=</span> <span class="n">ws</span><span class="o">.</span><span class="n">cell</span><span class="p">(</span><span class="n">mr</span><span class="o">.</span><span class="n">min_row</span><span class="p">,</span> <span class="n">mr</span><span class="o">.</span><span class="n">min_col</span><span class="p">)</span><span class="o">.</span><span class="n">value</span>
+        <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">mr</span><span class="o">.</span><span class="n">min_row</span><span class="p">,</span> <span class="n">mr</span><span class="o">.</span><span class="n">max_row</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">mr</span><span class="o">.</span><span class="n">min_col</span><span class="p">,</span> <span class="n">mr</span><span class="o">.</span><span class="n">max_col</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+                <span class="n">grid</span><span class="p">[</span><span class="n">r</span> <span class="o">-</span> <span class="mi">1</span><span class="p">][</span><span class="n">c</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">tl</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">grid</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">{}</span>
+    <span class="n">idset</span> <span class="o">=</span> <span class="p">{</span><span class="nb">str</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">val_ids</span><span class="p">}</span>
+    <span class="n">id_row</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">grid</span><span class="p">)),</span>
+                 <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">r</span><span class="p">:</span> <span class="nb">sum</span><span class="p">(</span><span class="mi">1</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">grid</span><span class="p">[</span><span class="n">r</span><span class="p">]</span> <span class="k">if</span> <span class="nb">str</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="ow">in</span> <span class="n">idset</span><span class="p">))</span>
+    <span class="n">colpos</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">c</span><span class="p">,</span> <span class="n">x</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">grid</span><span class="p">[</span><span class="n">id_row</span><span class="p">]):</span>
+        <span class="k">if</span> <span class="nb">str</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="ow">in</span> <span class="n">idset</span> <span class="ow">and</span> <span class="nb">str</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">colpos</span><span class="p">:</span>
+            <span class="n">colpos</span><span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">x</span><span class="p">)]</span> <span class="o">=</span> <span class="n">c</span>
+    <span class="n">out</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">vid</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">colpos</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">parts</span> <span class="o">=</span> <span class="p">[</span><span class="n">grid</span><span class="p">[</span><span class="n">r</span><span class="p">][</span><span class="n">c</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">id_row</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">grid</span><span class="p">))</span>
+                 <span class="k">if</span> <span class="n">grid</span><span class="p">[</span><span class="n">r</span><span class="p">][</span><span class="n">c</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">str</span><span class="p">(</span><span class="n">grid</span><span class="p">[</span><span class="n">r</span><span class="p">][</span><span class="n">c</span><span class="p">])</span><span class="o">.</span><span class="n">strip</span><span class="p">()]</span>
+        <span class="n">out</span><span class="p">[</span><span class="n">vid</span><span class="p">]</span> <span class="o">=</span> <span class="n">parts</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_lcp</span><span class="p">(</span><span class="n">seqs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Length of the longest common leading subsequence across *seqs* (empty → 0).&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">seqs</span><span class="p">:</span>
+        <span class="k">return</span> <span class="mi">0</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">seqs</span><span class="p">)</span>
+    <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">while</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">n</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">({</span><span class="n">s</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">seqs</span><span class="p">})</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="n">i</span> <span class="o">+=</span> <span class="mi">1</span>
+    <span class="k">return</span> <span class="n">i</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_column_names</span><span class="p">(</span><span class="n">varparts</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">prefixes</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Map each value-column id → ``{prefix}_{trimmed leaf}``, unique within the file.</span>
+
+<span class="sd">    Within each prefix group the shared leading labels (the topic category) are trimmed so</span>
+<span class="sd">    only the discriminating tail survives; a category that genuinely varies across the group</span>
+<span class="sd">    (``lebendgeborene`` vs ``totgeborene``) is kept because it is not part of the common prefix.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># clean + dedupe the label path per column</span>
+    <span class="n">cleaned</span> <span class="o">=</span> <span class="p">{</span><span class="n">vid</span><span class="p">:</span> <span class="p">[</span><span class="n">p</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="nb">dict</span><span class="o">.</span><span class="n">fromkeys</span><span class="p">(</span><span class="n">_clean_name</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">parts</span><span class="p">)</span> <span class="k">if</span> <span class="n">p</span><span class="p">]</span>
+               <span class="k">for</span> <span class="n">vid</span><span class="p">,</span> <span class="n">parts</span> <span class="ow">in</span> <span class="n">varparts</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+
+    <span class="n">names</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">groups</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">vid</span><span class="p">,</span> <span class="n">pfx</span> <span class="ow">in</span> <span class="n">prefixes</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">groups</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">pfx</span><span class="p">,</span> <span class="p">[])</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">vid</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">pfx</span><span class="p">,</span> <span class="n">vids</span> <span class="ow">in</span> <span class="n">groups</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">multi</span> <span class="o">=</span> <span class="p">[</span><span class="n">cleaned</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="p">[])</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">vids</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">cleaned</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="p">[]))</span> <span class="o">&gt;=</span> <span class="mi">2</span><span class="p">]</span>
+        <span class="n">drop</span> <span class="o">=</span> <span class="n">_lcp</span><span class="p">(</span><span class="n">multi</span><span class="p">)</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">multi</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">2</span> <span class="k">else</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">vids</span><span class="p">:</span>
+            <span class="n">parts</span> <span class="o">=</span> <span class="n">cleaned</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="p">[])</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span> <span class="o">&gt;</span> <span class="n">drop</span><span class="p">:</span>                            <span class="c1"># keep at least the leaf</span>
+                <span class="n">parts</span> <span class="o">=</span> <span class="n">parts</span><span class="p">[</span><span class="n">drop</span><span class="p">:]</span>
+            <span class="n">body</span> <span class="o">=</span> <span class="s2">&quot;_&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span> <span class="k">if</span> <span class="n">parts</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+            <span class="n">body</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;_?spalte_\d+(?:_\d+)*&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">body</span><span class="p">)</span>  <span class="c1"># drop &quot;(Spalte 2-18)&quot; noise</span>
+            <span class="n">body</span> <span class="o">=</span> <span class="n">body</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s2">&quot;_&quot;</span><span class="p">)</span>
+            <span class="n">names</span><span class="p">[</span><span class="n">v</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">pfx</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">body</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">if</span> <span class="n">body</span> <span class="k">else</span> <span class="n">pfx</span>
+
+    <span class="c1"># guarantee uniqueness (defensive: collisions get a numeric suffix)</span>
+    <span class="n">seen</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">names</span><span class="p">):</span>
+        <span class="n">base</span> <span class="o">=</span> <span class="n">names</span><span class="p">[</span><span class="n">v</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">base</span> <span class="ow">in</span> <span class="n">seen</span><span class="o">.</span><span class="n">values</span><span class="p">()</span> <span class="ow">or</span> <span class="nb">list</span><span class="p">(</span><span class="n">names</span><span class="o">.</span><span class="n">values</span><span class="p">())</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="n">base</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">seen</span><span class="p">[</span><span class="n">base</span><span class="p">]</span> <span class="o">=</span> <span class="n">seen</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">base</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+            <span class="k">if</span> <span class="n">seen</span><span class="p">[</span><span class="n">base</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="n">names</span><span class="p">[</span><span class="n">v</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">base</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">seen</span><span class="p">[</span><span class="n">base</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="k">return</span> <span class="n">names</span>
+
+
+<span class="c1"># ═══════════════════════════════════════════════════════════════════════════</span>
+<span class="c1"># Per-file loader</span>
+<span class="c1"># ═══════════════════════════════════════════════════════════════════════════</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_land3</span><span class="p">(</span><span class="n">code</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;First three digits of a unit code (crown land), robust to 6- or 9-digit ids.&quot;&quot;&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">code</span><span class="p">))[:</span><span class="mi">3</span><span class="p">])</span>
+    <span class="k">except</span> <span class="p">(</span><span class="ne">ValueError</span><span class="p">,</span> <span class="ne">TypeError</span><span class="p">):</span>
+        <span class="k">return</span> <span class="o">-</span><span class="mi">1</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">load_census_file</span><span class="p">(</span><span class="n">path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Load one census workbook → (tidy Czech-lands frame, level).</span>
+
+<span class="sd">    ``level`` is ``&quot;court&quot;`` (keyed ``court_id`` = ``IDCourtdistr``) or ``&quot;okres&quot;``</span>
+<span class="sd">    (keyed ``okres_id`` = ``IDPoldistrict``). Value columns are renamed via</span>
+<span class="sd">    :func:`_column_names`; ID/name columns are dropped except the key.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="n">xl</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">ExcelFile</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">xl</span><span class="o">.</span><span class="n">parse</span><span class="p">(</span><span class="n">xl</span><span class="o">.</span><span class="n">sheet_names</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+
+    <span class="k">if</span> <span class="s2">&quot;IDCourtdistr&quot;</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="n">level</span><span class="p">,</span> <span class="n">key_src</span> <span class="o">=</span> <span class="s2">&quot;court&quot;</span><span class="p">,</span> <span class="s2">&quot;IDCourtdistr&quot;</span>
+    <span class="k">elif</span> <span class="s2">&quot;IDPoldistrict&quot;</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="n">level</span><span class="p">,</span> <span class="n">key_src</span> <span class="o">=</span> <span class="s2">&quot;okres&quot;</span><span class="p">,</span> <span class="s2">&quot;IDPoldistrict&quot;</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">path</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">: no IDCourtdistr/IDPoldistrict key column&quot;</span><span class="p">)</span>
+
+    <span class="n">id_cols</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">columns</span>
+               <span class="k">if</span> <span class="nb">str</span><span class="p">(</span><span class="n">c</span><span class="p">)</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;ID&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;Name&quot;</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">c</span><span class="p">)</span> <span class="ow">or</span> <span class="n">c</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;N&quot;</span><span class="p">,</span> <span class="s2">&quot;Place&quot;</span><span class="p">)]</span>
+    <span class="c1"># value columns: drop id columns and stray blank-header cells (pandas &quot;Unnamed: N&quot;,</span>
+    <span class="c1"># empty/NaN headers) that carry no variable-sheet entry</span>
+    <span class="n">val_cols</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">columns</span>
+                <span class="k">if</span> <span class="n">c</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">id_cols</span>
+                <span class="ow">and</span> <span class="ow">not</span> <span class="nb">str</span><span class="p">(</span><span class="n">c</span><span class="p">)</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;Unnamed&quot;</span><span class="p">)</span>
+                <span class="ow">and</span> <span class="nb">str</span><span class="p">(</span><span class="n">c</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;nan&quot;</span><span class="p">)]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">val_cols</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">path</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">: no value columns&quot;</span><span class="p">)</span>
+
+    <span class="c1"># crown-land filter (Czech lands): use IDCrownland if present, else first 3 digits of the key</span>
+    <span class="k">if</span> <span class="s2">&quot;IDCrownland&quot;</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="n">land</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="s2">&quot;IDCrownland&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_land3</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">land</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="n">key_src</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_land3</span><span class="p">)</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="n">land</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">CZECH_LAND_CODES</span><span class="p">)]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+
+    <span class="c1"># build value-column names from the merged Variable-Names sheet</span>
+    <span class="n">var_sheet</span> <span class="o">=</span> <span class="nb">next</span><span class="p">((</span><span class="n">s</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">xl</span><span class="o">.</span><span class="n">sheet_names</span> <span class="k">if</span> <span class="s2">&quot;variable&quot;</span> <span class="ow">in</span> <span class="n">s</span><span class="o">.</span><span class="n">lower</span><span class="p">()),</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="n">prefixes</span> <span class="o">=</span> <span class="p">{</span><span class="nb">str</span><span class="p">(</span><span class="n">c</span><span class="p">):</span> <span class="n">_prefix_for</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">path</span><span class="o">.</span><span class="n">name</span><span class="p">)</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">val_cols</span><span class="p">}</span>
+    <span class="k">if</span> <span class="n">var_sheet</span><span class="p">:</span>
+        <span class="n">varparts</span> <span class="o">=</span> <span class="n">_expand_varsheet</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">var_sheet</span><span class="p">,</span> <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">c</span><span class="p">)</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">val_cols</span><span class="p">])</span>
+        <span class="n">varparts</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">varparts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="p">[])</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">map</span><span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">val_cols</span><span class="p">)}</span>
+        <span class="n">rename</span> <span class="o">=</span> <span class="n">_column_names</span><span class="p">(</span><span class="n">varparts</span><span class="p">,</span> <span class="n">prefixes</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">rename</span> <span class="o">=</span> <span class="p">{</span><span class="nb">str</span><span class="p">(</span><span class="n">c</span><span class="p">):</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">prefixes</span><span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">c</span><span class="p">)]</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">_clean_name</span><span class="p">(</span><span class="n">c</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">val_cols</span><span class="p">}</span>
+
+    <span class="n">out</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">({</span><span class="s2">&quot;unit_id&quot;</span><span class="p">:</span> <span class="n">data</span><span class="p">[</span><span class="n">key_src</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;Int64&quot;</span><span class="p">)})</span>
+    <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">val_cols</span><span class="p">:</span>
+        <span class="n">out</span><span class="p">[</span><span class="n">rename</span><span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">c</span><span class="p">)]]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_numeric</span><span class="p">(</span><span class="n">data</span><span class="p">[</span><span class="n">c</span><span class="p">],</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;coerce&quot;</span><span class="p">)</span>
+    <span class="c1"># collapse duplicate unit rows (e.g. several Sparkassen per court) by sum</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;unit_id&quot;</span><span class="p">,</span> <span class="n">as_index</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">min_count</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span><span class="p">,</span> <span class="n">level</span>
+
+
+<span class="c1"># ═══════════════════════════════════════════════════════════════════════════</span>
+<span class="c1"># Panel builder</span>
+<span class="c1"># ═══════════════════════════════════════════════════════════════════════════</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_okres_id</span><span class="p">(</span><span class="n">okres_code</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">r</span><span class="p">,</span> <span class="n">d</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">okres_code</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;-&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="n">r</span><span class="p">)</span> <span class="o">*</span> <span class="mi">1000</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">d</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_seat_courts</span><span class="p">(</span><span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">set</span><span class="p">[</span><span class="nb">int</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``{okres_id → {seat court_id}}`` — the court that shares the okres&#39;s own name.</span>
+
+<span class="sd">    The **seat** court is the discriminating one. When the census merges a statutory city into</span>
+<span class="sd">    its rural neighbour it is always the shared *seat* court that loses its row, because that is</span>
+<span class="sd">    the one physically covering both units. A missing non-seat court means something else</span>
+<span class="sd">    entirely — the Sparkassen files omit ~50 courts simply because no savings bank existed there,</span>
+<span class="sd">    which is a real zero and must not be mistaken for a merge.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">out</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">set</span><span class="p">[</span><span class="nb">int</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">code</span><span class="p">,</span> <span class="n">cid</span><span class="p">,</span> <span class="n">seat</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">districts</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">],</span> <span class="n">districts</span><span class="p">[</span><span class="s2">&quot;court_id&quot;</span><span class="p">],</span>
+                               <span class="n">districts</span><span class="p">[</span><span class="s2">&quot;is_okres_seat&quot;</span><span class="p">]):</span>
+        <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">cid</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">bool</span><span class="p">(</span><span class="n">seat</span><span class="p">):</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">_okres_id</span><span class="p">(</span><span class="n">code</span><span class="p">),</span> <span class="nb">set</span><span class="p">())</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">cid</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">build_census_panel</span><span class="p">(</span><span class="n">census_dir</span><span class="p">,</span> <span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Load all Cisleithanian census files → one **okres-level** covariate panel.</span>
+
+<span class="sd">    Court-level (934) files are summed up to their okres (``court_id // 1000`` =</span>
+<span class="sd">    ``IDPoldistrict``). The result is joined to the okres identity from *districts*</span>
+<span class="sd">    (one row per Czech-lands political okres) on ``okres_id``.</span>
+
+<span class="sd">    City/rural twins are a **structural gap in the court-level sources**, and it is handled here</span>
+<span class="sd">    rather than left for the reader. A statutory city had no Gerichtsbezirk of its own: the city</span>
+<span class="sd">    and the rural seat court around it were one court, and the census keeps one row for it —</span>
+<span class="sd">    ``Iglau/Jihlava Stadt``, ``Olmuetz/Olomouc Stadt``. The backbone splits that court in two so</span>
+<span class="sd">    it can nest inside two okresy, so ``court_id // 1000`` dumps the **pair&#39;s** total onto</span>
+<span class="sd">    whichever member the id encodes and leaves the other empty. The result is not coarse, it is</span>
+<span class="sd">    *mislabelled*: ``Opava (město)`` would read 0.463 Czech-speaking, which is Gerichtsbezirk</span>
+<span class="sd">    Troppau — city plus ring — while ``Opava`` would read 0.069, which is only Odry and Vítkov.</span>
+
+<span class="sd">    Every twin okres missing its own **seat** court in a given file is recorded, with that file&#39;s</span>
+<span class="sd">    columns, in ``panel.attrs[&quot;twin_suppressed&quot;]``. Nine of the ten pairs are flagged in the</span>
+<span class="sd">    Religion/Umgangssprache source; Brno is not (it has genuine ``Brno Stadt`` and ``Brno Land``</span>
+<span class="sd">    court rows) and keeps its values throughout.</span>
+
+<span class="sd">    The panel this returns is **unblanked** — it still carries the merged value on whichever</span>
+<span class="sd">    member absorbed it, because that value is the pair&#39;s total and :func:`pool_twin_okresy` needs</span>
+<span class="sd">    it. Use :func:`build_census_panels` to get the pair of frames actually meant for use: the</span>
+<span class="sd">    member-level panel with the twins blanked, and the pooled 148-row panel.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">census_dir</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">census_dir</span><span class="p">)</span>
+    <span class="n">okres</span> <span class="o">=</span> <span class="p">(</span><span class="n">districts</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;okres_code&quot;</span><span class="p">)[[</span><span class="s2">&quot;land&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_code&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_de&quot;</span><span class="p">]]</span>
+             <span class="o">.</span><span class="n">copy</span><span class="p">())</span>
+    <span class="n">okres</span><span class="p">[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">okres</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_okres_id</span><span class="p">)</span>
+    <span class="n">panel</span> <span class="o">=</span> <span class="n">okres</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;okres_id&quot;</span><span class="p">)</span>
+
+    <span class="n">twins</span> <span class="o">=</span> <span class="n">rg</span><span class="o">.</span><span class="n">build_twin_pairs</span><span class="p">(</span><span class="n">districts</span><span class="p">)</span>
+    <span class="n">seats</span> <span class="o">=</span> <span class="n">_seat_courts</span><span class="p">(</span><span class="n">districts</span><span class="p">)</span>
+    <span class="n">suppressed</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]]</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="n">loaded</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">census_dir</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">&quot;*.xlsx&quot;</span><span class="p">)):</span>
+        <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">s</span> <span class="ow">in</span> <span class="n">f</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">_SKIP_SUBSTR</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">tidy</span><span class="p">,</span> <span class="n">level</span> <span class="o">=</span> <span class="n">load_census_file</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>                       <span class="c1"># noqa: BLE001 — report &amp; continue</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  [skip] </span><span class="si">{</span><span class="n">f</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">continue</span>
+        <span class="k">if</span> <span class="n">level</span> <span class="o">==</span> <span class="s2">&quot;court&quot;</span><span class="p">:</span>
+            <span class="n">have</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">tidy</span><span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">dropna</span><span class="p">()</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">))</span>
+            <span class="n">tidy</span><span class="p">[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">tidy</span><span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">]</span> <span class="o">//</span> <span class="mi">1000</span>     <span class="c1"># court_id → IDPoldistrict</span>
+            <span class="n">tidy</span> <span class="o">=</span> <span class="n">tidy</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="s2">&quot;unit_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;okres_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">min_count</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+            <span class="c1"># a twin okres missing its own SEAT court here → the pair was merged upstream, so</span>
+            <span class="c1"># neither member&#39;s value is attributable. Recorded, not blanked: the value that</span>
+            <span class="c1"># survived is the pair total, which pool_twin_okresy still needs.</span>
+            <span class="n">bad</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+            <span class="k">for</span> <span class="n">oid</span><span class="p">,</span> <span class="p">(</span><span class="n">rural</span><span class="p">,</span> <span class="n">city</span><span class="p">,</span> <span class="n">_keys</span><span class="p">)</span> <span class="ow">in</span> <span class="n">twins</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="k">if</span> <span class="n">seats</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">oid</span><span class="p">,</span> <span class="nb">set</span><span class="p">())</span> <span class="o">-</span> <span class="n">have</span><span class="p">:</span>
+                    <span class="n">bad</span> <span class="o">|=</span> <span class="p">{</span><span class="n">rural</span><span class="p">,</span> <span class="n">city</span><span class="p">}</span>
+            <span class="k">if</span> <span class="n">bad</span><span class="p">:</span>
+                <span class="n">suppressed</span><span class="p">[</span><span class="n">f</span><span class="o">.</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="n">bad</span><span class="p">),</span> <span class="nb">list</span><span class="p">(</span><span class="n">tidy</span><span class="o">.</span><span class="n">columns</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">tidy</span> <span class="o">=</span> <span class="n">tidy</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;unit_id&quot;</span><span class="p">:</span> <span class="s2">&quot;okres_id&quot;</span><span class="p">})</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;okres_id&quot;</span><span class="p">)</span>
+        <span class="n">dup</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">tidy</span><span class="o">.</span><span class="n">columns</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">panel</span><span class="o">.</span><span class="n">columns</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">dup</span><span class="p">:</span>
+            <span class="c1"># a later file re-producing an already-loaded column name would silently</span>
+            <span class="c1"># shadow it — drop and SAY so, so a genuine cross-file collision is visible</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  [dup ] </span><span class="si">{</span><span class="n">f</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">: dropping </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">dup</span><span class="p">)</span><span class="si">}</span><span class="s2"> column(s) already loaded: &quot;</span>
+                  <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="nb">str</span><span class="p">,</span><span class="w"> </span><span class="n">dup</span><span class="p">[:</span><span class="mi">6</span><span class="p">]))</span><span class="si">}{</span><span class="s1">&#39; …&#39;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="n">dup</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">6</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="n">tidy</span> <span class="o">=</span> <span class="n">tidy</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="n">dup</span><span class="p">)</span>
+        <span class="n">panel</span> <span class="o">=</span> <span class="n">panel</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">tidy</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;left&quot;</span><span class="p">)</span>
+        <span class="n">loaded</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">f</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">level</span><span class="p">,</span> <span class="n">tidy</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]))</span>
+
+    <span class="n">panel</span> <span class="o">=</span> <span class="n">panel</span><span class="o">.</span><span class="n">reset_index</span><span class="p">()</span>
+    <span class="n">loaded_meta</span> <span class="o">=</span> <span class="n">loaded</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing</span><span class="w"> </span><span class="kn">import</span> <span class="n">census_labels</span> <span class="k">as</span> <span class="n">_cl</span>          <span class="c1"># English labels + derived shares</span>
+    <span class="n">rename</span> <span class="o">=</span> <span class="n">_cl</span><span class="o">.</span><span class="n">english_rename_map</span><span class="p">(</span><span class="n">panel</span><span class="p">,</span> <span class="s2">&quot;cis&quot;</span><span class="p">)</span>           <span class="c1"># carry the flags through the rename</span>
+    <span class="n">panel</span> <span class="o">=</span> <span class="n">_cl</span><span class="o">.</span><span class="n">to_english_census</span><span class="p">(</span><span class="n">panel</span><span class="p">,</span> <span class="s2">&quot;cis&quot;</span><span class="p">)</span>
+    <span class="n">panel</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;loaded&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">loaded_meta</span>
+    <span class="n">panel</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;twin_suppressed&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="n">name</span><span class="p">:</span> <span class="p">(</span><span class="n">oids</span><span class="p">,</span> <span class="p">[</span><span class="n">rename</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">c</span><span class="p">)</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cols</span><span class="p">])</span>
+        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="p">(</span><span class="n">oids</span><span class="p">,</span> <span class="n">cols</span><span class="p">)</span> <span class="ow">in</span> <span class="n">suppressed</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="n">panel</span>
+
+
+<span class="c1"># ── City/rural twins: the pooled analytical unit ──────────────────────────────</span>
+<span class="c1"># Recomputed, never averaged. Every share in the panel is a ratio of two counts, so pooling has</span>
+<span class="c1"># to happen on the **counts** and the shares be derived again afterwards — averaging a pair&#39;s two</span>
+<span class="c1"># shares would weight a 5,174-person city equally with a 107,015-person ring.</span>
+<span class="n">_DERIVED_RATES</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;literacy_rate&quot;</span><span class="p">,</span> <span class="s2">&quot;pop_total&quot;</span><span class="p">,</span> <span class="s2">&quot;illegitimacy_rate&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_derived_columns</span><span class="p">(</span><span class="n">panel</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+    <span class="k">return</span> <span class="p">([</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">panel</span><span class="o">.</span><span class="n">columns</span> <span class="k">if</span> <span class="n">c</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;_share&quot;</span><span class="p">)]</span>
+            <span class="o">+</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">_DERIVED_RATES</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">panel</span><span class="o">.</span><span class="n">columns</span><span class="p">])</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">okres_census_crosswalk</span><span class="p">(</span><span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``okres_id → census_okres_id`` (+ ``twin_pooled``, ``twin_role``), one row per okres.</span>
+
+<span class="sd">    The identity map everywhere except the twenty city/rural twin members, which both point at</span>
+<span class="sd">    the **rural** member&#39;s id — the pooled unit. Written to ``data/final/geo/`` so an analysis</span>
+<span class="sd">    can join on it without re-deriving the pairs.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">twins</span> <span class="o">=</span> <span class="n">rg</span><span class="o">.</span><span class="n">build_twin_pairs</span><span class="p">(</span><span class="n">districts</span><span class="p">)</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">code</span> <span class="ow">in</span> <span class="n">districts</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">():</span>
+        <span class="n">oid</span> <span class="o">=</span> <span class="n">_okres_id</span><span class="p">(</span><span class="n">code</span><span class="p">)</span>
+        <span class="n">entry</span> <span class="o">=</span> <span class="n">twins</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">oid</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">entry</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;okres_id&quot;</span><span class="p">:</span> <span class="n">oid</span><span class="p">,</span> <span class="s2">&quot;census_okres_id&quot;</span><span class="p">:</span> <span class="n">oid</span><span class="p">,</span>
+                         <span class="s2">&quot;twin_pooled&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;twin_role&quot;</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">})</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">rural</span><span class="p">,</span> <span class="n">city</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">entry</span>
+            <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;okres_id&quot;</span><span class="p">:</span> <span class="n">oid</span><span class="p">,</span> <span class="s2">&quot;census_okres_id&quot;</span><span class="p">:</span> <span class="n">rural</span><span class="p">,</span> <span class="s2">&quot;twin_pooled&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+                         <span class="s2">&quot;twin_role&quot;</span><span class="p">:</span> <span class="s2">&quot;city&quot;</span> <span class="k">if</span> <span class="n">oid</span> <span class="o">==</span> <span class="n">city</span> <span class="k">else</span> <span class="s2">&quot;ring&quot;</span><span class="p">})</span>
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span><span class="o">.</span><span class="n">sort_values</span><span class="p">(</span><span class="s2">&quot;okres_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">pool_twin_okresy</span><span class="p">(</span><span class="n">panel</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Collapse each city/rural twin pair into one unit → the **148-row** analytical panel.</span>
+
+<span class="sd">    This is the baseline unit for a district-level covariate merge, not a robustness variant:</span>
+<span class="sd">    for nine of the ten pairs the court-level sources do not split city from ring at all</span>
+<span class="sd">    (:func:`build_census_panel`), so the pair is the finest unit on which language, religion and</span>
+<span class="sd">    the justice caseload are defined. The okres-level (406) sources *do* split all ten, and those</span>
+<span class="sd">    columns survive at member level in the un-pooled panel for anyone who wants them.</span>
+
+<span class="sd">    Counts are summed with ``min_count=1`` — so a pair whose total sits on one row and ``&lt;NA&gt;``</span>
+<span class="sd">    on the other recovers the total, and a pair with no data at all stays ``&lt;NA&gt;`` — and every</span>
+<span class="sd">    share is then **re-derived from the pooled counts** by ``census_labels.add_shares_cis``.</span>
+<span class="sd">    Identity (code, names, land) comes from the rural member, which is also the pooled id.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing</span><span class="w"> </span><span class="kn">import</span> <span class="n">census_labels</span> <span class="k">as</span> <span class="n">_cl</span>
+
+    <span class="n">xw</span> <span class="o">=</span> <span class="n">okres_census_crosswalk</span><span class="p">(</span><span class="n">districts</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;okres_id&quot;</span><span class="p">)[</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">]</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">panel</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">xw</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+
+    <span class="n">ident</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;land&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_code&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_de&quot;</span><span class="p">]</span>
+    <span class="n">skip</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">ident</span><span class="p">)</span> <span class="o">|</span> <span class="p">{</span><span class="s2">&quot;okres_id&quot;</span><span class="p">,</span> <span class="s2">&quot;census_okres_id&quot;</span><span class="p">}</span> <span class="o">|</span> <span class="nb">set</span><span class="p">(</span><span class="n">_derived_columns</span><span class="p">(</span><span class="n">out</span><span class="p">))</span>
+    <span class="n">counts</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">out</span><span class="o">.</span><span class="n">columns</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">skip</span><span class="p">]</span>
+
+    <span class="n">agg</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">)[</span><span class="n">counts</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">min_count</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">idr</span> <span class="o">=</span> <span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">]]</span>
+           <span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">)[</span><span class="n">ident</span><span class="p">])</span>
+    <span class="n">pooled</span> <span class="o">=</span> <span class="n">idr</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">agg</span><span class="p">)</span><span class="o">.</span><span class="n">reset_index</span><span class="p">()</span>
+
+    <span class="n">twins</span> <span class="o">=</span> <span class="n">rg</span><span class="o">.</span><span class="n">build_twin_pairs</span><span class="p">(</span><span class="n">districts</span><span class="p">)</span>
+    <span class="n">pooled</span><span class="p">[</span><span class="s2">&quot;twin_pooled&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pooled</span><span class="p">[</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">({</span><span class="n">e</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">twins</span><span class="o">.</span><span class="n">values</span><span class="p">()})</span>
+    <span class="k">return</span> <span class="n">_cl</span><span class="o">.</span><span class="n">add_shares_cis</span><span class="p">(</span><span class="n">pooled</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">blank_twin_members</span><span class="p">(</span><span class="n">panel</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Blank the court-derived columns on the twin members the source could not separate.</span>
+
+<span class="sd">    Reads ``panel.attrs[&quot;twin_suppressed&quot;]`` (set by :func:`build_census_panel`) and sets those</span>
+<span class="sd">    columns to ``&lt;NA&gt;`` on **both** members of every affected pair. The value being removed is</span>
+<span class="sd">    not merely coarse — it is attached to the wrong unit — so leaving it in place would be worse</span>
+<span class="sd">    than leaving a hole. Shares are re-derived afterwards so no stale ratio survives its counts.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing</span><span class="w"> </span><span class="kn">import</span> <span class="n">census_labels</span> <span class="k">as</span> <span class="n">_cl</span>
+
+    <span class="n">out</span> <span class="o">=</span> <span class="n">panel</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">oids</span><span class="p">,</span> <span class="n">cols</span> <span class="ow">in</span> <span class="n">panel</span><span class="o">.</span><span class="n">attrs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;twin_suppressed&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+        <span class="n">cols</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cols</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">out</span><span class="o">.</span><span class="n">columns</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">cols</span><span class="p">:</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">oids</span><span class="p">),</span> <span class="n">cols</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="s2">&quot;nan&quot;</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="n">_derived_columns</span><span class="p">(</span><span class="n">out</span><span class="p">),</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;ignore&quot;</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">_cl</span><span class="o">.</span><span class="n">add_shares_cis</span><span class="p">(</span><span class="n">out</span><span class="p">)</span>
+    <span class="n">out</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;twin_suppressed&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">panel</span><span class="o">.</span><span class="n">attrs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;twin_suppressed&quot;</span><span class="p">,</span> <span class="p">{})</span>
+    <span class="n">out</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;loaded&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">panel</span><span class="o">.</span><span class="n">attrs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;loaded&quot;</span><span class="p">,</span> <span class="p">[])</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">build_census_panels</span><span class="p">(</span><span class="n">census_dir</span><span class="p">,</span> <span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span>
+                        <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The two okres-level census frames the pipeline actually uses.</span>
+
+<span class="sd">    Returns ``(member, pooled)``:</span>
+
+<span class="sd">    * **member** — 158 rows, one per political okres, with the court-derived columns blanked on</span>
+<span class="sd">      the eighteen twin members the source merges. Okres-level (406) covariates — literacy,</span>
+<span class="sd">      illegitimacy, occupation, livestock, population — remain valid for all twenty.</span>
+<span class="sd">    * **pooled** — 148 rows, each city/rural pair collapsed onto the rural member&#39;s id, counts</span>
+<span class="sd">      summed and shares re-derived. **This is the baseline unit** for a covariate merge; join it</span>
+<span class="sd">      on ``{prefix}_census_okres_id`` (:func:`add_census_okres_id`).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">raw</span> <span class="o">=</span> <span class="n">build_census_panel</span><span class="p">(</span><span class="n">census_dir</span><span class="p">,</span> <span class="n">districts</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">blank_twin_members</span><span class="p">(</span><span class="n">raw</span><span class="p">),</span> <span class="n">pool_twin_okresy</span><span class="p">(</span><span class="n">raw</span><span class="p">,</span> <span class="n">districts</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">add_census_okres_id</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+                        <span class="n">prefix</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;birth&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Add ``{prefix}_census_okres_id`` — the unit to merge the pooled census panel on.&quot;&quot;&quot;</span>
+    <span class="n">xw</span> <span class="o">=</span> <span class="n">okres_census_crosswalk</span><span class="p">(</span><span class="n">districts</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;okres_id&quot;</span><span class="p">)[</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">]</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">out</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">prefix</span><span class="si">}</span><span class="s2">_census_okres_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">prefix</span><span class="si">}</span><span class="s2">_okres_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">xw</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">census_report</span><span class="p">(</span><span class="n">panel</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Print coverage: okresy, covariate count, and which files loaded.&quot;&quot;&quot;</span>
+    <span class="n">covs</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">panel</span><span class="o">.</span><span class="n">columns</span>
+            <span class="k">if</span> <span class="n">c</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;okres_id&quot;</span><span class="p">,</span> <span class="s2">&quot;land&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_code&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_de&quot;</span><span class="p">)]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Census okres panel  (okresy = </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">panel</span><span class="p">)</span><span class="si">}</span><span class="s2">, covariates = </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">covs</span><span class="p">)</span><span class="si">}</span><span class="s2">)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">level</span><span class="p">,</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">panel</span><span class="o">.</span><span class="n">attrs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;loaded&quot;</span><span class="p">,</span> <span class="p">[]):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  [</span><span class="si">{</span><span class="n">level</span><span class="si">:</span><span class="s2">&lt;5</span><span class="si">}</span><span class="s2">] </span><span class="si">{</span><span class="n">n</span><span class="si">:</span><span class="s2">&gt;3</span><span class="si">}</span><span class="s2"> cols  </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">miss</span> <span class="o">=</span> <span class="n">panel</span><span class="p">[</span><span class="n">covs</span><span class="p">]</span><span class="o">.</span><span class="n">isna</span><span class="p">()</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  okresy with no census match: </span><span class="si">{</span><span class="n">miss</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">sup</span> <span class="o">=</span> <span class="n">panel</span><span class="o">.</span><span class="n">attrs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;twin_suppressed&quot;</span><span class="p">,</span> <span class="p">{})</span>
+    <span class="k">if</span> <span class="n">sup</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  city/rural twins the source cannot separate (one court row per pair; the&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  member values are blanked, the pair total survives in the pooled panel):&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="p">(</span><span class="n">oids</span><span class="p">,</span> <span class="n">cols</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">sup</span><span class="o">.</span><span class="n">items</span><span class="p">()):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    [</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">oids</span><span class="p">)</span><span class="si">:</span><span class="s2">&gt;2</span><span class="si">}</span><span class="s2"> okresy · </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">cols</span><span class="p">)</span><span class="si">:</span><span class="s2">&gt;2</span><span class="si">}</span><span class="s2"> cols] </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>

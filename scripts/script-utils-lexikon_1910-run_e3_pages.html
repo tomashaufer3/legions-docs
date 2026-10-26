@@ -1,0 +1,1052 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>E3 on any page: the locator and DINOv3 on the readers' saved section crops (D-112).</p><p class="tldr-facts"><b>1910 register</b> · v0.1.0 · 280 lines · 8 public functions · 3 constants · used by <code>15_frozen_run.ipynb</code>, <code>utils/lexikon_1910/run_frozen.py</code> · <code>utils/lexikon_1910/run_e3_pages.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-lexikon_1910-run_e3_pages-printed_munis">printed_munis</a><a class="chip" href="#fn-utils-lexikon_1910-run_e3_pages-sections_from_index">sections_from_index</a><a class="chip" href="#fn-utils-lexikon_1910-run_e3_pages-full_locator">full_locator</a><a class="chip" href="#fn-utils-lexikon_1910-run_e3_pages-full_detector">full_detector</a><a class="chip" href="#fn-utils-lexikon_1910-run_e3_pages-Namer">Namer</a><a class="chip" href="#fn-utils-lexikon_1910-run_e3_pages-run">run</a><a class="chip" href="#fn-utils-lexikon_1910-run_e3_pages-rehearse">rehearse</a><a class="chip" href="#fn-utils-lexikon_1910-run_e3_pages-main">main</a><a class="chip const" href="#c-utils-lexikon_1910-run_e3_pages-HERE">HERE</a><a class="chip const" href="#c-utils-lexikon_1910-run_e3_pages-ROOT">ROOT</a><a class="chip const" href="#c-utils-lexikon_1910-run_e3_pages-VOLUME_ROLE">VOLUME_ROLE</a></div>
+<h2>How it works</h2><p><code>run_glyph_e3.py</code> checks the readers on the <strong>gold</strong> pages: its sections come
+from the gold sheets, each page is placed by a locator trained on the <em>other</em>
+calibration pages, and each glyph is named against a bank that leaves its own
+page out. None of that exists for a page without a gold sheet. This runs the same
+check there:</p>
+<ul>
+<li><strong>sections</strong> from the section crops the pilot saved (<code>section_images</code>),
+  one per page, court and kind; the municipalities each prints, in order, from
+  the readers' own output (any reader's row for the entry, with or without a mark);</li>
+<li><strong>placement</strong> by one locator trained on every calibration page;</li>
+<li>the <strong>unclaimed-mark detector</strong> fitted on every calibration section, at the
+  threshold the gold run set;</li>
+<li><strong>naming</strong> against a bank of every gold glyph (calibration and purposive — the
+  freeze, D-112), with one <em>not in the bank</em> threshold pooled over the gold.</li>
+</ul>
+<p>Its output has the columns of <code>e3_verdicts_&amp;lt;tag&amp;gt;.csv</code> (<code>gold</code> blank), so the
+route and the ledger read it unchanged.</p>
+<p>Rehearsed on the gold section images themselves (<code>--rehearse</code>): the same path,
+fed images that follow the saved crops' naming, against the leave-page-out run.</p>
+<pre><code>python utils/lexikon_1910/run_e3_pages.py --sections DIR --passes L1,L2 --out DIR
+python utils/lexikon_1910/run_e3_pages.py --rehearse --encoders pixels
+</code></pre>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-lexikon_1910-run_e3_pages-printed_munis">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">printed_munis</span><span class="p">(</span><span class="n">paths</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span></pre>
+<div class="fndoc"><p><code>(page, court, kind) -&gt; munis in printed order</code>, from every reader's rows.</p>
+<p>Offices from <code>institutions_&amp;lt;label&amp;gt;.csv</code>, parts from <code>parts_&amp;lt;label&amp;gt;.csv</code>;
+a row counts whether it carries a mark or not, since a municipality printed
+without one still opens an entry the locator must count.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 54–76 (23 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">54</span>
+<span class="normal">55</span>
+<span class="normal">56</span>
+<span class="normal">57</span>
+<span class="normal">58</span>
+<span class="normal">59</span>
+<span class="normal">60</span>
+<span class="normal">61</span>
+<span class="normal">62</span>
+<span class="normal">63</span>
+<span class="normal">64</span>
+<span class="normal">65</span>
+<span class="normal">66</span>
+<span class="normal">67</span>
+<span class="normal">68</span>
+<span class="normal">69</span>
+<span class="normal">70</span>
+<span class="normal">71</span>
+<span class="normal">72</span>
+<span class="normal">73</span>
+<span class="normal">74</span>
+<span class="normal">75</span>
+<span class="normal">76</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">printed_munis</span><span class="p">(</span><span class="n">paths</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``(page, court, kind) -&gt; munis in printed order``, from every reader&#39;s rows.</span>
+
+<span class="sd">    Offices from ``institutions_&lt;label&gt;.csv``, parts from ``parts_&lt;label&gt;.csv``;</span>
+<span class="sd">    a row counts whether it carries a mark or not, since a municipality printed</span>
+<span class="sd">    without one still opens an entry the locator must count.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_notes</span> <span class="k">as</span> <span class="n">lxnt</span>
+
+    <span class="n">out</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">set</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="n">paths</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+        <span class="k">for</span> <span class="n">stem</span><span class="p">,</span> <span class="n">kind</span> <span class="ow">in</span> <span class="p">((</span><span class="s2">&quot;institutions_&quot;</span><span class="p">,</span> <span class="s2">&quot;offices&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;parts_&quot;</span><span class="p">,</span> <span class="s2">&quot;parts&quot;</span><span class="p">)):</span>
+            <span class="n">p</span> <span class="o">=</span> <span class="n">path</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="n">path</span><span class="o">.</span><span class="n">name</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;institutions_&quot;</span><span class="p">,</span> <span class="n">stem</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">p</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+                <span class="k">continue</span>
+            <span class="k">with</span> <span class="n">p</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictReader</span><span class="p">(</span><span class="n">fh</span><span class="p">):</span>
+                    <span class="k">try</span><span class="p">:</span>
+                        <span class="n">muni</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;muni_seq&quot;</span><span class="p">]))</span>
+                    <span class="k">except</span> <span class="p">(</span><span class="ne">TypeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">,</span> <span class="ne">KeyError</span><span class="p">):</span>
+                        <span class="k">continue</span>
+                    <span class="n">out</span><span class="p">[(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">zfill</span><span class="p">(</span><span class="mi">4</span><span class="p">),</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">normalise</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;district&quot;</span><span class="p">]),</span> <span class="n">kind</span><span class="p">)]</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">muni</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">out</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-run_e3_pages-sections_from_index">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">sections_from_index</span><span class="p">(</span><span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">],</span> <span class="n">directory</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">printed</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span></pre>
+<div class="fndoc"><p>One <code>locate_glyphs.Section</code> per page, court and kind, images in order.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 79–90 (12 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">79</span>
+<span class="normal">80</span>
+<span class="normal">81</span>
+<span class="normal">82</span>
+<span class="normal">83</span>
+<span class="normal">84</span>
+<span class="normal">85</span>
+<span class="normal">86</span>
+<span class="normal">87</span>
+<span class="normal">88</span>
+<span class="normal">89</span>
+<span class="normal">90</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">sections_from_index</span><span class="p">(</span><span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">],</span> <span class="n">directory</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">printed</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;One :class:`locate_glyphs.Section` per page, court and kind, images in order.&quot;&quot;&quot;</span>
+    <span class="n">groups</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+        <span class="n">groups</span><span class="p">[(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;district&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;kind&quot;</span><span class="p">])]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="p">(</span><span class="n">page</span><span class="p">,</span> <span class="n">district</span><span class="p">,</span> <span class="n">kind</span><span class="p">),</span> <span class="n">rs</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">groups</span><span class="o">.</span><span class="n">items</span><span class="p">()):</span>
+        <span class="n">images</span> <span class="o">=</span> <span class="p">[</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;image&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">rs</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">r</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;order&quot;</span><span class="p">]))]</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">lg</span><span class="o">.</span><span class="n">Section</span><span class="p">(</span><span class="n">scan</span><span class="o">=</span><span class="n">page</span><span class="p">,</span> <span class="n">role</span><span class="o">=</span><span class="n">VOLUME_ROLE</span><span class="p">,</span> <span class="n">kind</span><span class="o">=</span><span class="n">kind</span><span class="p">,</span> <span class="n">images</span><span class="o">=</span><span class="n">images</span><span class="p">,</span>
+                              <span class="n">sheet_dir</span><span class="o">=</span><span class="n">Path</span><span class="p">(</span><span class="n">directory</span><span class="p">),</span> <span class="n">district</span><span class="o">=</span><span class="n">district</span><span class="p">,</span>
+                              <span class="n">printed</span><span class="o">=</span><span class="n">printed</span><span class="o">.</span><span class="n">get</span><span class="p">((</span><span class="n">page</span><span class="p">,</span> <span class="n">district</span><span class="p">,</span> <span class="n">kind</span><span class="p">),</span> <span class="p">[])))</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-run_e3_pages-full_locator">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">full_locator</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">rounds</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">lg</span><span class="o">.</span><span class="n">Locator</span></pre>
+<div class="fndoc"><p>Trained on every calibration page (<code>train_locator</code> uses calibration only).</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 97–100 (4 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">full_locator</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">rounds</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">lg</span><span class="o">.</span><span class="n">Locator</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Trained on every calibration page (``train_locator`` uses calibration only).&quot;&quot;&quot;</span>
+    <span class="n">pages</span> <span class="o">=</span> <span class="p">{</span><span class="n">s</span><span class="o">.</span><span class="n">scan</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">_c</span> <span class="ow">in</span> <span class="n">data</span> <span class="k">if</span> <span class="n">s</span><span class="o">.</span><span class="n">role</span> <span class="o">==</span> <span class="s2">&quot;calibration&quot;</span><span class="p">}</span>
+    <span class="k">return</span> <span class="n">lg</span><span class="o">.</span><span class="n">train_locator</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">pages</span><span class="p">,</span> <span class="n">rounds</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-run_e3_pages-full_detector">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">full_detector</span><span class="p">(</span><span class="n">located</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">locators</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">sections</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">cands</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">locator</span><span class="p">:</span> <span class="n">lg</span><span class="o">.</span><span class="n">Locator</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">lg</span><span class="o">.</span><span class="n">Detection</span></pre>
+<div class="fndoc"><p>The token-blind mark detector fitted on every calibration section, applied to
+the new sections at the gold run's threshold (best F1 on the calibration pages).</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 103–130 (28 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">full_detector</span><span class="p">(</span><span class="n">located</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">locators</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">sections</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">cands</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span>
+                  <span class="n">locator</span><span class="p">:</span> <span class="n">lg</span><span class="o">.</span><span class="n">Locator</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">lg</span><span class="o">.</span><span class="n">Detection</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The token-blind mark detector fitted on every calibration section, applied to</span>
+<span class="sd">    the new sections at the gold run&#39;s threshold (best F1 on the calibration pages).&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+    <span class="n">gold</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">detect_marks</span><span class="p">(</span><span class="n">located</span><span class="p">,</span> <span class="n">locators</span><span class="p">)</span>           <span class="c1"># the threshold, leave-page-out</span>
+    <span class="n">xs</span><span class="p">,</span> <span class="n">ys</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">section</span><span class="p">,</span> <span class="n">cs</span><span class="p">,</span> <span class="n">placed</span> <span class="ow">in</span> <span class="n">located</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+        <span class="k">if</span> <span class="n">section</span><span class="o">.</span><span class="n">role</span> <span class="o">!=</span> <span class="s2">&quot;calibration&quot;</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">cs</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">cols</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">section_text_columns</span><span class="p">(</span><span class="n">section</span><span class="p">)</span>
+        <span class="n">elig</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">lg</span><span class="o">.</span><span class="n">eligible</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">cols</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">image</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">))</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cs</span><span class="p">])</span>
+        <span class="n">pos</span> <span class="o">=</span> <span class="p">{</span><span class="n">i</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">placed</span> <span class="k">if</span> <span class="n">i</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">}</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">detector_features</span><span class="p">(</span><span class="n">cs</span><span class="p">,</span> <span class="n">locators</span><span class="p">[</span><span class="n">section</span><span class="o">.</span><span class="n">scan</span><span class="p">])</span>
+        <span class="n">xs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="n">elig</span><span class="p">])</span>
+        <span class="n">ys</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mi">1</span> <span class="k">if</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">pos</span> <span class="k">else</span> <span class="mi">0</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">cs</span><span class="p">))])[</span><span class="n">elig</span><span class="p">])</span>
+    <span class="n">model</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">fit_detector</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span><span class="n">xs</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span><span class="n">ys</span><span class="p">))</span>
+    <span class="n">scores</span><span class="p">,</span> <span class="n">elig</span><span class="p">,</span> <span class="n">columns</span> <span class="o">=</span> <span class="p">{},</span> <span class="p">{},</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">section</span> <span class="ow">in</span> <span class="n">sections</span><span class="p">:</span>
+        <span class="n">cs</span> <span class="o">=</span> <span class="n">cands</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">section</span><span class="o">.</span><span class="n">key</span><span class="p">)</span> <span class="ow">or</span> <span class="p">[]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">cs</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">cols</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">section_text_columns</span><span class="p">(</span><span class="n">section</span><span class="p">)</span>
+        <span class="n">columns</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">cols</span><span class="p">)</span>
+        <span class="n">scores</span><span class="p">[</span><span class="n">section</span><span class="o">.</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">lg</span><span class="o">.</span><span class="n">detector_features</span><span class="p">(</span><span class="n">cs</span><span class="p">,</span> <span class="n">locator</span><span class="p">))</span>
+        <span class="n">elig</span><span class="p">[</span><span class="n">section</span><span class="o">.</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">lg</span><span class="o">.</span><span class="n">eligible</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">cols</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">image</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">))</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cs</span><span class="p">])</span>
+    <span class="k">return</span> <span class="n">lg</span><span class="o">.</span><span class="n">Detection</span><span class="p">(</span><span class="n">scores</span><span class="p">,</span> <span class="n">elig</span><span class="p">,</span> <span class="p">{},</span> <span class="n">gold</span><span class="o">.</span><span class="n">threshold</span><span class="p">,</span> <span class="n">columns</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-run_e3_pages-Namer">
+<pre class="sig"><span class="k">class</span><span class="w"> </span><span class="nc">Namer</span></pre>
+<div class="fndoc"><p>DINOv3 (or pixels) naming against every gold glyph, base x brackets x letter.</p></div>
+<p class="calls warn">No call site found in the notebooks or <code>utils/</code> — possibly superseded or reserved for interactive use.</p>
+<details><summary>source · lines 133–181 (49 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">Namer</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;DINOv3 (or pixels) naming against every gold glyph, base x brackets x letter.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">glyphs</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">encoder</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">,</span> <span class="n">download</span><span class="p">:</span> <span class="nb">bool</span><span class="p">):</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">variant</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">feature</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">k</span> <span class="o">=</span> <span class="n">encoder</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">download</span> <span class="o">=</span> <span class="n">download</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">glyphs</span> <span class="o">=</span> <span class="n">glyphs</span>
+        <span class="n">feats</span> <span class="o">=</span> <span class="n">e3</span><span class="o">.</span><span class="n">embed</span><span class="p">(</span><span class="n">glyphs</span><span class="p">,</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">],</span> <span class="n">download</span><span class="p">,</span> <span class="n">cuts</span><span class="o">=</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">variant</span><span class="p">,))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">bank_x</span> <span class="o">=</span> <span class="n">feats</span><span class="p">[(</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">variant</span><span class="p">)][</span><span class="bp">self</span><span class="o">.</span><span class="n">feature</span><span class="p">]</span>
+        <span class="c1"># one threshold for pages the bank has never seen: the ABSTAIN_QUANTILE of</span>
+        <span class="c1"># the similarity of correctly named gold glyphs, each named leave-page-out</span>
+        <span class="n">raw</span> <span class="o">=</span> <span class="n">e3</span><span class="o">.</span><span class="n">name_bases</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bank_x</span><span class="p">,</span> <span class="n">glyphs</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bank_x</span><span class="p">,</span> <span class="n">glyphs</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">k</span><span class="p">)</span>
+        <span class="n">right</span> <span class="o">=</span> <span class="p">[</span><span class="n">s</span> <span class="k">for</span> <span class="p">(</span><span class="n">pred</span><span class="p">,</span> <span class="n">s</span><span class="p">),</span> <span class="n">g</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">raw</span><span class="p">,</span> <span class="n">glyphs</span><span class="p">)</span> <span class="k">if</span> <span class="n">pred</span> <span class="o">==</span> <span class="n">g</span><span class="o">.</span><span class="n">base</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">threshold</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">quantile</span><span class="p">(</span><span class="n">right</span><span class="p">,</span> <span class="n">e3</span><span class="o">.</span><span class="n">ABSTAIN_QUANTILE</span><span class="p">))</span> <span class="k">if</span> <span class="n">right</span> <span class="k">else</span> <span class="o">-</span><span class="mf">1.0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">lettered</span> <span class="o">=</span> <span class="p">[</span><span class="n">g</span> <span class="k">for</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">glyphs</span> <span class="k">if</span> <span class="n">g</span><span class="o">.</span><span class="n">letter_box</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">letter_x</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">lettered</span><span class="p">:</span>
+            <span class="n">lf</span> <span class="o">=</span> <span class="n">e3</span><span class="o">.</span><span class="n">embed</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">lettered</span><span class="p">,</span> <span class="p">[</span><span class="n">e3</span><span class="o">.</span><span class="n">LETTER_ENCODER</span><span class="p">],</span> <span class="n">download</span><span class="p">,</span> <span class="n">cuts</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;letter&quot;</span><span class="p">,))</span>
+            <span class="n">key</span> <span class="o">=</span> <span class="s2">&quot;pixels&quot;</span> <span class="k">if</span> <span class="n">e3</span><span class="o">.</span><span class="n">LETTER_ENCODER</span> <span class="o">==</span> <span class="s2">&quot;pixels&quot;</span> <span class="k">else</span> <span class="s2">&quot;cls&quot;</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">letter_x</span> <span class="o">=</span> <span class="n">lf</span><span class="p">[(</span><span class="n">e3</span><span class="o">.</span><span class="n">LETTER_ENCODER</span><span class="p">,</span> <span class="s2">&quot;letter&quot;</span><span class="p">)][</span><span class="n">key</span><span class="p">]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">readers</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">_config</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">]:</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">readers</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">[]</span>
+        <span class="n">unique</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">dict</span><span class="o">.</span><span class="n">fromkeys</span><span class="p">(</span><span class="n">g</span><span class="o">.</span><span class="n">key</span> <span class="k">for</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">readers</span><span class="p">))</span>
+        <span class="n">first</span> <span class="o">=</span> <span class="p">{</span><span class="n">key</span><span class="p">:</span> <span class="nb">next</span><span class="p">(</span><span class="n">g</span> <span class="k">for</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">readers</span> <span class="k">if</span> <span class="n">g</span><span class="o">.</span><span class="n">key</span> <span class="o">==</span> <span class="n">key</span><span class="p">)</span> <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">unique</span><span class="p">}</span>
+        <span class="n">got</span> <span class="o">=</span> <span class="n">e3</span><span class="o">.</span><span class="n">embed</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">first</span><span class="o">.</span><span class="n">values</span><span class="p">()),</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">],</span> <span class="bp">self</span><span class="o">.</span><span class="n">download</span><span class="p">,</span> <span class="n">cuts</span><span class="o">=</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">variant</span><span class="p">,))</span>
+        <span class="n">idx</span> <span class="o">=</span> <span class="p">{</span><span class="n">key</span><span class="p">:</span> <span class="n">n</span> <span class="k">for</span> <span class="n">n</span><span class="p">,</span> <span class="n">key</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">unique</span><span class="p">)}</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="n">got</span><span class="p">[(</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">variant</span><span class="p">)][</span><span class="bp">self</span><span class="o">.</span><span class="n">feature</span><span class="p">][[</span><span class="n">idx</span><span class="p">[</span><span class="n">g</span><span class="o">.</span><span class="n">key</span><span class="p">]</span> <span class="k">for</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">readers</span><span class="p">]]</span>
+        <span class="n">thresholds</span> <span class="o">=</span> <span class="p">{</span><span class="n">g</span><span class="o">.</span><span class="n">scan</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">threshold</span> <span class="k">for</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">readers</span><span class="p">}</span>
+        <span class="n">bases</span> <span class="o">=</span> <span class="n">e3</span><span class="o">.</span><span class="n">name_bases</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">readers</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bank_x</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">glyphs</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">k</span><span class="p">,</span> <span class="n">thresholds</span><span class="p">)</span>
+        <span class="n">letters</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;&quot;</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">readers</span><span class="p">)</span>
+        <span class="n">lettered</span> <span class="o">=</span> <span class="p">[</span><span class="n">g</span> <span class="k">for</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">readers</span> <span class="k">if</span> <span class="n">g</span><span class="o">.</span><span class="n">letter_box</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">lettered</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">letter_x</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">lx</span> <span class="o">=</span> <span class="n">e3</span><span class="o">.</span><span class="n">embed</span><span class="p">(</span><span class="n">lettered</span><span class="p">,</span> <span class="p">[</span><span class="n">e3</span><span class="o">.</span><span class="n">LETTER_ENCODER</span><span class="p">],</span> <span class="bp">self</span><span class="o">.</span><span class="n">download</span><span class="p">,</span> <span class="n">cuts</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;letter&quot;</span><span class="p">,))</span>
+            <span class="n">key</span> <span class="o">=</span> <span class="s2">&quot;pixels&quot;</span> <span class="k">if</span> <span class="n">e3</span><span class="o">.</span><span class="n">LETTER_ENCODER</span> <span class="o">==</span> <span class="s2">&quot;pixels&quot;</span> <span class="k">else</span> <span class="s2">&quot;cls&quot;</span>
+            <span class="n">q</span> <span class="o">=</span> <span class="n">lx</span><span class="p">[(</span><span class="n">e3</span><span class="o">.</span><span class="n">LETTER_ENCODER</span><span class="p">,</span> <span class="s2">&quot;letter&quot;</span><span class="p">)][</span><span class="n">key</span><span class="p">]</span>
+            <span class="n">full</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="nb">len</span><span class="p">(</span><span class="n">readers</span><span class="p">),</span> <span class="n">q</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]))</span>
+            <span class="n">at</span> <span class="o">=</span> <span class="p">{</span><span class="nb">id</span><span class="p">(</span><span class="n">g</span><span class="p">):</span> <span class="n">n</span> <span class="k">for</span> <span class="n">n</span><span class="p">,</span> <span class="n">g</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">lettered</span><span class="p">)}</span>
+            <span class="k">for</span> <span class="n">n</span><span class="p">,</span> <span class="n">g</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">readers</span><span class="p">):</span>
+                <span class="k">if</span> <span class="n">g</span><span class="o">.</span><span class="n">letter_box</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">full</span><span class="p">[</span><span class="n">n</span><span class="p">]</span> <span class="o">=</span> <span class="n">q</span><span class="p">[</span><span class="n">at</span><span class="p">[</span><span class="nb">id</span><span class="p">(</span><span class="n">g</span><span class="p">)]]</span>
+            <span class="n">letters</span> <span class="o">=</span> <span class="n">e3</span><span class="o">.</span><span class="n">name_letters</span><span class="p">(</span><span class="n">full</span><span class="p">,</span> <span class="n">readers</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">letter_x</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">lettered</span><span class="p">,</span>
+                                      <span class="p">[</span><span class="n">b</span> <span class="k">for</span> <span class="n">b</span><span class="p">,</span> <span class="n">_s</span> <span class="ow">in</span> <span class="n">bases</span><span class="p">])</span>
+        <span class="k">return</span> <span class="n">e3</span><span class="o">.</span><span class="n">compose_names</span><span class="p">(</span><span class="n">readers</span><span class="p">,</span> <span class="n">bases</span><span class="p">,</span> <span class="n">letters</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-run_e3_pages-run">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="n">section_dir</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">index</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">],</span> <span class="n">paths</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">out</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">encoders</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">rounds</span><span class="p">:</span> <span class="nb">int</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">download</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span></pre>
+<div class="fndoc"><p>Verdict rows for every pass in <code>paths</code> (label -&gt; institutions csv) on the saved sections.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 188–232 (45 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="n">section_dir</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">index</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">],</span> <span class="n">paths</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">out</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">encoders</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+        <span class="n">rounds</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">4</span><span class="p">,</span> <span class="n">download</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Verdict rows for every pass in ``paths`` (label -&gt; institutions csv) on the saved sections.&quot;&quot;&quot;</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">load_sections</span><span class="p">()</span>
+    <span class="n">located</span><span class="p">,</span> <span class="n">locators</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">locate_all</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">rounds</span><span class="p">)</span>
+    <span class="n">glyphs</span> <span class="o">=</span> <span class="n">e3</span><span class="o">.</span><span class="n">placed_glyphs</span><span class="p">(</span><span class="n">located</span><span class="p">)</span>
+    <span class="n">locator</span> <span class="o">=</span> <span class="n">full_locator</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">rounds</span><span class="p">)</span>
+    <span class="n">sections</span> <span class="o">=</span> <span class="n">sections_from_index</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">section_dir</span><span class="p">,</span> <span class="n">printed_munis</span><span class="p">(</span><span class="n">paths</span><span class="p">))</span>
+    <span class="n">cands</span> <span class="o">=</span> <span class="p">{</span><span class="n">s</span><span class="o">.</span><span class="n">key</span><span class="p">:</span> <span class="n">lg</span><span class="o">.</span><span class="n">section_candidates</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">sections</span><span class="p">}</span>
+    <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">sections</span><span class="p">:</span>
+        <span class="n">scores</span> <span class="o">=</span> <span class="n">locator</span><span class="o">.</span><span class="n">glyph</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="n">cands</span><span class="p">[</span><span class="n">s</span><span class="o">.</span><span class="n">key</span><span class="p">])</span> <span class="k">if</span> <span class="n">cands</span><span class="p">[</span><span class="n">s</span><span class="o">.</span><span class="n">key</span><span class="p">]</span> <span class="k">else</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">c</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">cands</span><span class="p">[</span><span class="n">s</span><span class="o">.</span><span class="n">key</span><span class="p">],</span> <span class="n">scores</span><span class="p">):</span>
+            <span class="n">c</span><span class="o">.</span><span class="n">glyphness</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+    <span class="n">detection</span> <span class="o">=</span> <span class="n">full_detector</span><span class="p">(</span><span class="n">located</span><span class="p">,</span> <span class="n">locators</span><span class="p">,</span> <span class="n">sections</span><span class="p">,</span> <span class="n">cands</span><span class="p">,</span> <span class="n">locator</span><span class="p">)</span>
+    <span class="n">config</span> <span class="o">=</span> <span class="n">e3</span><span class="o">.</span><span class="n">OF_RECORD</span> <span class="k">if</span> <span class="n">e3</span><span class="o">.</span><span class="n">OF_RECORD</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">in</span> <span class="n">encoders</span> <span class="k">else</span> <span class="n">e3</span><span class="o">.</span><span class="n">FLOOR</span>
+    <span class="n">namer</span> <span class="o">=</span> <span class="n">Namer</span><span class="p">(</span><span class="n">glyphs</span><span class="p">,</span> <span class="n">config</span><span class="p">,</span> <span class="n">download</span><span class="p">)</span>
+    <span class="n">verdicts</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">path</span> <span class="ow">in</span> <span class="n">paths</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">claims</span> <span class="o">=</span> <span class="n">e3</span><span class="o">.</span><span class="n">read_reader_claims</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+        <span class="n">on</span><span class="p">,</span> <span class="n">off</span><span class="p">,</span> <span class="n">extra</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[],</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">section</span> <span class="ow">in</span> <span class="n">sections</span><span class="p">:</span>
+            <span class="n">mine</span> <span class="o">=</span> <span class="n">claims</span><span class="o">.</span><span class="n">get</span><span class="p">((</span><span class="n">section</span><span class="o">.</span><span class="n">scan</span><span class="p">,</span> <span class="n">section</span><span class="o">.</span><span class="n">district</span><span class="p">,</span> <span class="n">section</span><span class="o">.</span><span class="n">kind</span><span class="p">),</span> <span class="p">[])</span>
+            <span class="n">listed</span> <span class="o">=</span> <span class="p">[</span><span class="n">lg</span><span class="o">.</span><span class="n">Claim</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">muni</span><span class="p">,</span> <span class="n">seq</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;reader&quot;</span><span class="p">)</span>
+                      <span class="k">for</span> <span class="n">muni</span><span class="p">,</span> <span class="n">seq</span><span class="p">,</span> <span class="n">_pos</span><span class="p">,</span> <span class="n">token</span> <span class="ow">in</span> <span class="n">mine</span> <span class="k">if</span> <span class="n">muni</span> <span class="ow">in</span> <span class="n">section</span><span class="o">.</span><span class="n">printed</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">n</span><span class="p">,</span> <span class="n">cl</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">listed</span><span class="p">):</span>
+                <span class="n">cl</span><span class="o">.</span><span class="n">order</span> <span class="o">=</span> <span class="n">n</span>
+            <span class="n">cs</span> <span class="o">=</span> <span class="n">cands</span><span class="p">[</span><span class="n">section</span><span class="o">.</span><span class="n">key</span><span class="p">]</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">listed</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">cs</span><span class="p">:</span>
+                <span class="n">off</span> <span class="o">+=</span> <span class="p">[(</span><span class="n">section</span><span class="p">,</span> <span class="n">cl</span><span class="p">)</span> <span class="k">for</span> <span class="n">cl</span> <span class="ow">in</span> <span class="n">listed</span><span class="p">]</span>
+                <span class="k">continue</span>
+            <span class="n">placed</span> <span class="o">=</span> <span class="n">locator</span><span class="o">.</span><span class="n">place</span><span class="p">(</span><span class="n">cs</span><span class="p">,</span> <span class="n">listed</span><span class="p">)</span>
+            <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">c</span> <span class="o">=</span> <span class="n">e3</span><span class="o">.</span><span class="n">section_glyphs</span><span class="p">(</span><span class="n">section</span><span class="p">,</span> <span class="n">cs</span><span class="p">,</span> <span class="n">listed</span><span class="p">,</span> <span class="n">placed</span><span class="p">,</span> <span class="n">detection</span><span class="p">,</span> <span class="n">label</span><span class="p">)</span>
+            <span class="n">on</span> <span class="o">+=</span> <span class="n">a</span>
+            <span class="n">off</span> <span class="o">+=</span> <span class="p">[(</span><span class="n">section</span><span class="p">,</span> <span class="n">cl</span><span class="p">)</span> <span class="k">for</span> <span class="n">cl</span> <span class="ow">in</span> <span class="n">b</span><span class="p">]</span>
+            <span class="n">extra</span> <span class="o">+=</span> <span class="n">c</span>
+        <span class="n">named</span> <span class="o">=</span> <span class="n">namer</span><span class="p">(</span><span class="n">on</span> <span class="o">+</span> <span class="n">extra</span><span class="p">)</span>
+        <span class="n">verdicts</span> <span class="o">+=</span> <span class="n">e3</span><span class="o">.</span><span class="n">verdict_rows</span><span class="p">(</span><span class="n">label</span><span class="p">,</span> <span class="p">{},</span> <span class="n">on</span><span class="p">,</span> <span class="n">named</span><span class="p">[:</span><span class="nb">len</span><span class="p">(</span><span class="n">on</span><span class="p">)],</span> <span class="n">off</span><span class="p">,</span> <span class="n">extra</span><span class="p">,</span>
+                                    <span class="n">named</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">on</span><span class="p">):],</span> <span class="p">{})</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">on</span><span class="p">)</span><span class="si">}</span><span class="s2"> placed, </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">off</span><span class="p">)</span><span class="si">}</span><span class="s2"> unplaced, </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">extra</span><span class="p">)</span><span class="si">}</span><span class="s2"> unclaimed marks&quot;</span><span class="p">)</span>
+    <span class="n">out</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">out</span> <span class="o">/</span> <span class="s2">&quot;e3_verdicts_pages.csv&quot;</span>
+    <span class="n">e3</span><span class="o">.</span><span class="n">write_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">verdicts</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">sections</span><span class="p">)</span><span class="si">}</span><span class="s2"> sections, encoder </span><span class="si">{</span><span class="s1">&#39;/&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="nb">str</span><span class="p">,</span><span class="w"> </span><span class="n">config</span><span class="p">))</span><span class="si">}</span><span class="s2">, &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;not-in-bank below </span><span class="si">{</span><span class="n">namer</span><span class="o">.</span><span class="n">threshold</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> -&gt; </span><span class="si">{</span><span class="n">path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">path</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-run_e3_pages-rehearse">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">rehearse</span><span class="p">(</span><span class="n">encoders</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">download</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span></pre>
+<div class="fndoc"><p>The page path on the gold section images, for the r5 reader of record and one Haiku read.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/lexikon_1910/run_frozen.py</code></p>
+<details><summary>source · lines 235–246 (12 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">rehearse</span><span class="p">(</span><span class="n">encoders</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">download</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The page path on the gold section images, for the r5 reader of record and one Haiku read.&quot;&quot;&quot;</span>
+    <span class="n">gold_dirs</span> <span class="o">=</span> <span class="p">[</span><span class="n">lg</span><span class="o">.</span><span class="n">GOLD</span> <span class="o">/</span> <span class="n">role</span> <span class="k">for</span> <span class="n">role</span> <span class="ow">in</span> <span class="n">lg</span><span class="o">.</span><span class="n">ROLES</span><span class="p">]</span>
+    <span class="n">labels</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;gemini38_r5atlasntg1&quot;</span><span class="p">,</span> <span class="s2">&quot;haiku55nh_r5atlasg1&quot;</span><span class="p">]</span>
+    <span class="n">paths</span> <span class="o">=</span> <span class="p">{</span><span class="n">l</span><span class="p">:</span> <span class="n">p</span> <span class="k">for</span> <span class="n">l</span><span class="p">,</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">e3</span><span class="o">.</span><span class="n">reader_passes</span><span class="p">(</span><span class="s2">&quot;r5&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">l</span> <span class="ow">in</span> <span class="n">labels</span><span class="p">}</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;output&quot;</span> <span class="o">/</span> <span class="s2">&quot;frozen&quot;</span> <span class="o">/</span> <span class="s2">&quot;rehearsal_pages&quot;</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">gold_dirs</span><span class="p">:</span>                  <span class="c1"># one directory at a time: Section has one sheet_dir</span>
+        <span class="n">index</span> <span class="o">=</span> <span class="n">si</span><span class="o">.</span><span class="n">index_from_names</span><span class="p">(</span><span class="n">d</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">index</span><span class="p">:</span>
+            <span class="n">results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">run</span><span class="p">(</span><span class="n">d</span><span class="p">,</span> <span class="n">index</span><span class="p">,</span> <span class="n">paths</span><span class="p">,</span> <span class="n">out</span> <span class="o">/</span> <span class="n">d</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">encoders</span><span class="p">,</span> <span class="n">download</span><span class="o">=</span><span class="n">download</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-run_e3_pages-main">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 249–276 (28 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="k">for</span> <span class="n">stream</span> <span class="ow">in</span> <span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">stdout</span><span class="p">,</span> <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">stream</span><span class="o">.</span><span class="n">reconfigure</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;replace&quot;</span><span class="p">)</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">AttributeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">):</span>
+            <span class="k">pass</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--sections&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;a directory of saved section crops&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--passes&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;comma list of reader labels&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--out&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--encoders&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;pixels,dinov3-vitb16&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--download&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--rehearse&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;run the page path on the gold section images&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+    <span class="n">encoders</span> <span class="o">=</span> <span class="p">[</span><span class="n">e</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">args</span><span class="o">.</span><span class="n">encoders</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">e</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">rehearse</span><span class="p">:</span>
+        <span class="n">rehearse</span><span class="p">(</span><span class="n">encoders</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">download</span><span class="p">)</span>
+        <span class="k">return</span> <span class="mi">0</span>
+    <span class="n">labels</span> <span class="o">=</span> <span class="p">[</span><span class="n">l</span> <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="n">args</span><span class="o">.</span><span class="n">passes</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">l</span><span class="p">]</span>
+    <span class="n">found</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="n">labels</span><span class="p">:</span>
+        <span class="n">hit</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">e3</span><span class="o">.</span><span class="n">BAKEOFF</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;*/institutions_</span><span class="si">{</span><span class="n">l</span><span class="si">}</span><span class="s2">.csv&quot;</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">hit</span><span class="p">:</span>
+            <span class="n">found</span><span class="p">[</span><span class="n">l</span><span class="p">]</span> <span class="o">=</span> <span class="n">hit</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">directory</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">sections</span><span class="p">)</span>
+    <span class="n">run</span><span class="p">(</span><span class="n">directory</span><span class="p">,</span> <span class="n">si</span><span class="o">.</span><span class="n">read_index</span><span class="p">(</span><span class="n">directory</span><span class="p">),</span> <span class="n">found</span><span class="p">,</span> <span class="n">Path</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">out</span><span class="p">),</span> <span class="n">encoders</span><span class="p">,</span> <span class="n">download</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">download</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-lexikon_1910-run_e3_pages-HERE"><pre class="sig">HERE<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-run_e3_pages-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">HERE</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-run_e3_pages-VOLUME_ROLE"><pre class="sig">VOLUME_ROLE<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;volume&#39;</span>
+</pre></div>
+</details></div>
+<h2>Used by</h2><p><code>15_frozen_run.ipynb</code> <code>utils/lexikon_1910/run_frozen.py</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/lexikon_1910/run_e3_pages.py · 280 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;E3 on any page: the locator and DINOv3 on the readers&#39; saved section crops (D-112).</span>
+
+<span class="sd">``run_glyph_e3.py`` checks the readers on the **gold** pages: its sections come</span>
+<span class="sd">from the gold sheets, each page is placed by a locator trained on the *other*</span>
+<span class="sd">calibration pages, and each glyph is named against a bank that leaves its own</span>
+<span class="sd">page out. None of that exists for a page without a gold sheet. This runs the same</span>
+<span class="sd">check there:</span>
+
+<span class="sd">* **sections** from the section crops the pilot saved (:mod:`section_images`),</span>
+<span class="sd">  one per page, court and kind; the municipalities each prints, in order, from</span>
+<span class="sd">  the readers&#39; own output (any reader&#39;s row for the entry, with or without a mark);</span>
+<span class="sd">* **placement** by one locator trained on every calibration page;</span>
+<span class="sd">* the **unclaimed-mark detector** fitted on every calibration section, at the</span>
+<span class="sd">  threshold the gold run set;</span>
+<span class="sd">* **naming** against a bank of every gold glyph (calibration and purposive — the</span>
+<span class="sd">  freeze, D-112), with one *not in the bank* threshold pooled over the gold.</span>
+
+<span class="sd">Its output has the columns of ``e3_verdicts_&lt;tag&gt;.csv`` (``gold`` blank), so the</span>
+<span class="sd">route and the ledger read it unchanged.</span>
+
+<span class="sd">Rehearsed on the gold section images themselves (``--rehearse``): the same path,</span>
+<span class="sd">fed images that follow the saved crops&#39; naming, against the leave-page-out run.</span>
+
+<span class="sd">    python utils/lexikon_1910/run_e3_pages.py --sections DIR --passes L1,L2 --out DIR</span>
+<span class="sd">    python utils/lexikon_1910/run_e3_pages.py --rehearse --encoders pixels</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;0.1.0&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">csv</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">defaultdict</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="n">HERE</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span>
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">HERE</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">))</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">HERE</span><span class="p">))</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">locate_glyphs</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">lg</span>                                       <span class="c1"># noqa: E402</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">run_glyph_e3</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">e3</span>                                        <span class="c1"># noqa: E402</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">section_images</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">si</span>                                      <span class="c1"># noqa: E402</span>
+
+<span class="n">VOLUME_ROLE</span> <span class="o">=</span> <span class="s2">&quot;volume&quot;</span>
+
+
+<span class="c1"># --------------------------------------------------------------------------- #</span>
+<span class="c1"># Sections from saved crops</span>
+<span class="c1"># --------------------------------------------------------------------------- #</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">printed_munis</span><span class="p">(</span><span class="n">paths</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``(page, court, kind) -&gt; munis in printed order``, from every reader&#39;s rows.</span>
+
+<span class="sd">    Offices from ``institutions_&lt;label&gt;.csv``, parts from ``parts_&lt;label&gt;.csv``;</span>
+<span class="sd">    a row counts whether it carries a mark or not, since a municipality printed</span>
+<span class="sd">    without one still opens an entry the locator must count.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_notes</span> <span class="k">as</span> <span class="n">lxnt</span>
+
+    <span class="n">out</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">set</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="n">paths</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+        <span class="k">for</span> <span class="n">stem</span><span class="p">,</span> <span class="n">kind</span> <span class="ow">in</span> <span class="p">((</span><span class="s2">&quot;institutions_&quot;</span><span class="p">,</span> <span class="s2">&quot;offices&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;parts_&quot;</span><span class="p">,</span> <span class="s2">&quot;parts&quot;</span><span class="p">)):</span>
+            <span class="n">p</span> <span class="o">=</span> <span class="n">path</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="n">path</span><span class="o">.</span><span class="n">name</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;institutions_&quot;</span><span class="p">,</span> <span class="n">stem</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">p</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+                <span class="k">continue</span>
+            <span class="k">with</span> <span class="n">p</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictReader</span><span class="p">(</span><span class="n">fh</span><span class="p">):</span>
+                    <span class="k">try</span><span class="p">:</span>
+                        <span class="n">muni</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;muni_seq&quot;</span><span class="p">]))</span>
+                    <span class="k">except</span> <span class="p">(</span><span class="ne">TypeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">,</span> <span class="ne">KeyError</span><span class="p">):</span>
+                        <span class="k">continue</span>
+                    <span class="n">out</span><span class="p">[(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">zfill</span><span class="p">(</span><span class="mi">4</span><span class="p">),</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">normalise</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;district&quot;</span><span class="p">]),</span> <span class="n">kind</span><span class="p">)]</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">muni</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">out</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">sections_from_index</span><span class="p">(</span><span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">],</span> <span class="n">directory</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">printed</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;One :class:`locate_glyphs.Section` per page, court and kind, images in order.&quot;&quot;&quot;</span>
+    <span class="n">groups</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+        <span class="n">groups</span><span class="p">[(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;district&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;kind&quot;</span><span class="p">])]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="p">(</span><span class="n">page</span><span class="p">,</span> <span class="n">district</span><span class="p">,</span> <span class="n">kind</span><span class="p">),</span> <span class="n">rs</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">groups</span><span class="o">.</span><span class="n">items</span><span class="p">()):</span>
+        <span class="n">images</span> <span class="o">=</span> <span class="p">[</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;image&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">rs</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">r</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;order&quot;</span><span class="p">]))]</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">lg</span><span class="o">.</span><span class="n">Section</span><span class="p">(</span><span class="n">scan</span><span class="o">=</span><span class="n">page</span><span class="p">,</span> <span class="n">role</span><span class="o">=</span><span class="n">VOLUME_ROLE</span><span class="p">,</span> <span class="n">kind</span><span class="o">=</span><span class="n">kind</span><span class="p">,</span> <span class="n">images</span><span class="o">=</span><span class="n">images</span><span class="p">,</span>
+                              <span class="n">sheet_dir</span><span class="o">=</span><span class="n">Path</span><span class="p">(</span><span class="n">directory</span><span class="p">),</span> <span class="n">district</span><span class="o">=</span><span class="n">district</span><span class="p">,</span>
+                              <span class="n">printed</span><span class="o">=</span><span class="n">printed</span><span class="o">.</span><span class="n">get</span><span class="p">((</span><span class="n">page</span><span class="p">,</span> <span class="n">district</span><span class="p">,</span> <span class="n">kind</span><span class="p">),</span> <span class="p">[])))</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="c1"># --------------------------------------------------------------------------- #</span>
+<span class="c1"># What the gold teaches: one locator, one detector, one bank</span>
+<span class="c1"># --------------------------------------------------------------------------- #</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">full_locator</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">rounds</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">lg</span><span class="o">.</span><span class="n">Locator</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Trained on every calibration page (``train_locator`` uses calibration only).&quot;&quot;&quot;</span>
+    <span class="n">pages</span> <span class="o">=</span> <span class="p">{</span><span class="n">s</span><span class="o">.</span><span class="n">scan</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">_c</span> <span class="ow">in</span> <span class="n">data</span> <span class="k">if</span> <span class="n">s</span><span class="o">.</span><span class="n">role</span> <span class="o">==</span> <span class="s2">&quot;calibration&quot;</span><span class="p">}</span>
+    <span class="k">return</span> <span class="n">lg</span><span class="o">.</span><span class="n">train_locator</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">pages</span><span class="p">,</span> <span class="n">rounds</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">full_detector</span><span class="p">(</span><span class="n">located</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">locators</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">sections</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">cands</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span>
+                  <span class="n">locator</span><span class="p">:</span> <span class="n">lg</span><span class="o">.</span><span class="n">Locator</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">lg</span><span class="o">.</span><span class="n">Detection</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The token-blind mark detector fitted on every calibration section, applied to</span>
+<span class="sd">    the new sections at the gold run&#39;s threshold (best F1 on the calibration pages).&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+    <span class="n">gold</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">detect_marks</span><span class="p">(</span><span class="n">located</span><span class="p">,</span> <span class="n">locators</span><span class="p">)</span>           <span class="c1"># the threshold, leave-page-out</span>
+    <span class="n">xs</span><span class="p">,</span> <span class="n">ys</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">section</span><span class="p">,</span> <span class="n">cs</span><span class="p">,</span> <span class="n">placed</span> <span class="ow">in</span> <span class="n">located</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+        <span class="k">if</span> <span class="n">section</span><span class="o">.</span><span class="n">role</span> <span class="o">!=</span> <span class="s2">&quot;calibration&quot;</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">cs</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">cols</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">section_text_columns</span><span class="p">(</span><span class="n">section</span><span class="p">)</span>
+        <span class="n">elig</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">lg</span><span class="o">.</span><span class="n">eligible</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">cols</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">image</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">))</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cs</span><span class="p">])</span>
+        <span class="n">pos</span> <span class="o">=</span> <span class="p">{</span><span class="n">i</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">placed</span> <span class="k">if</span> <span class="n">i</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">}</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">detector_features</span><span class="p">(</span><span class="n">cs</span><span class="p">,</span> <span class="n">locators</span><span class="p">[</span><span class="n">section</span><span class="o">.</span><span class="n">scan</span><span class="p">])</span>
+        <span class="n">xs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="n">elig</span><span class="p">])</span>
+        <span class="n">ys</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mi">1</span> <span class="k">if</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">pos</span> <span class="k">else</span> <span class="mi">0</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">cs</span><span class="p">))])[</span><span class="n">elig</span><span class="p">])</span>
+    <span class="n">model</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">fit_detector</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span><span class="n">xs</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span><span class="n">ys</span><span class="p">))</span>
+    <span class="n">scores</span><span class="p">,</span> <span class="n">elig</span><span class="p">,</span> <span class="n">columns</span> <span class="o">=</span> <span class="p">{},</span> <span class="p">{},</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">section</span> <span class="ow">in</span> <span class="n">sections</span><span class="p">:</span>
+        <span class="n">cs</span> <span class="o">=</span> <span class="n">cands</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">section</span><span class="o">.</span><span class="n">key</span><span class="p">)</span> <span class="ow">or</span> <span class="p">[]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">cs</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">cols</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">section_text_columns</span><span class="p">(</span><span class="n">section</span><span class="p">)</span>
+        <span class="n">columns</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">cols</span><span class="p">)</span>
+        <span class="n">scores</span><span class="p">[</span><span class="n">section</span><span class="o">.</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">lg</span><span class="o">.</span><span class="n">detector_features</span><span class="p">(</span><span class="n">cs</span><span class="p">,</span> <span class="n">locator</span><span class="p">))</span>
+        <span class="n">elig</span><span class="p">[</span><span class="n">section</span><span class="o">.</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">lg</span><span class="o">.</span><span class="n">eligible</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">cols</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">image</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">))</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cs</span><span class="p">])</span>
+    <span class="k">return</span> <span class="n">lg</span><span class="o">.</span><span class="n">Detection</span><span class="p">(</span><span class="n">scores</span><span class="p">,</span> <span class="n">elig</span><span class="p">,</span> <span class="p">{},</span> <span class="n">gold</span><span class="o">.</span><span class="n">threshold</span><span class="p">,</span> <span class="n">columns</span><span class="p">)</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">Namer</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;DINOv3 (or pixels) naming against every gold glyph, base x brackets x letter.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">glyphs</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">encoder</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">,</span> <span class="n">download</span><span class="p">:</span> <span class="nb">bool</span><span class="p">):</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">variant</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">feature</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">k</span> <span class="o">=</span> <span class="n">encoder</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">download</span> <span class="o">=</span> <span class="n">download</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">glyphs</span> <span class="o">=</span> <span class="n">glyphs</span>
+        <span class="n">feats</span> <span class="o">=</span> <span class="n">e3</span><span class="o">.</span><span class="n">embed</span><span class="p">(</span><span class="n">glyphs</span><span class="p">,</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">],</span> <span class="n">download</span><span class="p">,</span> <span class="n">cuts</span><span class="o">=</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">variant</span><span class="p">,))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">bank_x</span> <span class="o">=</span> <span class="n">feats</span><span class="p">[(</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">variant</span><span class="p">)][</span><span class="bp">self</span><span class="o">.</span><span class="n">feature</span><span class="p">]</span>
+        <span class="c1"># one threshold for pages the bank has never seen: the ABSTAIN_QUANTILE of</span>
+        <span class="c1"># the similarity of correctly named gold glyphs, each named leave-page-out</span>
+        <span class="n">raw</span> <span class="o">=</span> <span class="n">e3</span><span class="o">.</span><span class="n">name_bases</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bank_x</span><span class="p">,</span> <span class="n">glyphs</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bank_x</span><span class="p">,</span> <span class="n">glyphs</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">k</span><span class="p">)</span>
+        <span class="n">right</span> <span class="o">=</span> <span class="p">[</span><span class="n">s</span> <span class="k">for</span> <span class="p">(</span><span class="n">pred</span><span class="p">,</span> <span class="n">s</span><span class="p">),</span> <span class="n">g</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">raw</span><span class="p">,</span> <span class="n">glyphs</span><span class="p">)</span> <span class="k">if</span> <span class="n">pred</span> <span class="o">==</span> <span class="n">g</span><span class="o">.</span><span class="n">base</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">threshold</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">quantile</span><span class="p">(</span><span class="n">right</span><span class="p">,</span> <span class="n">e3</span><span class="o">.</span><span class="n">ABSTAIN_QUANTILE</span><span class="p">))</span> <span class="k">if</span> <span class="n">right</span> <span class="k">else</span> <span class="o">-</span><span class="mf">1.0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">lettered</span> <span class="o">=</span> <span class="p">[</span><span class="n">g</span> <span class="k">for</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">glyphs</span> <span class="k">if</span> <span class="n">g</span><span class="o">.</span><span class="n">letter_box</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">letter_x</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">lettered</span><span class="p">:</span>
+            <span class="n">lf</span> <span class="o">=</span> <span class="n">e3</span><span class="o">.</span><span class="n">embed</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">lettered</span><span class="p">,</span> <span class="p">[</span><span class="n">e3</span><span class="o">.</span><span class="n">LETTER_ENCODER</span><span class="p">],</span> <span class="n">download</span><span class="p">,</span> <span class="n">cuts</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;letter&quot;</span><span class="p">,))</span>
+            <span class="n">key</span> <span class="o">=</span> <span class="s2">&quot;pixels&quot;</span> <span class="k">if</span> <span class="n">e3</span><span class="o">.</span><span class="n">LETTER_ENCODER</span> <span class="o">==</span> <span class="s2">&quot;pixels&quot;</span> <span class="k">else</span> <span class="s2">&quot;cls&quot;</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">letter_x</span> <span class="o">=</span> <span class="n">lf</span><span class="p">[(</span><span class="n">e3</span><span class="o">.</span><span class="n">LETTER_ENCODER</span><span class="p">,</span> <span class="s2">&quot;letter&quot;</span><span class="p">)][</span><span class="n">key</span><span class="p">]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">readers</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">_config</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">]:</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">readers</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">[]</span>
+        <span class="n">unique</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">dict</span><span class="o">.</span><span class="n">fromkeys</span><span class="p">(</span><span class="n">g</span><span class="o">.</span><span class="n">key</span> <span class="k">for</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">readers</span><span class="p">))</span>
+        <span class="n">first</span> <span class="o">=</span> <span class="p">{</span><span class="n">key</span><span class="p">:</span> <span class="nb">next</span><span class="p">(</span><span class="n">g</span> <span class="k">for</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">readers</span> <span class="k">if</span> <span class="n">g</span><span class="o">.</span><span class="n">key</span> <span class="o">==</span> <span class="n">key</span><span class="p">)</span> <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">unique</span><span class="p">}</span>
+        <span class="n">got</span> <span class="o">=</span> <span class="n">e3</span><span class="o">.</span><span class="n">embed</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">first</span><span class="o">.</span><span class="n">values</span><span class="p">()),</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">],</span> <span class="bp">self</span><span class="o">.</span><span class="n">download</span><span class="p">,</span> <span class="n">cuts</span><span class="o">=</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">variant</span><span class="p">,))</span>
+        <span class="n">idx</span> <span class="o">=</span> <span class="p">{</span><span class="n">key</span><span class="p">:</span> <span class="n">n</span> <span class="k">for</span> <span class="n">n</span><span class="p">,</span> <span class="n">key</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">unique</span><span class="p">)}</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="n">got</span><span class="p">[(</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">variant</span><span class="p">)][</span><span class="bp">self</span><span class="o">.</span><span class="n">feature</span><span class="p">][[</span><span class="n">idx</span><span class="p">[</span><span class="n">g</span><span class="o">.</span><span class="n">key</span><span class="p">]</span> <span class="k">for</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">readers</span><span class="p">]]</span>
+        <span class="n">thresholds</span> <span class="o">=</span> <span class="p">{</span><span class="n">g</span><span class="o">.</span><span class="n">scan</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">threshold</span> <span class="k">for</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">readers</span><span class="p">}</span>
+        <span class="n">bases</span> <span class="o">=</span> <span class="n">e3</span><span class="o">.</span><span class="n">name_bases</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">readers</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">bank_x</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">glyphs</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">k</span><span class="p">,</span> <span class="n">thresholds</span><span class="p">)</span>
+        <span class="n">letters</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;&quot;</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">readers</span><span class="p">)</span>
+        <span class="n">lettered</span> <span class="o">=</span> <span class="p">[</span><span class="n">g</span> <span class="k">for</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">readers</span> <span class="k">if</span> <span class="n">g</span><span class="o">.</span><span class="n">letter_box</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">lettered</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">letter_x</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">lx</span> <span class="o">=</span> <span class="n">e3</span><span class="o">.</span><span class="n">embed</span><span class="p">(</span><span class="n">lettered</span><span class="p">,</span> <span class="p">[</span><span class="n">e3</span><span class="o">.</span><span class="n">LETTER_ENCODER</span><span class="p">],</span> <span class="bp">self</span><span class="o">.</span><span class="n">download</span><span class="p">,</span> <span class="n">cuts</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;letter&quot;</span><span class="p">,))</span>
+            <span class="n">key</span> <span class="o">=</span> <span class="s2">&quot;pixels&quot;</span> <span class="k">if</span> <span class="n">e3</span><span class="o">.</span><span class="n">LETTER_ENCODER</span> <span class="o">==</span> <span class="s2">&quot;pixels&quot;</span> <span class="k">else</span> <span class="s2">&quot;cls&quot;</span>
+            <span class="n">q</span> <span class="o">=</span> <span class="n">lx</span><span class="p">[(</span><span class="n">e3</span><span class="o">.</span><span class="n">LETTER_ENCODER</span><span class="p">,</span> <span class="s2">&quot;letter&quot;</span><span class="p">)][</span><span class="n">key</span><span class="p">]</span>
+            <span class="n">full</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="nb">len</span><span class="p">(</span><span class="n">readers</span><span class="p">),</span> <span class="n">q</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]))</span>
+            <span class="n">at</span> <span class="o">=</span> <span class="p">{</span><span class="nb">id</span><span class="p">(</span><span class="n">g</span><span class="p">):</span> <span class="n">n</span> <span class="k">for</span> <span class="n">n</span><span class="p">,</span> <span class="n">g</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">lettered</span><span class="p">)}</span>
+            <span class="k">for</span> <span class="n">n</span><span class="p">,</span> <span class="n">g</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">readers</span><span class="p">):</span>
+                <span class="k">if</span> <span class="n">g</span><span class="o">.</span><span class="n">letter_box</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">full</span><span class="p">[</span><span class="n">n</span><span class="p">]</span> <span class="o">=</span> <span class="n">q</span><span class="p">[</span><span class="n">at</span><span class="p">[</span><span class="nb">id</span><span class="p">(</span><span class="n">g</span><span class="p">)]]</span>
+            <span class="n">letters</span> <span class="o">=</span> <span class="n">e3</span><span class="o">.</span><span class="n">name_letters</span><span class="p">(</span><span class="n">full</span><span class="p">,</span> <span class="n">readers</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">letter_x</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">lettered</span><span class="p">,</span>
+                                      <span class="p">[</span><span class="n">b</span> <span class="k">for</span> <span class="n">b</span><span class="p">,</span> <span class="n">_s</span> <span class="ow">in</span> <span class="n">bases</span><span class="p">])</span>
+        <span class="k">return</span> <span class="n">e3</span><span class="o">.</span><span class="n">compose_names</span><span class="p">(</span><span class="n">readers</span><span class="p">,</span> <span class="n">bases</span><span class="p">,</span> <span class="n">letters</span><span class="p">)</span>
+
+
+<span class="c1"># --------------------------------------------------------------------------- #</span>
+<span class="c1"># The run</span>
+<span class="c1"># --------------------------------------------------------------------------- #</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="n">section_dir</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">index</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">],</span> <span class="n">paths</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">out</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">encoders</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+        <span class="n">rounds</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">4</span><span class="p">,</span> <span class="n">download</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Verdict rows for every pass in ``paths`` (label -&gt; institutions csv) on the saved sections.&quot;&quot;&quot;</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">load_sections</span><span class="p">()</span>
+    <span class="n">located</span><span class="p">,</span> <span class="n">locators</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">locate_all</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">rounds</span><span class="p">)</span>
+    <span class="n">glyphs</span> <span class="o">=</span> <span class="n">e3</span><span class="o">.</span><span class="n">placed_glyphs</span><span class="p">(</span><span class="n">located</span><span class="p">)</span>
+    <span class="n">locator</span> <span class="o">=</span> <span class="n">full_locator</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">rounds</span><span class="p">)</span>
+    <span class="n">sections</span> <span class="o">=</span> <span class="n">sections_from_index</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">section_dir</span><span class="p">,</span> <span class="n">printed_munis</span><span class="p">(</span><span class="n">paths</span><span class="p">))</span>
+    <span class="n">cands</span> <span class="o">=</span> <span class="p">{</span><span class="n">s</span><span class="o">.</span><span class="n">key</span><span class="p">:</span> <span class="n">lg</span><span class="o">.</span><span class="n">section_candidates</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">sections</span><span class="p">}</span>
+    <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">sections</span><span class="p">:</span>
+        <span class="n">scores</span> <span class="o">=</span> <span class="n">locator</span><span class="o">.</span><span class="n">glyph</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="n">cands</span><span class="p">[</span><span class="n">s</span><span class="o">.</span><span class="n">key</span><span class="p">])</span> <span class="k">if</span> <span class="n">cands</span><span class="p">[</span><span class="n">s</span><span class="o">.</span><span class="n">key</span><span class="p">]</span> <span class="k">else</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">c</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">cands</span><span class="p">[</span><span class="n">s</span><span class="o">.</span><span class="n">key</span><span class="p">],</span> <span class="n">scores</span><span class="p">):</span>
+            <span class="n">c</span><span class="o">.</span><span class="n">glyphness</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+    <span class="n">detection</span> <span class="o">=</span> <span class="n">full_detector</span><span class="p">(</span><span class="n">located</span><span class="p">,</span> <span class="n">locators</span><span class="p">,</span> <span class="n">sections</span><span class="p">,</span> <span class="n">cands</span><span class="p">,</span> <span class="n">locator</span><span class="p">)</span>
+    <span class="n">config</span> <span class="o">=</span> <span class="n">e3</span><span class="o">.</span><span class="n">OF_RECORD</span> <span class="k">if</span> <span class="n">e3</span><span class="o">.</span><span class="n">OF_RECORD</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">in</span> <span class="n">encoders</span> <span class="k">else</span> <span class="n">e3</span><span class="o">.</span><span class="n">FLOOR</span>
+    <span class="n">namer</span> <span class="o">=</span> <span class="n">Namer</span><span class="p">(</span><span class="n">glyphs</span><span class="p">,</span> <span class="n">config</span><span class="p">,</span> <span class="n">download</span><span class="p">)</span>
+    <span class="n">verdicts</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">path</span> <span class="ow">in</span> <span class="n">paths</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">claims</span> <span class="o">=</span> <span class="n">e3</span><span class="o">.</span><span class="n">read_reader_claims</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+        <span class="n">on</span><span class="p">,</span> <span class="n">off</span><span class="p">,</span> <span class="n">extra</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[],</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">section</span> <span class="ow">in</span> <span class="n">sections</span><span class="p">:</span>
+            <span class="n">mine</span> <span class="o">=</span> <span class="n">claims</span><span class="o">.</span><span class="n">get</span><span class="p">((</span><span class="n">section</span><span class="o">.</span><span class="n">scan</span><span class="p">,</span> <span class="n">section</span><span class="o">.</span><span class="n">district</span><span class="p">,</span> <span class="n">section</span><span class="o">.</span><span class="n">kind</span><span class="p">),</span> <span class="p">[])</span>
+            <span class="n">listed</span> <span class="o">=</span> <span class="p">[</span><span class="n">lg</span><span class="o">.</span><span class="n">Claim</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="n">muni</span><span class="p">,</span> <span class="n">seq</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;reader&quot;</span><span class="p">)</span>
+                      <span class="k">for</span> <span class="n">muni</span><span class="p">,</span> <span class="n">seq</span><span class="p">,</span> <span class="n">_pos</span><span class="p">,</span> <span class="n">token</span> <span class="ow">in</span> <span class="n">mine</span> <span class="k">if</span> <span class="n">muni</span> <span class="ow">in</span> <span class="n">section</span><span class="o">.</span><span class="n">printed</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">n</span><span class="p">,</span> <span class="n">cl</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">listed</span><span class="p">):</span>
+                <span class="n">cl</span><span class="o">.</span><span class="n">order</span> <span class="o">=</span> <span class="n">n</span>
+            <span class="n">cs</span> <span class="o">=</span> <span class="n">cands</span><span class="p">[</span><span class="n">section</span><span class="o">.</span><span class="n">key</span><span class="p">]</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">listed</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">cs</span><span class="p">:</span>
+                <span class="n">off</span> <span class="o">+=</span> <span class="p">[(</span><span class="n">section</span><span class="p">,</span> <span class="n">cl</span><span class="p">)</span> <span class="k">for</span> <span class="n">cl</span> <span class="ow">in</span> <span class="n">listed</span><span class="p">]</span>
+                <span class="k">continue</span>
+            <span class="n">placed</span> <span class="o">=</span> <span class="n">locator</span><span class="o">.</span><span class="n">place</span><span class="p">(</span><span class="n">cs</span><span class="p">,</span> <span class="n">listed</span><span class="p">)</span>
+            <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">c</span> <span class="o">=</span> <span class="n">e3</span><span class="o">.</span><span class="n">section_glyphs</span><span class="p">(</span><span class="n">section</span><span class="p">,</span> <span class="n">cs</span><span class="p">,</span> <span class="n">listed</span><span class="p">,</span> <span class="n">placed</span><span class="p">,</span> <span class="n">detection</span><span class="p">,</span> <span class="n">label</span><span class="p">)</span>
+            <span class="n">on</span> <span class="o">+=</span> <span class="n">a</span>
+            <span class="n">off</span> <span class="o">+=</span> <span class="p">[(</span><span class="n">section</span><span class="p">,</span> <span class="n">cl</span><span class="p">)</span> <span class="k">for</span> <span class="n">cl</span> <span class="ow">in</span> <span class="n">b</span><span class="p">]</span>
+            <span class="n">extra</span> <span class="o">+=</span> <span class="n">c</span>
+        <span class="n">named</span> <span class="o">=</span> <span class="n">namer</span><span class="p">(</span><span class="n">on</span> <span class="o">+</span> <span class="n">extra</span><span class="p">)</span>
+        <span class="n">verdicts</span> <span class="o">+=</span> <span class="n">e3</span><span class="o">.</span><span class="n">verdict_rows</span><span class="p">(</span><span class="n">label</span><span class="p">,</span> <span class="p">{},</span> <span class="n">on</span><span class="p">,</span> <span class="n">named</span><span class="p">[:</span><span class="nb">len</span><span class="p">(</span><span class="n">on</span><span class="p">)],</span> <span class="n">off</span><span class="p">,</span> <span class="n">extra</span><span class="p">,</span>
+                                    <span class="n">named</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">on</span><span class="p">):],</span> <span class="p">{})</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">on</span><span class="p">)</span><span class="si">}</span><span class="s2"> placed, </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">off</span><span class="p">)</span><span class="si">}</span><span class="s2"> unplaced, </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">extra</span><span class="p">)</span><span class="si">}</span><span class="s2"> unclaimed marks&quot;</span><span class="p">)</span>
+    <span class="n">out</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">out</span> <span class="o">/</span> <span class="s2">&quot;e3_verdicts_pages.csv&quot;</span>
+    <span class="n">e3</span><span class="o">.</span><span class="n">write_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">verdicts</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">sections</span><span class="p">)</span><span class="si">}</span><span class="s2"> sections, encoder </span><span class="si">{</span><span class="s1">&#39;/&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="nb">str</span><span class="p">,</span><span class="w"> </span><span class="n">config</span><span class="p">))</span><span class="si">}</span><span class="s2">, &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;not-in-bank below </span><span class="si">{</span><span class="n">namer</span><span class="o">.</span><span class="n">threshold</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> -&gt; </span><span class="si">{</span><span class="n">path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">path</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">rehearse</span><span class="p">(</span><span class="n">encoders</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">download</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The page path on the gold section images, for the r5 reader of record and one Haiku read.&quot;&quot;&quot;</span>
+    <span class="n">gold_dirs</span> <span class="o">=</span> <span class="p">[</span><span class="n">lg</span><span class="o">.</span><span class="n">GOLD</span> <span class="o">/</span> <span class="n">role</span> <span class="k">for</span> <span class="n">role</span> <span class="ow">in</span> <span class="n">lg</span><span class="o">.</span><span class="n">ROLES</span><span class="p">]</span>
+    <span class="n">labels</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;gemini38_r5atlasntg1&quot;</span><span class="p">,</span> <span class="s2">&quot;haiku55nh_r5atlasg1&quot;</span><span class="p">]</span>
+    <span class="n">paths</span> <span class="o">=</span> <span class="p">{</span><span class="n">l</span><span class="p">:</span> <span class="n">p</span> <span class="k">for</span> <span class="n">l</span><span class="p">,</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">e3</span><span class="o">.</span><span class="n">reader_passes</span><span class="p">(</span><span class="s2">&quot;r5&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">l</span> <span class="ow">in</span> <span class="n">labels</span><span class="p">}</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;output&quot;</span> <span class="o">/</span> <span class="s2">&quot;frozen&quot;</span> <span class="o">/</span> <span class="s2">&quot;rehearsal_pages&quot;</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">gold_dirs</span><span class="p">:</span>                  <span class="c1"># one directory at a time: Section has one sheet_dir</span>
+        <span class="n">index</span> <span class="o">=</span> <span class="n">si</span><span class="o">.</span><span class="n">index_from_names</span><span class="p">(</span><span class="n">d</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">index</span><span class="p">:</span>
+            <span class="n">results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">run</span><span class="p">(</span><span class="n">d</span><span class="p">,</span> <span class="n">index</span><span class="p">,</span> <span class="n">paths</span><span class="p">,</span> <span class="n">out</span> <span class="o">/</span> <span class="n">d</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">encoders</span><span class="p">,</span> <span class="n">download</span><span class="o">=</span><span class="n">download</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="k">for</span> <span class="n">stream</span> <span class="ow">in</span> <span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">stdout</span><span class="p">,</span> <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">stream</span><span class="o">.</span><span class="n">reconfigure</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;replace&quot;</span><span class="p">)</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">AttributeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">):</span>
+            <span class="k">pass</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--sections&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;a directory of saved section crops&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--passes&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;comma list of reader labels&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--out&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--encoders&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;pixels,dinov3-vitb16&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--download&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--rehearse&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;run the page path on the gold section images&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+    <span class="n">encoders</span> <span class="o">=</span> <span class="p">[</span><span class="n">e</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">args</span><span class="o">.</span><span class="n">encoders</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">e</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">rehearse</span><span class="p">:</span>
+        <span class="n">rehearse</span><span class="p">(</span><span class="n">encoders</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">download</span><span class="p">)</span>
+        <span class="k">return</span> <span class="mi">0</span>
+    <span class="n">labels</span> <span class="o">=</span> <span class="p">[</span><span class="n">l</span> <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="n">args</span><span class="o">.</span><span class="n">passes</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">l</span><span class="p">]</span>
+    <span class="n">found</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="n">labels</span><span class="p">:</span>
+        <span class="n">hit</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">e3</span><span class="o">.</span><span class="n">BAKEOFF</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;*/institutions_</span><span class="si">{</span><span class="n">l</span><span class="si">}</span><span class="s2">.csv&quot;</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">hit</span><span class="p">:</span>
+            <span class="n">found</span><span class="p">[</span><span class="n">l</span><span class="p">]</span> <span class="o">=</span> <span class="n">hit</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">directory</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">sections</span><span class="p">)</span>
+    <span class="n">run</span><span class="p">(</span><span class="n">directory</span><span class="p">,</span> <span class="n">si</span><span class="o">.</span><span class="n">read_index</span><span class="p">(</span><span class="n">directory</span><span class="p">),</span> <span class="n">found</span><span class="p">,</span> <span class="n">Path</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">out</span><span class="p">),</span> <span class="n">encoders</span><span class="p">,</span> <span class="n">download</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">download</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>

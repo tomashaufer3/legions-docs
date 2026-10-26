@@ -1,0 +1,565 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>The Cisleithanian analogue is <code>utils.parsing.districts</code> (Czech lands). This module builds
+the <strong>Hungarian</strong> 1910 administrative backbone — <em>vármegye</em> (county) → <em>járás</em> (district) /
+chartered town — for the <strong>Felvidék</strong> (Upper Hungary), the region that became Czechoslovakia in
+1918 (Slovakia + Subcarpathian Rus). It is the spine for standardising the Slovak-born soldiers the
+Cisleithanian census frame cannot reach.</p><p class="tldr-facts"><b>Geography &amp; census</b> · v1.0.0 · 177 lines · 3 public functions · used by <code>02_data_cleaning.ipynb</code>, <code>utils/reference_tools/places/build_sk_curation.py</code>, <code>utils/validation/build_validation_workbook.py</code> · <code>utils/parsing/districts_hu.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-parsing-districts_hu-build_jaras_backbone">build_jaras_backbone</a><a class="chip" href="#fn-utils-parsing-districts_hu-write_sk_curation_template">write_sk_curation_template</a><a class="chip" href="#fn-utils-parsing-districts_hu-jaras_report">jaras_report</a></div>
+<h2>How it works</h2><h4>Source &amp; spine</h4>
+<p><strong><a class="cite" data-ref="gista" href="#references" onclick="return bibGo(event)">GISta Hungarorum</a></strong> (gistory.hu; MTA BTK, after the 1910 census) shapefiles under
+<code>data/raw/census_hu/shp/</code> — all <strong>UTF-8</strong> (<code>.cpg</code>), so <code>districts.read_dbf</code> is called
+with <code>encodings=("utf-8", …)</code> (its default tries cp1250 first — wrong here). The spine is
+<strong><code>MO_JarasVaros</code></strong> (577 units = 439 <em>járás</em> + 112 <em>rtv.</em> chartered towns + 25 <em>tjv.</em> boroughs),
+because that is what the járás-level census (<code>…_ETN.xlsx</code>, <code>kod</code>) keys on <strong>1:1</strong> — the chartered
+towns (Körmöcbánya=Kremnica, Selmecbánya=Banská Štiavnica, Szakolca=Skalica, Rimaszombat=Rimavská
+Sobota …) are standalone census units, not folded into a járás. County names come from
+<code>MO_Megye</code> (<code>Nagytaj == "Felvidék"</code> isolates the 21 Upper-Hungary counties); járás seat towns
+from <code>MO_Telepules</code> via <code>IDJarassze</code>.</p>
+<h4>Magyar → Slovak names</h4>
+<p>GIS names are <strong>Magyar</strong> (Nyitra, Trencsén, Pozsony) while the soldier records use <strong>Slovak</strong>
+(Nitra, Trenčín, Bratislava). The Slovak/Rusyn name of each county and unit is a curated data file
+(<code>reference/places/district_sk_curation.csv</code>, cols <code>level,key,sk,cs_modern</code>) — the same
+auditable pattern as the Czech <code>district_cs_curation.csv</code>. <code>key</code> is <code>IDMegye</code> for counties
+and <code>IDJaras</code> (the unit id) for járás / towns.</p>
+<h4>Usage</h4>
+<pre><code>from utils.parsing import districts_hu as dzh
+backbone = dzh.build_jaras_backbone(SHP_DIR, curation_csv=SK_CURATION)   # 192 Felvidék units
+dzh.jaras_report(backbone)
+</code></pre>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-parsing-districts_hu-build_jaras_backbone">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">build_jaras_backbone</span><span class="p">(</span><span class="n">shp_dir</span><span class="p">,</span> <span class="n">curation_csv</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">region</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;Felvidék&#39;</span><span class="p">,</span> <span class="n">extra_megye</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span><span class="o">=</span><span class="n">_EXTRA_MEGYE</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Assemble the járás/town backbone for <em>region</em> (default the Upper-Hungary <code>Felvidék</code>).</p>
+<p>One row per census unit (járás or chartered town). Columns: <code>unit_id</code> (=census <code>kod</code>) ·
+<code>unit_type</code> (járás / rtv. / tjv.) · <code>megye_id</code> · <code>megye_hu</code> · <code>megye_sk</code> (curated) ·
+<code>name_hu</code> (Magyar seat town for a járás, else the town's own name) · <code>jaras_hu</code> (Magyar
+adjectival járás name; NA for towns) · <code>name_sk</code> (curated Slovak) · <code>name_sk_modern</code> ·
+<code>is_czechoslovak</code> · <code>nagytaj</code>. <code>region=None</code> keeps all of Hungary; <em>extra_megye</em> adds
+named counties from other macro-regions (Danube-straddling, north bank to Czechoslovakia).</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code> <code>utils/reference_tools/places/build_sk_curation.py</code> <code>utils/validation/build_validation_workbook.py</code></p>
+<details><summary>source · lines 97–141 (45 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">build_jaras_backbone</span><span class="p">(</span><span class="n">shp_dir</span><span class="p">,</span> <span class="n">curation_csv</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">region</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Felvidék&quot;</span><span class="p">,</span>
+                         <span class="n">extra_megye</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">_EXTRA_MEGYE</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Assemble the járás/town backbone for *region* (default the Upper-Hungary ``Felvidék``).</span>
+
+<span class="sd">    One row per census unit (járás or chartered town). Columns: ``unit_id`` (=census ``kod``) ·</span>
+<span class="sd">    ``unit_type`` (járás / rtv. / tjv.) · ``megye_id`` · ``megye_hu`` · ``megye_sk`` (curated) ·</span>
+<span class="sd">    ``name_hu`` (Magyar seat town for a járás, else the town&#39;s own name) · ``jaras_hu`` (Magyar</span>
+<span class="sd">    adjectival járás name; NA for towns) · ``name_sk`` (curated Slovak) · ``name_sk_modern`` ·</span>
+<span class="sd">    ``is_czechoslovak`` · ``nagytaj``. ``region=None`` keeps all of Hungary; *extra_megye* adds</span>
+<span class="sd">    named counties from other macro-regions (Danube-straddling, north bank to Czechoslovakia).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">shp_dir</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">shp_dir</span><span class="p">)</span>
+    <span class="n">megye</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">read_dbf</span><span class="p">(</span><span class="n">shp_dir</span> <span class="o">/</span> <span class="s2">&quot;MO_Megye.dbf&quot;</span><span class="p">,</span> <span class="n">encodings</span><span class="o">=</span><span class="n">_UTF</span><span class="p">))</span>
+    <span class="n">jv</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">read_dbf</span><span class="p">(</span><span class="n">shp_dir</span> <span class="o">/</span> <span class="s2">&quot;MO_JarasVaros.dbf&quot;</span><span class="p">,</span> <span class="n">encodings</span><span class="o">=</span><span class="n">_UTF</span><span class="p">))</span>
+    <span class="n">seat</span> <span class="o">=</span> <span class="n">_seat_names</span><span class="p">(</span><span class="n">shp_dir</span><span class="p">)</span>
+    <span class="n">unit_sk</span><span class="p">,</span> <span class="n">unit_alt</span><span class="p">,</span> <span class="n">megye_sk</span><span class="p">,</span> <span class="n">modern</span> <span class="o">=</span> <span class="n">_load_sk_curation</span><span class="p">(</span><span class="n">curation_csv</span><span class="p">)</span>
+
+    <span class="n">megye_hu</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">megye</span><span class="p">[</span><span class="s2">&quot;IDMegye&quot;</span><span class="p">],</span> <span class="n">megye</span><span class="p">[</span><span class="s2">&quot;Megye_1910&quot;</span><span class="p">]))</span>
+    <span class="n">nagytaj</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">megye</span><span class="p">[</span><span class="s2">&quot;IDMegye&quot;</span><span class="p">],</span> <span class="n">megye</span><span class="p">[</span><span class="s2">&quot;Nagytaj&quot;</span><span class="p">]))</span>
+
+    <span class="n">df</span> <span class="o">=</span> <span class="n">jv</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;nagytaj&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;IDMegye&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">nagytaj</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;megye_hu_tmp&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;IDMegye&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">megye_hu</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">region</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">keep</span> <span class="o">=</span> <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;nagytaj&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">region</span><span class="p">)</span> <span class="o">|</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;megye_hu_tmp&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">extra_megye</span> <span class="ow">or</span> <span class="nb">set</span><span class="p">())</span>
+        <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">keep</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="s2">&quot;megye_hu_tmp&quot;</span><span class="p">)</span>
+
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;IDJaras&quot;</span><span class="p">]</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;unit_type&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;Status&quot;</span><span class="p">]</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;megye_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;IDMegye&quot;</span><span class="p">]</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;megye_hu&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;IDMegye&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">megye_hu</span><span class="p">)</span>
+    <span class="c1"># a járás&#39;s Magyar place name is its seat town (via IDJarassze); a town unit is itself</span>
+    <span class="n">is_jaras</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;Status&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;járás&quot;</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;jaras_hu&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;JarasNev&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">is_jaras</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;name_hu&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;IDJarassze&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">seat</span><span class="p">)</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">is_jaras</span><span class="p">,</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;JarasNev&quot;</span><span class="p">])</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;megye_sk&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;megye_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">megye_sk</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;name_sk&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">unit_sk</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;name_sk_alt&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">unit_alt</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;name_sk_modern&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">modern</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;is_czechoslovak&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="o">~</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;megye_hu&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">_STAYED_HUNGARY</span><span class="p">)</span>
+
+    <span class="n">cols</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">,</span> <span class="s2">&quot;unit_type&quot;</span><span class="p">,</span> <span class="s2">&quot;megye_id&quot;</span><span class="p">,</span> <span class="s2">&quot;megye_hu&quot;</span><span class="p">,</span> <span class="s2">&quot;megye_sk&quot;</span><span class="p">,</span> <span class="s2">&quot;name_hu&quot;</span><span class="p">,</span> <span class="s2">&quot;jaras_hu&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;name_sk&quot;</span><span class="p">,</span> <span class="s2">&quot;name_sk_alt&quot;</span><span class="p">,</span> <span class="s2">&quot;name_sk_modern&quot;</span><span class="p">,</span> <span class="s2">&quot;is_czechoslovak&quot;</span><span class="p">,</span> <span class="s2">&quot;nagytaj&quot;</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">df</span><span class="p">[</span><span class="n">cols</span><span class="p">]</span><span class="o">.</span><span class="n">sort_values</span><span class="p">([</span><span class="s2">&quot;megye_hu&quot;</span><span class="p">,</span> <span class="s2">&quot;unit_type&quot;</span><span class="p">,</span> <span class="s2">&quot;unit_id&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-districts_hu-write_sk_curation_template">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">write_sk_curation_template</span><span class="p">(</span><span class="n">shp_dir</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="n">region</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;Felvidék&#39;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Write the blank Magyar→Slovak curation skeleton: one <code>megye</code> row per county + one
+<code>jaras</code> row per unit, with the Magyar name as an edit seed and an empty <code>sk</code> to fill.</p></div>
+<p class="calls warn">No call site found in the notebooks or <code>utils/</code> — possibly superseded or reserved for interactive use.</p>
+<details><summary>source · lines 144–159 (16 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">write_sk_curation_template</span><span class="p">(</span><span class="n">shp_dir</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="n">region</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Felvidék&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Write the blank Magyar→Slovak curation skeleton: one ``megye`` row per county + one</span>
+<span class="sd">    ``jaras`` row per unit, with the Magyar name as an edit seed and an empty ``sk`` to fill.&quot;&quot;&quot;</span>
+    <span class="n">bb</span> <span class="o">=</span> <span class="n">build_jaras_backbone</span><span class="p">(</span><span class="n">shp_dir</span><span class="p">,</span> <span class="n">curation_csv</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">region</span><span class="o">=</span><span class="n">region</span><span class="p">)</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">mid</span><span class="p">,</span> <span class="n">sub</span> <span class="ow">in</span> <span class="n">bb</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;megye_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;megye_id&quot;</span><span class="p">):</span>
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;level&quot;</span><span class="p">:</span> <span class="s2">&quot;megye&quot;</span><span class="p">,</span> <span class="s2">&quot;key&quot;</span><span class="p">:</span> <span class="n">mid</span><span class="p">,</span> <span class="s2">&quot;hu&quot;</span><span class="p">:</span> <span class="n">sub</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;megye_hu&quot;</span><span class="p">],</span>
+                     <span class="s2">&quot;unit_type&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;sk&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;cs_modern&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">})</span>
+    <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">bb</span><span class="o">.</span><span class="n">iterrows</span><span class="p">():</span>
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;level&quot;</span><span class="p">:</span> <span class="s2">&quot;jaras&quot;</span><span class="p">,</span> <span class="s2">&quot;key&quot;</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">],</span> <span class="s2">&quot;hu&quot;</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;name_hu&quot;</span><span class="p">],</span>
+                     <span class="s2">&quot;unit_type&quot;</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;unit_type&quot;</span><span class="p">],</span> <span class="s2">&quot;sk&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;cs_modern&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">})</span>
+    <span class="n">tmpl</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;level&quot;</span><span class="p">,</span> <span class="s2">&quot;key&quot;</span><span class="p">,</span> <span class="s2">&quot;hu&quot;</span><span class="p">,</span> <span class="s2">&quot;unit_type&quot;</span><span class="p">,</span> <span class="s2">&quot;sk&quot;</span><span class="p">,</span> <span class="s2">&quot;cs_modern&quot;</span><span class="p">])</span>
+    <span class="n">p</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="n">p</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">tmpl</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">tmpl</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-districts_hu-jaras_report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">jaras_report</span><span class="p">(</span><span class="n">backbone</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span></pre>
+<div class="fndoc"><p>Print coverage of the járás backbone (counties, units, Slovak-name curation load).</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code> <code>utils/parsing/records_geo_hu.py</code></p>
+<details><summary>source · lines 162–177 (16 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">jaras_report</span><span class="p">(</span><span class="n">backbone</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Print coverage of the járás backbone (counties, units, Slovak-name curation load).&quot;&quot;&quot;</span>
+    <span class="n">n_u</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">backbone</span><span class="p">)</span>
+    <span class="n">n_m</span> <span class="o">=</span> <span class="n">backbone</span><span class="p">[</span><span class="s2">&quot;megye_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">nunique</span><span class="p">()</span>
+    <span class="n">cs</span> <span class="o">=</span> <span class="n">backbone</span><span class="p">[</span><span class="n">backbone</span><span class="p">[</span><span class="s2">&quot;is_czechoslovak&quot;</span><span class="p">]]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Járás/town backbone  (units = </span><span class="si">{</span><span class="n">n_u</span><span class="si">}</span><span class="s2">, counties = </span><span class="si">{</span><span class="n">n_m</span><span class="si">}</span><span class="s2">; &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;Czechoslovak: </span><span class="si">{</span><span class="n">cs</span><span class="p">[</span><span class="s1">&#39;megye_id&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">nunique</span><span class="p">()</span><span class="si">}</span><span class="s2"> counties / </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">cs</span><span class="p">)</span><span class="si">}</span><span class="s2"> units)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  by unit type: </span><span class="si">{</span><span class="nb">dict</span><span class="p">(</span><span class="n">backbone</span><span class="p">[</span><span class="s1">&#39;unit_type&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">())</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">named</span> <span class="o">=</span> <span class="n">backbone</span><span class="p">[</span><span class="s2">&quot;name_sk&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+    <span class="n">m_named</span> <span class="o">=</span> <span class="n">backbone</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;megye_id&quot;</span><span class="p">)[</span><span class="s2">&quot;megye_sk&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Slovak name curated: </span><span class="si">{</span><span class="n">named</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">n_u</span><span class="si">}</span><span class="s2"> units, </span><span class="si">{</span><span class="n">m_named</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">n_m</span><span class="si">}</span><span class="s2"> counties&quot;</span><span class="p">)</span>
+    <span class="n">miss</span> <span class="o">=</span> <span class="n">backbone</span><span class="p">[</span><span class="n">backbone</span><span class="p">[</span><span class="s2">&quot;is_czechoslovak&quot;</span><span class="p">]</span> <span class="o">&amp;</span> <span class="n">backbone</span><span class="p">[</span><span class="s2">&quot;name_sk&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isna</span><span class="p">()]</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">miss</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  [!] </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">miss</span><span class="p">)</span><span class="si">}</span><span class="s2"> Czechoslovak units still without a Slovak name:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">miss</span><span class="o">.</span><span class="n">head</span><span class="p">(</span><span class="mi">25</span><span class="p">)</span><span class="o">.</span><span class="n">iterrows</span><span class="p">():</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;      </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;megye_hu&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">&lt;18</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;unit_type&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">&lt;6</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;name_hu&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Used by</h2><p><code>02_data_cleaning.ipynb</code> <code>utils/reference_tools/places/build_sk_curation.py</code> <code>utils/validation/build_validation_workbook.py</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/parsing/districts_hu.py · 177 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">districts_hu.py — 1910 Transleithanian (Upper-Hungary) district backbone, Magyar + Slovak</span>
+<span class="sd">=========================================================================================</span>
+<span class="sd">The Cisleithanian analogue is :mod:`utils.parsing.districts` (Czech lands). This module builds</span>
+<span class="sd">the **Hungarian** 1910 administrative backbone — *vármegye* (county) → *járás* (district) /</span>
+<span class="sd">chartered town — for the **Felvidék** (Upper Hungary), the region that became Czechoslovakia in</span>
+<span class="sd">1918 (Slovakia + Subcarpathian Rus). It is the spine for standardising the Slovak-born soldiers the</span>
+<span class="sd">Cisleithanian census frame cannot reach.</span>
+
+<span class="sd">Source &amp; spine</span>
+<span class="sd">--------------</span>
+<span class="sd">**GISta Hungarorum** (gistory.hu; MTA BTK, after the 1910 census) shapefiles under</span>
+<span class="sd">``data/raw/census_hu/shp/`` — all **UTF-8** (``.cpg``), so :func:`districts.read_dbf` is called</span>
+<span class="sd">with ``encodings=(&quot;utf-8&quot;, …)`` (its default tries cp1250 first — wrong here). The spine is</span>
+<span class="sd">**``MO_JarasVaros``** (577 units = 439 *járás* + 112 *rtv.* chartered towns + 25 *tjv.* boroughs),</span>
+<span class="sd">because that is what the járás-level census (``…_ETN.xlsx``, ``kod``) keys on **1:1** — the chartered</span>
+<span class="sd">towns (Körmöcbánya=Kremnica, Selmecbánya=Banská Štiavnica, Szakolca=Skalica, Rimaszombat=Rimavská</span>
+<span class="sd">Sobota …) are standalone census units, not folded into a járás. County names come from</span>
+<span class="sd">``MO_Megye`` (``Nagytaj == &quot;Felvidék&quot;`` isolates the 21 Upper-Hungary counties); járás seat towns</span>
+<span class="sd">from ``MO_Telepules`` via ``IDJarassze``.</span>
+
+<span class="sd">Magyar → Slovak names</span>
+<span class="sd">---------------------</span>
+<span class="sd">GIS names are **Magyar** (Nyitra, Trencsén, Pozsony) while the soldier records use **Slovak**</span>
+<span class="sd">(Nitra, Trenčín, Bratislava). The Slovak/Rusyn name of each county and unit is a curated data file</span>
+<span class="sd">(``reference/places/district_sk_curation.csv``, cols ``level,key,sk,cs_modern``) — the same</span>
+<span class="sd">auditable pattern as the Czech ``district_cs_curation.csv``. ``key`` is ``IDMegye`` for counties</span>
+<span class="sd">and ``IDJaras`` (the unit id) for járás / towns.</span>
+
+<span class="sd">Usage</span>
+<span class="sd">-----</span>
+<span class="sd">    from utils.parsing import districts_hu as dzh</span>
+<span class="sd">    backbone = dzh.build_jaras_backbone(SHP_DIR, curation_csv=SK_CURATION)   # 192 Felvidék units</span>
+<span class="sd">    dzh.jaras_report(backbone)</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing.districts</span><span class="w"> </span><span class="kn">import</span> <span class="n">read_dbf</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.0.0&quot;</span>
+
+<span class="n">_UTF</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="s2">&quot;cp1250&quot;</span><span class="p">,</span> <span class="s2">&quot;latin-1&quot;</span><span class="p">)</span>            <span class="c1"># these GIS dbfs are UTF-8 (unlike the MPIDR one)</span>
+
+<span class="c1"># Felvidék counties that stayed Hungary in 1918 (the rest became Czechoslovakia — Slovakia +</span>
+<span class="c1"># Subcarpathian Rus). Several border counties (Gömör, Hont, Nógrád, Abaúj-Torna, Zemplén, Ugocsa,</span>
+<span class="c1"># Máramaros) were split; flagged Czechoslovak here at county level — records only name Slovak/Rusyn</span>
+<span class="c1"># places, so the over-inclusion is harmless for matching.</span>
+<span class="n">_STAYED_HUNGARY</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;Borsod&quot;</span><span class="p">,</span> <span class="s2">&quot;Heves&quot;</span><span class="p">}</span>
+
+<span class="c1"># Danube-straddling counties the census files under other macro-regions but whose north bank went</span>
+<span class="c1"># to Czechoslovakia (Komárno, Štúrovo…) — added to the Felvidék backbone so Slovak records there</span>
+<span class="c1"># resolve. Mostly stayed Hungary, so is_czechoslovak is left True only as a coarse eligibility hint.</span>
+<span class="n">_EXTRA_MEGYE</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;Komárom&quot;</span><span class="p">,</span> <span class="s2">&quot;Esztergom&quot;</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_seat_names</span><span class="p">(</span><span class="n">shp_dir</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``IDTel1910 → Magyar settlement name`` (for the járás-seat lookup).&quot;&quot;&quot;</span>
+    <span class="n">tel</span> <span class="o">=</span> <span class="n">read_dbf</span><span class="p">(</span><span class="n">shp_dir</span> <span class="o">/</span> <span class="s2">&quot;MO_Telepules.dbf&quot;</span><span class="p">,</span> <span class="n">encodings</span><span class="o">=</span><span class="n">_UTF</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;IDTel1910&quot;</span><span class="p">]:</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;telepulesn&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">tel</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_load_sk_curation</span><span class="p">(</span><span class="n">curation_csv</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Curated Slovak names → ``(unit_sk, unit_alt, megye_sk, modern)`` dicts keyed by id.</span>
+
+<span class="sd">    ``unit_sk`` ``{IDJaras: sk}`` primary (seat) name · ``unit_alt`` ``{IDJaras: sk_alt}`` an extra</span>
+<span class="sd">    Slovak name for the same unit (a non-seat settlement records use) · ``megye_sk`` ``{IDMegye: sk}``</span>
+<span class="sd">    · ``modern`` ``{IDJaras: cs_modern}`` today&#39;s Slovak name where renamed.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">unit_sk</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">unit_alt</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">megye_sk</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">modern</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">if</span> <span class="n">curation_csv</span> <span class="ow">and</span> <span class="n">Path</span><span class="p">(</span><span class="n">curation_csv</span><span class="p">)</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="n">cur</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">curation_csv</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+        <span class="n">has_modern</span> <span class="o">=</span> <span class="s2">&quot;cs_modern&quot;</span> <span class="ow">in</span> <span class="n">cur</span><span class="o">.</span><span class="n">columns</span>
+        <span class="n">has_alt</span> <span class="o">=</span> <span class="s2">&quot;sk_alt&quot;</span> <span class="ow">in</span> <span class="n">cur</span><span class="o">.</span><span class="n">columns</span>
+        <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">cur</span><span class="o">.</span><span class="n">iterrows</span><span class="p">():</span>
+            <span class="n">key</span><span class="p">,</span> <span class="n">sk</span> <span class="o">=</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;key&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;sk&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;level&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;megye&quot;</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">sk</span><span class="p">:</span>
+                    <span class="n">megye_sk</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">sk</span>
+                <span class="k">continue</span>
+            <span class="k">if</span> <span class="n">sk</span><span class="p">:</span>
+                <span class="n">unit_sk</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">sk</span>
+            <span class="k">if</span> <span class="n">has_alt</span> <span class="ow">and</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;sk_alt&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+                <span class="n">unit_alt</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;sk_alt&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">has_modern</span> <span class="ow">and</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;cs_modern&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+                <span class="n">modern</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;cs_modern&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">unit_sk</span><span class="p">,</span> <span class="n">unit_alt</span><span class="p">,</span> <span class="n">megye_sk</span><span class="p">,</span> <span class="n">modern</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">build_jaras_backbone</span><span class="p">(</span><span class="n">shp_dir</span><span class="p">,</span> <span class="n">curation_csv</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">region</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Felvidék&quot;</span><span class="p">,</span>
+                         <span class="n">extra_megye</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">_EXTRA_MEGYE</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Assemble the járás/town backbone for *region* (default the Upper-Hungary ``Felvidék``).</span>
+
+<span class="sd">    One row per census unit (járás or chartered town). Columns: ``unit_id`` (=census ``kod``) ·</span>
+<span class="sd">    ``unit_type`` (járás / rtv. / tjv.) · ``megye_id`` · ``megye_hu`` · ``megye_sk`` (curated) ·</span>
+<span class="sd">    ``name_hu`` (Magyar seat town for a járás, else the town&#39;s own name) · ``jaras_hu`` (Magyar</span>
+<span class="sd">    adjectival járás name; NA for towns) · ``name_sk`` (curated Slovak) · ``name_sk_modern`` ·</span>
+<span class="sd">    ``is_czechoslovak`` · ``nagytaj``. ``region=None`` keeps all of Hungary; *extra_megye* adds</span>
+<span class="sd">    named counties from other macro-regions (Danube-straddling, north bank to Czechoslovakia).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">shp_dir</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">shp_dir</span><span class="p">)</span>
+    <span class="n">megye</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">read_dbf</span><span class="p">(</span><span class="n">shp_dir</span> <span class="o">/</span> <span class="s2">&quot;MO_Megye.dbf&quot;</span><span class="p">,</span> <span class="n">encodings</span><span class="o">=</span><span class="n">_UTF</span><span class="p">))</span>
+    <span class="n">jv</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">read_dbf</span><span class="p">(</span><span class="n">shp_dir</span> <span class="o">/</span> <span class="s2">&quot;MO_JarasVaros.dbf&quot;</span><span class="p">,</span> <span class="n">encodings</span><span class="o">=</span><span class="n">_UTF</span><span class="p">))</span>
+    <span class="n">seat</span> <span class="o">=</span> <span class="n">_seat_names</span><span class="p">(</span><span class="n">shp_dir</span><span class="p">)</span>
+    <span class="n">unit_sk</span><span class="p">,</span> <span class="n">unit_alt</span><span class="p">,</span> <span class="n">megye_sk</span><span class="p">,</span> <span class="n">modern</span> <span class="o">=</span> <span class="n">_load_sk_curation</span><span class="p">(</span><span class="n">curation_csv</span><span class="p">)</span>
+
+    <span class="n">megye_hu</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">megye</span><span class="p">[</span><span class="s2">&quot;IDMegye&quot;</span><span class="p">],</span> <span class="n">megye</span><span class="p">[</span><span class="s2">&quot;Megye_1910&quot;</span><span class="p">]))</span>
+    <span class="n">nagytaj</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">megye</span><span class="p">[</span><span class="s2">&quot;IDMegye&quot;</span><span class="p">],</span> <span class="n">megye</span><span class="p">[</span><span class="s2">&quot;Nagytaj&quot;</span><span class="p">]))</span>
+
+    <span class="n">df</span> <span class="o">=</span> <span class="n">jv</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;nagytaj&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;IDMegye&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">nagytaj</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;megye_hu_tmp&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;IDMegye&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">megye_hu</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">region</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">keep</span> <span class="o">=</span> <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;nagytaj&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">region</span><span class="p">)</span> <span class="o">|</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;megye_hu_tmp&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">extra_megye</span> <span class="ow">or</span> <span class="nb">set</span><span class="p">())</span>
+        <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">keep</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="s2">&quot;megye_hu_tmp&quot;</span><span class="p">)</span>
+
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;IDJaras&quot;</span><span class="p">]</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;unit_type&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;Status&quot;</span><span class="p">]</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;megye_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;IDMegye&quot;</span><span class="p">]</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;megye_hu&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;IDMegye&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">megye_hu</span><span class="p">)</span>
+    <span class="c1"># a járás&#39;s Magyar place name is its seat town (via IDJarassze); a town unit is itself</span>
+    <span class="n">is_jaras</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;Status&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;járás&quot;</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;jaras_hu&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;JarasNev&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">is_jaras</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;name_hu&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;IDJarassze&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">seat</span><span class="p">)</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">is_jaras</span><span class="p">,</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;JarasNev&quot;</span><span class="p">])</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;megye_sk&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;megye_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">megye_sk</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;name_sk&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">unit_sk</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;name_sk_alt&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">unit_alt</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;name_sk_modern&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">modern</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;is_czechoslovak&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="o">~</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;megye_hu&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">_STAYED_HUNGARY</span><span class="p">)</span>
+
+    <span class="n">cols</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">,</span> <span class="s2">&quot;unit_type&quot;</span><span class="p">,</span> <span class="s2">&quot;megye_id&quot;</span><span class="p">,</span> <span class="s2">&quot;megye_hu&quot;</span><span class="p">,</span> <span class="s2">&quot;megye_sk&quot;</span><span class="p">,</span> <span class="s2">&quot;name_hu&quot;</span><span class="p">,</span> <span class="s2">&quot;jaras_hu&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;name_sk&quot;</span><span class="p">,</span> <span class="s2">&quot;name_sk_alt&quot;</span><span class="p">,</span> <span class="s2">&quot;name_sk_modern&quot;</span><span class="p">,</span> <span class="s2">&quot;is_czechoslovak&quot;</span><span class="p">,</span> <span class="s2">&quot;nagytaj&quot;</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">df</span><span class="p">[</span><span class="n">cols</span><span class="p">]</span><span class="o">.</span><span class="n">sort_values</span><span class="p">([</span><span class="s2">&quot;megye_hu&quot;</span><span class="p">,</span> <span class="s2">&quot;unit_type&quot;</span><span class="p">,</span> <span class="s2">&quot;unit_id&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">write_sk_curation_template</span><span class="p">(</span><span class="n">shp_dir</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="n">region</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Felvidék&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Write the blank Magyar→Slovak curation skeleton: one ``megye`` row per county + one</span>
+<span class="sd">    ``jaras`` row per unit, with the Magyar name as an edit seed and an empty ``sk`` to fill.&quot;&quot;&quot;</span>
+    <span class="n">bb</span> <span class="o">=</span> <span class="n">build_jaras_backbone</span><span class="p">(</span><span class="n">shp_dir</span><span class="p">,</span> <span class="n">curation_csv</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">region</span><span class="o">=</span><span class="n">region</span><span class="p">)</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">mid</span><span class="p">,</span> <span class="n">sub</span> <span class="ow">in</span> <span class="n">bb</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;megye_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;megye_id&quot;</span><span class="p">):</span>
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;level&quot;</span><span class="p">:</span> <span class="s2">&quot;megye&quot;</span><span class="p">,</span> <span class="s2">&quot;key&quot;</span><span class="p">:</span> <span class="n">mid</span><span class="p">,</span> <span class="s2">&quot;hu&quot;</span><span class="p">:</span> <span class="n">sub</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;megye_hu&quot;</span><span class="p">],</span>
+                     <span class="s2">&quot;unit_type&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;sk&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;cs_modern&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">})</span>
+    <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">bb</span><span class="o">.</span><span class="n">iterrows</span><span class="p">():</span>
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;level&quot;</span><span class="p">:</span> <span class="s2">&quot;jaras&quot;</span><span class="p">,</span> <span class="s2">&quot;key&quot;</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">],</span> <span class="s2">&quot;hu&quot;</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;name_hu&quot;</span><span class="p">],</span>
+                     <span class="s2">&quot;unit_type&quot;</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;unit_type&quot;</span><span class="p">],</span> <span class="s2">&quot;sk&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;cs_modern&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">})</span>
+    <span class="n">tmpl</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;level&quot;</span><span class="p">,</span> <span class="s2">&quot;key&quot;</span><span class="p">,</span> <span class="s2">&quot;hu&quot;</span><span class="p">,</span> <span class="s2">&quot;unit_type&quot;</span><span class="p">,</span> <span class="s2">&quot;sk&quot;</span><span class="p">,</span> <span class="s2">&quot;cs_modern&quot;</span><span class="p">])</span>
+    <span class="n">p</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="n">p</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">tmpl</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">tmpl</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">jaras_report</span><span class="p">(</span><span class="n">backbone</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Print coverage of the járás backbone (counties, units, Slovak-name curation load).&quot;&quot;&quot;</span>
+    <span class="n">n_u</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">backbone</span><span class="p">)</span>
+    <span class="n">n_m</span> <span class="o">=</span> <span class="n">backbone</span><span class="p">[</span><span class="s2">&quot;megye_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">nunique</span><span class="p">()</span>
+    <span class="n">cs</span> <span class="o">=</span> <span class="n">backbone</span><span class="p">[</span><span class="n">backbone</span><span class="p">[</span><span class="s2">&quot;is_czechoslovak&quot;</span><span class="p">]]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Járás/town backbone  (units = </span><span class="si">{</span><span class="n">n_u</span><span class="si">}</span><span class="s2">, counties = </span><span class="si">{</span><span class="n">n_m</span><span class="si">}</span><span class="s2">; &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;Czechoslovak: </span><span class="si">{</span><span class="n">cs</span><span class="p">[</span><span class="s1">&#39;megye_id&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">nunique</span><span class="p">()</span><span class="si">}</span><span class="s2"> counties / </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">cs</span><span class="p">)</span><span class="si">}</span><span class="s2"> units)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  by unit type: </span><span class="si">{</span><span class="nb">dict</span><span class="p">(</span><span class="n">backbone</span><span class="p">[</span><span class="s1">&#39;unit_type&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">())</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">named</span> <span class="o">=</span> <span class="n">backbone</span><span class="p">[</span><span class="s2">&quot;name_sk&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+    <span class="n">m_named</span> <span class="o">=</span> <span class="n">backbone</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;megye_id&quot;</span><span class="p">)[</span><span class="s2">&quot;megye_sk&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Slovak name curated: </span><span class="si">{</span><span class="n">named</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">n_u</span><span class="si">}</span><span class="s2"> units, </span><span class="si">{</span><span class="n">m_named</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">n_m</span><span class="si">}</span><span class="s2"> counties&quot;</span><span class="p">)</span>
+    <span class="n">miss</span> <span class="o">=</span> <span class="n">backbone</span><span class="p">[</span><span class="n">backbone</span><span class="p">[</span><span class="s2">&quot;is_czechoslovak&quot;</span><span class="p">]</span> <span class="o">&amp;</span> <span class="n">backbone</span><span class="p">[</span><span class="s2">&quot;name_sk&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isna</span><span class="p">()]</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">miss</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  [!] </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">miss</span><span class="p">)</span><span class="si">}</span><span class="s2"> Czechoslovak units still without a Slovak name:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">miss</span><span class="o">.</span><span class="n">head</span><span class="p">(</span><span class="mi">25</span><span class="p">)</span><span class="o">.</span><span class="n">iterrows</span><span class="p">():</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;      </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;megye_hu&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">&lt;18</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;unit_type&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">&lt;6</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;name_hu&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>

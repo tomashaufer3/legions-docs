@@ -1,0 +1,1253 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Where every Czechoslovak Legion unit was, whom it answered to and who commanded it,
+month by month, read from the unit entries of</p><p class="tldr-facts"><b>Reference tools</b> · v1.0.0 · 360 lines · 13 public functions · 4 constants · used by nothing else · <code>utils/reference_tools/units/build_unit_timeline.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-reference_tools-units-build_unit_timeline-sentences">sentences</a><a class="chip" href="#fn-utils-reference_tools-units-build_unit_timeline-split_phases">split_phases</a><a class="chip" href="#fn-utils-reference_tools-units-build_unit_timeline-parse_states">parse_states</a><a class="chip" href="#fn-utils-reference_tools-units-build_unit_timeline-parse_period">parse_period</a><a class="chip" href="#fn-utils-reference_tools-units-build_unit_timeline-parse_commanders">parse_commanders</a><a class="chip" href="#fn-utils-reference_tools-units-build_unit_timeline-parse_parents">parse_parents</a><a class="chip" href="#fn-utils-reference_tools-units-build_unit_timeline-parse_lifecycle">parse_lifecycle</a><a class="chip" href="#fn-utils-reference_tools-units-build_unit_timeline-parse_transport">parse_transport</a><a class="chip" href="#fn-utils-reference_tools-units-build_unit_timeline-parse_entry">parse_entry</a><a class="chip" href="#fn-utils-reference_tools-units-build_unit_timeline-out_of_order">out_of_order</a><a class="chip" href="#fn-utils-reference_tools-units-build_unit_timeline-flag_suspect">flag_suspect</a><a class="chip" href="#fn-utils-reference_tools-units-build_unit_timeline-build">build</a><a class="chip" href="#fn-utils-reference_tools-units-build_unit_timeline-main">main</a><a class="chip const" href="#c-utils-reference_tools-units-build_unit_timeline-OUT">OUT</a><a class="chip const" href="#c-utils-reference_tools-units-build_unit_timeline-AUTHORITY">AUTHORITY</a><a class="chip const" href="#c-utils-reference_tools-units-build_unit_timeline-COLUMNS">COLUMNS</a><a class="chip const" href="#c-utils-reference_tools-units-build_unit_timeline-MONTH">MONTH</a></div>
+<h2>How it works</h2><p><a class="cite" data-ref="fidler_2025" href="#references" onclick="return bibGo(event)">Fidler, Jiří (2025)</a>. <em>Encyklopedie československých legií.</em> Praha: Universum.</p>
+<h4>Why this exists</h4>
+<p><code>unit_authority.csv</code> says that a unit existed, in which theatre and from when. It
+does not say where the unit stood in a given month, and that is what a design with
+time-varying exposure needs: the shocks of the Russian theatre (November 1917, Brest-
+Litovsk, May 1918, the withdrawal from the front in 1919) hit every unit at once, so
+the only variation with a comparison group is <em>which unit was at the front, in a
+garrison or on the rails when</em>. The encyclopedia writes exactly that, in one formula
+per entry, down to the battalion:</p>
+<pre><code>Nacházelo se v -&gt; Borispolu, od prosince 1917 na přesunu a v -&gt; Kajevce, od března
+1918 ..., podléhalo veliteli -&gt; X, od října 1917 veliteli -&gt; Y. Funkci velitele
+pluku zastávali plk. A (srpen 1917 – září 1917), ...
+</code></pre>
+<p>Each formula becomes rows of one long table:</p>
+<pre><code>kind = location     state ∈ {place, moving, field, moving_home}; value = the place,
+                    in the grammatical case the source uses ("Borispolu")
+kind = parent       value = the formation the unit answered to; state says which of
+                    two chains it is when the source gives two (professional, general)
+kind = commander    value = rank and name, with the months of the tenure; state = the
+                    office when it is not the commander's (chief_of_staff, …)
+kind = lifecycle    state ∈ {formed, renamed, merged, disbanded, sailed,
+                    arrived_home}; value = the unit it came from or became
+kind = composition  (transports) the units that sailed
+kind = strength     (transports) how many men
+</code></pre>
+<p>Dates are as precise as the source: a lifecycle date is a day, a phase of the location
+and subordination chains opens in a month ("od prosince 1917"), and the first phase of
+a chain opens when the unit was formed (<code>date_from_precision = formation</code>). Several
+states inside one phase share its opening month and keep the order the source gives
+them in <code>seq</code>; the source does not date the changes inside a phase.</p>
+<p>What it does NOT carry: detachments the source puts in brackets ("části oddílu v X"),
+and anything the entry says outside its formulas.</p>
+<p>The source's slips are kept and flagged, not corrected. A location chain that runs
+backwards in time ("od prosince 1919 v Čeljabinsku, od ledna 1919 na přesunu" — the
+year of one of the two is a misprint) keeps the dates as printed; the rows outside the
+longest run that is in order carry <code>date_suspect = 1</code>. A sub-entry heading printed
+twice under one headword gets "#2" on its second occurrence.</p>
+<h4>Copyright note</h4>
+<p>As for <code>build_unit_authority.py</code>: the book is in copyright and stays in the
+gitignored <code>library/</code>. This script emits facts only (unit, date, place, formation,
+name) and none of the encyclopedia's prose.</p>
+<p>Run:    python utils/reference_tools/units/build_unit_timeline.py [path/to/encyklopedie.epub]
+Emits:  reference/units/unit_timeline.csv
+Check:  python utils/reference_tools/units/check_unit_timeline.py</p>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-reference_tools-units-build_unit_timeline-sentences">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">sentences</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span></pre>
+<div class="fndoc"><p>Split an entry into sentences, keeping 'čs.', ranks and ordinals intact.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_unit_timeline.py</code></p>
+<details><summary>source · lines 120–129 (10 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">sentences</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Split an entry into sentences, keeping &#39;čs.&#39;, ranks and ordinals intact.&quot;&quot;&quot;</span>
+    <span class="n">out</span><span class="p">,</span> <span class="n">last</span> <span class="o">=</span> <span class="p">[],</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="n">_STOP</span><span class="o">.</span><span class="n">finditer</span><span class="p">(</span><span class="n">text</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">_NO_END</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">text</span><span class="p">[</span><span class="n">last</span><span class="p">:</span><span class="n">m</span><span class="o">.</span><span class="n">start</span><span class="p">()]):</span>
+            <span class="k">continue</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">text</span><span class="p">[</span><span class="n">last</span><span class="p">:</span><span class="n">m</span><span class="o">.</span><span class="n">start</span><span class="p">()]</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span>
+        <span class="n">last</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">end</span><span class="p">()</span>
+    <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">text</span><span class="p">[</span><span class="n">last</span><span class="p">:]</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s2">&quot; .&quot;</span><span class="p">))</span>
+    <span class="k">return</span> <span class="p">[</span><span class="n">s</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">out</span> <span class="k">if</span> <span class="n">s</span><span class="p">]</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-units-build_unit_timeline-split_phases">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">split_phases</span><span class="p">(</span><span class="n">chain</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span></pre>
+<div class="fndoc"><p><code>'v A, od března 1918 v B a od června v poli'</code> -&gt;
+<code>[('', 'v A'), ('1918-03', 'v B'), ('1918-06', 'v poli')]</code>.</p>
+<p>A phase written without its year takes the year of the phase before it, or the
+next one if the month runs backwards.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_unit_timeline.py</code></p>
+<details><summary>source · lines 144–161 (18 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">split_phases</span><span class="p">(</span><span class="n">chain</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``&#39;v A, od března 1918 v B a od června v poli&#39;`` -&gt;</span>
+<span class="sd">    ``[(&#39;&#39;, &#39;v A&#39;), (&#39;1918-03&#39;, &#39;v B&#39;), (&#39;1918-06&#39;, &#39;v poli&#39;)]``.</span>
+
+<span class="sd">    A phase written without its year takes the year of the phase before it, or the</span>
+<span class="sd">    next one if the month runs backwards.&quot;&quot;&quot;</span>
+    <span class="n">out</span><span class="p">,</span> <span class="n">last</span><span class="p">,</span> <span class="n">start</span><span class="p">,</span> <span class="n">year</span> <span class="o">=</span> <span class="p">[],</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span>
+    <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="n">_PHASE</span><span class="o">.</span><span class="n">finditer</span><span class="p">(</span><span class="n">chain</span><span class="p">):</span>
+        <span class="n">body</span> <span class="o">=</span> <span class="n">chain</span><span class="p">[</span><span class="n">last</span><span class="p">:</span><span class="n">m</span><span class="o">.</span><span class="n">start</span><span class="p">()]</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s2">&quot; ,&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">body</span> <span class="ow">or</span> <span class="n">out</span><span class="p">:</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">start</span><span class="p">,</span> <span class="n">body</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">2</span><span class="p">):</span>
+            <span class="n">year</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">year</span> <span class="ow">and</span> <span class="n">start</span> <span class="ow">and</span> <span class="n">MONTH</span><span class="p">[</span><span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)]</span> <span class="o">&lt;</span> <span class="nb">int</span><span class="p">(</span><span class="n">start</span><span class="p">[</span><span class="mi">5</span><span class="p">:</span><span class="mi">7</span><span class="p">]):</span>
+            <span class="n">year</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">year</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="n">start</span><span class="p">,</span> <span class="n">last</span> <span class="o">=</span> <span class="p">(</span><span class="n">_ym</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span> <span class="n">year</span><span class="p">)</span> <span class="k">if</span> <span class="n">year</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">),</span> <span class="n">m</span><span class="o">.</span><span class="n">end</span><span class="p">()</span>
+    <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">start</span><span class="p">,</span> <span class="n">chain</span><span class="p">[</span><span class="n">last</span><span class="p">:]</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s2">&quot; ,&quot;</span><span class="p">)))</span>
+    <span class="k">return</span> <span class="p">[(</span><span class="n">d</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span> <span class="k">for</span> <span class="n">d</span><span class="p">,</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">out</span> <span class="k">if</span> <span class="n">b</span><span class="p">]</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-units-build_unit_timeline-parse_states">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">parse_states</span><span class="p">(</span><span class="n">body</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span></pre>
+<div class="fndoc"><p>One phase of a location chain -&gt; ordered <code>(state, place)</code> pairs.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_unit_timeline.py</code></p>
+<details><summary>source · lines 164–182 (19 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">parse_states</span><span class="p">(</span><span class="n">body</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;One phase of a location chain -&gt; ordered ``(state, place)`` pairs.&quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">part</span> <span class="ow">in</span> <span class="n">_STATE_SPLIT</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="n">_BRACKET</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">body</span><span class="p">)):</span>
+        <span class="n">p</span> <span class="o">=</span> <span class="n">_strip_ref</span><span class="p">(</span><span class="n">part</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">p</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="k">if</span> <span class="n">p</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;na přesunu do vlasti&quot;</span><span class="p">):</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s2">&quot;moving_home&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+        <span class="k">elif</span> <span class="n">p</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;na přesunu&quot;</span><span class="p">):</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s2">&quot;moving&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+            <span class="n">rest</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;na přesunu\s+(?:a\s+)?(?:ve?|na|u)\s+(.+)$&quot;</span><span class="p">,</span> <span class="n">p</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">rest</span><span class="p">:</span>
+                <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s2">&quot;place&quot;</span><span class="p">,</span> <span class="n">_strip_ref</span><span class="p">(</span><span class="n">rest</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">))))</span>
+        <span class="k">elif</span> <span class="n">p</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;v poli&quot;</span><span class="p">):</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s2">&quot;field&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s2">&quot;place&quot;</span><span class="p">,</span> <span class="n">_strip_ref</span><span class="p">(</span><span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;^(?:ve?|na|u|poblíž)\s+&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">p</span><span class="p">))))</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-units-build_unit_timeline-parse_period">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">parse_period</span><span class="p">(</span><span class="n">s</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span></pre>
+<div class="fndoc"><p><code>'srpen 1917 – září 1917'</code> -&gt; <code>('1917-08', '1917-09')</code>; open ends are ''.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 185–196 (12 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">parse_period</span><span class="p">(</span><span class="n">s</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``&#39;srpen 1917 – září 1917&#39;`` -&gt; ``(&#39;1917-08&#39;, &#39;1917-09&#39;)``; open ends are &#39;&#39;.&quot;&quot;&quot;</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="n">ms</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;(&quot;</span> <span class="o">+</span> <span class="n">_M</span> <span class="o">+</span> <span class="sa">r</span><span class="s2">&quot;)\s+(\d</span><span class="si">{4}</span><span class="s2">)&quot;</span><span class="p">,</span> <span class="n">s</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">ms</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">first</span><span class="p">,</span> <span class="n">last</span> <span class="o">=</span> <span class="n">_ym</span><span class="p">(</span><span class="o">*</span><span class="n">ms</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="n">_ym</span><span class="p">(</span><span class="o">*</span><span class="n">ms</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">ms</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span> <span class="ow">and</span> <span class="n">s</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;od &quot;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">first</span><span class="p">,</span> <span class="s2">&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">ms</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span> <span class="ow">and</span> <span class="n">s</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;do &quot;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">first</span>
+    <span class="k">return</span> <span class="n">first</span><span class="p">,</span> <span class="n">last</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-units-build_unit_timeline-parse_commanders">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">parse_commanders</span><span class="p">(</span><span class="n">sentence</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span></pre>
+<div class="fndoc"><p>'Funkci velitele pluku zastávali A (…), B (…), funkci náčelníka štábu zastával
+C (…)' -&gt; <code>(office, name, from, to)</code>; the commander's own office is ''.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 199–212 (14 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">parse_commanders</span><span class="p">(</span><span class="n">sentence</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;&#39;Funkci velitele pluku zastávali A (…), B (…), funkci náčelníka štábu zastával</span>
+<span class="sd">    C (…)&#39; -&gt; ``(office, name, from, to)``; the commander&#39;s own office is &#39;&#39;.&quot;&quot;&quot;</span>
+    <span class="n">parts</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;[Ff]unkci\s+(.+?)\s+zastával[iay]?\s+&quot;</span><span class="p">,</span> <span class="n">sentence</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">office</span><span class="p">,</span> <span class="n">body</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">parts</span><span class="p">[</span><span class="mi">1</span><span class="p">::</span><span class="mi">2</span><span class="p">],</span> <span class="n">parts</span><span class="p">[</span><span class="mi">2</span><span class="p">::</span><span class="mi">2</span><span class="p">]):</span>
+        <span class="n">role</span> <span class="o">=</span> <span class="nb">next</span><span class="p">((</span><span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">_OFFICE</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">office</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">k</span><span class="p">)),</span> <span class="n">office</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">period</span> <span class="ow">in</span> <span class="n">_PERIODS</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="n">body</span><span class="p">):</span>
+            <span class="n">name</span> <span class="o">=</span> <span class="n">_strip_ref</span><span class="p">(</span><span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;^\s*(?:,|a\b|postupně)\s*&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">name</span><span class="o">.</span><span class="n">strip</span><span class="p">()))</span>
+            <span class="k">for</span> <span class="n">one</span> <span class="ow">in</span> <span class="n">re</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;,\s*(?=(?:od |do )?(?:&quot;</span> <span class="o">+</span> <span class="n">_M</span> <span class="o">+</span> <span class="sa">r</span><span class="s2">&quot;))&quot;</span><span class="p">,</span> <span class="n">period</span><span class="p">):</span>
+                <span class="n">start</span><span class="p">,</span> <span class="n">end</span> <span class="o">=</span> <span class="n">parse_period</span><span class="p">(</span><span class="n">one</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">name</span> <span class="ow">and</span> <span class="p">(</span><span class="n">start</span> <span class="ow">or</span> <span class="n">end</span><span class="p">):</span>
+                    <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">role</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">start</span><span class="p">,</span> <span class="n">end</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-units-build_unit_timeline-parse_parents">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">parse_parents</span><span class="p">(</span><span class="n">sub</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span></pre>
+<div class="fndoc"><p>The subordination chain -&gt; <code>(scope, month, formation)</code>.</p>
+<p>A unit that answered to one superior in its own branch and to another in everything
+else carries two chains ('ve věcech odborných …, ve věcech ostatních …'); <code>scope</code>
+tells them apart and is '' when there is only one.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_unit_timeline.py</code></p>
+<details><summary>source · lines 215–228 (14 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">parse_parents</span><span class="p">(</span><span class="n">sub</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The subordination chain -&gt; ``(scope, month, formation)``.</span>
+
+<span class="sd">    A unit that answered to one superior in its own branch and to another in everything</span>
+<span class="sd">    else carries two chains (&#39;ve věcech odborných …, ve věcech ostatních …&#39;); ``scope``</span>
+<span class="sd">    tells them apart and is &#39;&#39; when there is only one.&quot;&quot;&quot;</span>
+    <span class="n">pieces</span> <span class="o">=</span> <span class="n">_SUBORD</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="n">sub</span><span class="p">)</span>              <span class="c1"># [&#39;&#39;, scope, chain, scope, chain, …]</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">scope</span><span class="p">,</span> <span class="n">chain</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">pieces</span><span class="p">[</span><span class="mi">1</span><span class="p">::</span><span class="mi">2</span><span class="p">],</span> <span class="n">pieces</span><span class="p">[</span><span class="mi">2</span><span class="p">::</span><span class="mi">2</span><span class="p">]):</span>
+        <span class="k">for</span> <span class="n">start</span><span class="p">,</span> <span class="n">body</span> <span class="ow">in</span> <span class="n">split_phases</span><span class="p">(</span><span class="n">_BRACKET</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">chain</span><span class="p">)):</span>
+            <span class="n">parent</span> <span class="o">=</span> <span class="n">_strip_ref</span><span class="p">(</span><span class="n">_SUPERIOR</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">_strip_ref</span><span class="p">(</span><span class="n">body</span><span class="p">)))</span>
+            <span class="k">if</span> <span class="n">parent</span><span class="p">:</span>
+                <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">_SCOPE</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">scope</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span> <span class="n">start</span><span class="p">,</span> <span class="n">parent</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-units-build_unit_timeline-parse_lifecycle">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">parse_lifecycle</span><span class="p">(</span><span class="n">sentence</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span></pre>
+<div class="fndoc"><p>A sentence with a full date and a lifecycle verb -&gt; <code>(state, date, target)</code>.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 231–242 (12 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">parse_lifecycle</span><span class="p">(</span><span class="n">sentence</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A sentence with a full date and a lifecycle verb -&gt; ``(state, date, target)``.&quot;&quot;&quot;</span>
+    <span class="n">day</span> <span class="o">=</span> <span class="n">_DAY</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">sentence</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">day</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">for</span> <span class="n">state</span><span class="p">,</span> <span class="n">pattern</span> <span class="ow">in</span> <span class="n">_LIFECYCLE</span><span class="p">:</span>
+        <span class="n">verb</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">pattern</span><span class="p">,</span> <span class="n">sentence</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">verb</span><span class="p">:</span>
+            <span class="n">tail</span> <span class="o">=</span> <span class="n">sentence</span><span class="p">[</span><span class="nb">max</span><span class="p">(</span><span class="n">day</span><span class="o">.</span><span class="n">end</span><span class="p">(),</span> <span class="n">verb</span><span class="o">.</span><span class="n">end</span><span class="p">()):]</span>
+            <span class="n">target</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\b(?:z|ze|na|do|v)\s+(.+)$&quot;</span><span class="p">,</span> <span class="n">tail</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">state</span><span class="p">,</span> <span class="n">_iso</span><span class="p">(</span><span class="n">day</span><span class="p">),</span> <span class="n">_strip_ref</span><span class="p">(</span><span class="n">target</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">))[:</span><span class="mi">160</span><span class="p">]</span> <span class="k">if</span> <span class="n">target</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+    <span class="k">return</span> <span class="kc">None</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-units-build_unit_timeline-parse_transport">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">parse_transport</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span></pre>
+<div class="fndoc"><p>A transport entry: the units that travelled and their number.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 245–254 (10 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">parse_transport</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A transport entry: the units that travelled and their number.&quot;&quot;&quot;</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">_COMPOSITION</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">m</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[]</span>
+    <span class="n">day</span> <span class="o">=</span> <span class="n">_DAY</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="n">common</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">state</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">date_from</span><span class="o">=</span><span class="n">_iso</span><span class="p">(</span><span class="n">day</span><span class="p">)</span> <span class="k">if</span> <span class="n">day</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+                  <span class="n">date_from_precision</span><span class="o">=</span><span class="s2">&quot;day&quot;</span> <span class="k">if</span> <span class="n">day</span> <span class="k">else</span> <span class="s2">&quot;unknown&quot;</span><span class="p">,</span> <span class="n">date_to</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">[</span><span class="nb">dict</span><span class="p">(</span><span class="n">kind</span><span class="o">=</span><span class="s2">&quot;composition&quot;</span><span class="p">,</span> <span class="n">value</span><span class="o">=</span><span class="n">_strip_ref</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)),</span> <span class="o">**</span><span class="n">common</span><span class="p">),</span>
+            <span class="nb">dict</span><span class="p">(</span><span class="n">kind</span><span class="o">=</span><span class="s2">&quot;strength&quot;</span><span class="p">,</span> <span class="n">value</span><span class="o">=</span><span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\D&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">2</span><span class="p">)),</span> <span class="o">**</span><span class="n">common</span><span class="p">)]</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-units-build_unit_timeline-parse_entry">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">parse_entry</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span></pre>
+<div class="fndoc"><p>All timeline rows of one entry or sub-entry (without the unit columns).</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_unit_timeline.py</code> <code>utils/parsing/vua_courts.py</code></p>
+<details><summary>source · lines 265–297 (33 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">parse_entry</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;All timeline rows of one entry or sub-entry (without the unit columns).&quot;&quot;&quot;</span>
+    <span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">formed</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+    <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">sentences</span><span class="p">(</span><span class="n">text</span><span class="p">):</span>
+        <span class="n">loc</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;Nacház\w+ se (?:se )?(.*)$&quot;</span><span class="p">,</span> <span class="n">s</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">loc</span><span class="p">:</span>
+            <span class="n">cut</span> <span class="o">=</span> <span class="n">_SUBORD</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">loc</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span>
+            <span class="n">chain</span> <span class="o">=</span> <span class="n">loc</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)[:</span><span class="n">cut</span><span class="o">.</span><span class="n">start</span><span class="p">()]</span> <span class="k">if</span> <span class="n">cut</span> <span class="k">else</span> <span class="n">loc</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">start</span><span class="p">,</span> <span class="n">body</span> <span class="ow">in</span> <span class="n">split_phases</span><span class="p">(</span><span class="n">chain</span><span class="p">):</span>
+                <span class="k">for</span> <span class="n">state</span><span class="p">,</span> <span class="n">place</span> <span class="ow">in</span> <span class="n">parse_states</span><span class="p">(</span><span class="n">body</span><span class="p">):</span>
+                    <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">_phase_row</span><span class="p">(</span><span class="s2">&quot;location&quot;</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">place</span><span class="p">,</span> <span class="n">start</span><span class="p">,</span> <span class="n">formed</span><span class="p">))</span>
+            <span class="k">if</span> <span class="n">cut</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">scope</span><span class="p">,</span> <span class="n">start</span><span class="p">,</span> <span class="n">parent</span> <span class="ow">in</span> <span class="n">parse_parents</span><span class="p">(</span><span class="n">loc</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)[</span><span class="n">cut</span><span class="o">.</span><span class="n">start</span><span class="p">():]):</span>
+                    <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">_phase_row</span><span class="p">(</span><span class="s2">&quot;parent&quot;</span><span class="p">,</span> <span class="n">scope</span><span class="p">,</span> <span class="n">parent</span><span class="p">,</span> <span class="n">start</span><span class="p">,</span> <span class="n">formed</span><span class="p">))</span>
+            <span class="k">continue</span>
+        <span class="k">if</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;[Ff]unkci\b.*zastával&quot;</span><span class="p">,</span> <span class="n">s</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">office</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">start</span><span class="p">,</span> <span class="n">end</span> <span class="ow">in</span> <span class="n">parse_commanders</span><span class="p">(</span><span class="n">s</span><span class="p">):</span>
+                <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">dict</span><span class="p">(</span><span class="n">kind</span><span class="o">=</span><span class="s2">&quot;commander&quot;</span><span class="p">,</span> <span class="n">state</span><span class="o">=</span><span class="n">office</span><span class="p">,</span> <span class="n">value</span><span class="o">=</span><span class="n">name</span><span class="p">,</span>
+                                 <span class="n">date_from</span><span class="o">=</span><span class="n">start</span><span class="p">,</span>
+                                 <span class="n">date_from_precision</span><span class="o">=</span><span class="s2">&quot;month&quot;</span> <span class="k">if</span> <span class="n">start</span> <span class="k">else</span> <span class="s2">&quot;unknown&quot;</span><span class="p">,</span>
+                                 <span class="n">date_to</span><span class="o">=</span><span class="n">end</span><span class="p">))</span>
+            <span class="k">continue</span>
+        <span class="n">life</span> <span class="o">=</span> <span class="n">parse_lifecycle</span><span class="p">(</span><span class="n">s</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">life</span><span class="p">:</span>
+            <span class="n">state</span><span class="p">,</span> <span class="n">date</span><span class="p">,</span> <span class="n">target</span> <span class="o">=</span> <span class="n">life</span>
+            <span class="k">if</span> <span class="n">state</span> <span class="o">==</span> <span class="s2">&quot;formed&quot;</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">formed</span><span class="p">:</span>
+                <span class="n">formed</span> <span class="o">=</span> <span class="n">date</span>
+            <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">dict</span><span class="p">(</span><span class="n">kind</span><span class="o">=</span><span class="s2">&quot;lifecycle&quot;</span><span class="p">,</span> <span class="n">state</span><span class="o">=</span><span class="n">state</span><span class="p">,</span> <span class="n">value</span><span class="o">=</span><span class="n">target</span><span class="p">,</span> <span class="n">date_from</span><span class="o">=</span><span class="n">date</span><span class="p">,</span>
+                             <span class="n">date_from_precision</span><span class="o">=</span><span class="s2">&quot;day&quot;</span><span class="p">,</span> <span class="n">date_to</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">text</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;Dopravní jednotka&quot;</span><span class="p">):</span>
+        <span class="n">rows</span> <span class="o">+=</span> <span class="n">parse_transport</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">rows</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-units-build_unit_timeline-out_of_order">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">out_of_order</span><span class="p">(</span><span class="n">months</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">bool</span><span class="p">]</span></pre>
+<div class="fndoc"><p>True for the items outside the longest non-decreasing run of <em>months</em>.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_lexikon_1910_order.py</code> <code>tests/test_unit_timeline.py</code> <code>utils/lexikon_1910/lexikon_1910_institutions.py</code></p>
+<details><summary>source · lines 300–312 (13 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">out_of_order</span><span class="p">(</span><span class="n">months</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">bool</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;True for the items outside the longest non-decreasing run of *months*.&quot;&quot;&quot;</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">months</span><span class="p">)</span>
+    <span class="n">best</span><span class="p">,</span> <span class="n">prev</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">*</span> <span class="n">n</span><span class="p">,</span> <span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">*</span> <span class="n">n</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">i</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">months</span><span class="p">[</span><span class="n">j</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">months</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="ow">and</span> <span class="n">best</span><span class="p">[</span><span class="n">j</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span> <span class="o">&gt;</span> <span class="n">best</span><span class="p">[</span><span class="n">i</span><span class="p">]:</span>
+                <span class="n">best</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">prev</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">best</span><span class="p">[</span><span class="n">j</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">j</span>
+    <span class="n">keep</span><span class="p">,</span> <span class="n">i</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(),</span> <span class="nb">max</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">),</span> <span class="n">key</span><span class="o">=</span><span class="n">best</span><span class="o">.</span><span class="fm">__getitem__</span><span class="p">)</span> <span class="k">if</span> <span class="n">n</span> <span class="k">else</span> <span class="o">-</span><span class="mi">1</span>
+    <span class="k">while</span> <span class="n">i</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">keep</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+        <span class="n">i</span> <span class="o">=</span> <span class="n">prev</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+    <span class="k">return</span> <span class="p">[</span><span class="n">k</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">keep</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">)]</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-units-build_unit_timeline-flag_suspect">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">flag_suspect</span><span class="p">(</span><span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="kc">None</span></pre>
+<div class="fndoc"><p>Mark the location rows of one entry whose month breaks the chain's order.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 315–319 (5 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">flag_suspect</span><span class="p">(</span><span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Mark the location rows of one entry whose month breaks the chain&#39;s order.&quot;&quot;&quot;</span>
+    <span class="n">chain</span> <span class="o">=</span> <span class="p">[</span><span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;kind&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;location&quot;</span> <span class="ow">and</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;date_from&quot;</span><span class="p">]]</span>
+    <span class="k">for</span> <span class="n">r</span><span class="p">,</span> <span class="n">bad</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">chain</span><span class="p">,</span> <span class="n">out_of_order</span><span class="p">([</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;date_from&quot;</span><span class="p">][:</span><span class="mi">7</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">chain</span><span class="p">])):</span>
+        <span class="n">r</span><span class="p">[</span><span class="s2">&quot;date_suspect&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">bad</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-units-build_unit_timeline-build">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">build</span><span class="p">(</span><span class="n">epub</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 322–344 (23 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span>
+<span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span>
+<span class="normal">337</span>
+<span class="normal">338</span>
+<span class="normal">339</span>
+<span class="normal">340</span>
+<span class="normal">341</span>
+<span class="normal">342</span>
+<span class="normal">343</span>
+<span class="normal">344</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">build</span><span class="p">(</span><span class="n">epub</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+    <span class="n">entries</span> <span class="o">=</span> <span class="n">read_entries</span><span class="p">(</span><span class="n">epub</span><span class="p">)</span>
+    <span class="n">auth</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">AUTHORITY</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="n">units</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">auth</span><span class="p">[</span><span class="s2">&quot;unit_cs&quot;</span><span class="p">])</span>
+    <span class="n">rows</span><span class="p">,</span> <span class="n">seen</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">head</span><span class="p">,</span> <span class="n">sub</span><span class="p">,</span> <span class="n">text</span> <span class="ow">in</span> <span class="n">entries</span><span class="o">.</span><span class="n">itertuples</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">head</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">units</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">sub</span> <span class="o">=</span> <span class="n">sub</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span>
+        <span class="n">seen</span><span class="p">[</span><span class="n">head</span><span class="p">,</span> <span class="n">sub</span><span class="p">]</span> <span class="o">=</span> <span class="n">seen</span><span class="o">.</span><span class="n">get</span><span class="p">((</span><span class="n">head</span><span class="p">,</span> <span class="n">sub</span><span class="p">),</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="k">if</span> <span class="n">seen</span><span class="p">[</span><span class="n">head</span><span class="p">,</span> <span class="n">sub</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">sub</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">sub</span><span class="si">}</span><span class="s2"> #</span><span class="si">{</span><span class="n">seen</span><span class="p">[</span><span class="n">head</span><span class="p">,</span><span class="w"> </span><span class="n">sub</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="n">entry</span> <span class="o">=</span> <span class="p">[</span><span class="nb">dict</span><span class="p">(</span><span class="n">date_suspect</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="o">**</span><span class="n">r</span><span class="p">)</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">parse_entry</span><span class="p">(</span><span class="n">text</span><span class="p">)]</span>
+        <span class="n">flag_suspect</span><span class="p">(</span><span class="n">entry</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">entry</span><span class="p">,</span> <span class="n">start</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+            <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">dict</span><span class="p">(</span><span class="n">unit_cs</span><span class="o">=</span><span class="n">head</span><span class="p">,</span> <span class="n">subunit</span><span class="o">=</span><span class="n">sub</span><span class="p">,</span> <span class="n">seq</span><span class="o">=</span><span class="n">i</span><span class="p">,</span> <span class="o">**</span><span class="n">r</span><span class="p">))</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="n">COLUMNS</span><span class="p">)</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">out</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span><span class="n">auth</span><span class="p">[[</span><span class="s2">&quot;unit_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;theatre&quot;</span><span class="p">,</span> <span class="s2">&quot;number&quot;</span><span class="p">]],</span> <span class="n">on</span><span class="o">=</span><span class="s2">&quot;unit_cs&quot;</span><span class="p">,</span>
+                    <span class="n">how</span><span class="o">=</span><span class="s2">&quot;left&quot;</span><span class="p">,</span> <span class="n">validate</span><span class="o">=</span><span class="s2">&quot;m:1&quot;</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">out</span><span class="p">)</span> <span class="o">==</span> <span class="n">n</span> <span class="ow">and</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;theatre&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;source&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;Fidler 2025, entry &quot;</span> <span class="o">+</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;unit_cs&quot;</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-units-build_unit_timeline-main">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 347–356 (10 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">347</span>
+<span class="normal">348</span>
+<span class="normal">349</span>
+<span class="normal">350</span>
+<span class="normal">351</span>
+<span class="normal">352</span>
+<span class="normal">353</span>
+<span class="normal">354</span>
+<span class="normal">355</span>
+<span class="normal">356</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">epub</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="k">else</span> <span class="n">DEFAULT_EPUB</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">epub</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;epub not found: </span><span class="si">{</span><span class="n">epub</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">tab</span> <span class="o">=</span> <span class="n">build</span><span class="p">(</span><span class="n">epub</span><span class="p">)</span>
+    <span class="n">tab</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">OUT</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="n">with_sub</span> <span class="o">=</span> <span class="p">(</span><span class="n">tab</span><span class="p">[</span><span class="s2">&quot;subunit&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="n">tab</span><span class="p">[</span><span class="s2">&quot;unit_cs&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">any</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;wrote </span><span class="si">{</span><span class="n">OUT</span><span class="o">.</span><span class="n">relative_to</span><span class="p">(</span><span class="n">ROOT</span><span class="p">)</span><span class="si">}</span><span class="s2">  (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">tab</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> rows, &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">tab</span><span class="p">[</span><span class="s1">&#39;unit_cs&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">nunique</span><span class="p">()</span><span class="si">}</span><span class="s2"> units, </span><span class="si">{</span><span class="n">with_sub</span><span class="si">}</span><span class="s2"> with sub-units)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">tab</span><span class="o">.</span><span class="n">groupby</span><span class="p">([</span><span class="s2">&quot;kind&quot;</span><span class="p">,</span> <span class="s2">&quot;state&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">size</span><span class="p">()</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-reference_tools-units-build_unit_timeline-OUT"><pre class="sig">OUT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;reference&#39;</span> <span class="o">/</span> <span class="s1">&#39;units&#39;</span> <span class="o">/</span> <span class="s1">&#39;unit_timeline.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-units-build_unit_timeline-AUTHORITY"><pre class="sig">AUTHORITY<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;reference&#39;</span> <span class="o">/</span> <span class="s1">&#39;units&#39;</span> <span class="o">/</span> <span class="s1">&#39;unit_authority.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-units-build_unit_timeline-COLUMNS"><pre class="sig">COLUMNS<span class="kind">list · 10 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">[</span><span class="s1">&#39;unit_cs&#39;</span><span class="p">,</span> <span class="s1">&#39;subunit&#39;</span><span class="p">,</span> <span class="s1">&#39;seq&#39;</span><span class="p">,</span> <span class="s1">&#39;kind&#39;</span><span class="p">,</span> <span class="s1">&#39;state&#39;</span><span class="p">,</span> <span class="s1">&#39;date_from&#39;</span><span class="p">,</span> <span class="s1">&#39;date_from_precision&#39;</span><span class="p">,</span> <span class="s1">&#39;date_to&#39;</span><span class="p">,</span> <span class="s1">&#39;value&#39;</span><span class="p">,</span> <span class="s1">&#39;date_suspect&#39;</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-units-build_unit_timeline-MONTH"><pre class="sig">MONTH<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="n">m</span><span class="p">:</span> <span class="n">i</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">m</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">_NOM</span><span class="p">,</span> <span class="n">start</span><span class="o">=</span><span class="mi">1</span><span class="p">)}</span> <span class="o">|</span> <span class="p">{</span><span class="n">m</span><span class="p">:</span> <span class="n">i</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">m</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">_GEN</span><span class="p">,</span> <span class="n">start</span><span class="o">=</span><span class="mi">1</span><span class="p">)}</span>
+</pre></div>
+</details></div>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/reference_tools/units/build_unit_timeline.py · 360 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span>
+<span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span>
+<span class="normal">337</span>
+<span class="normal">338</span>
+<span class="normal">339</span>
+<span class="normal">340</span>
+<span class="normal">341</span>
+<span class="normal">342</span>
+<span class="normal">343</span>
+<span class="normal">344</span>
+<span class="normal">345</span>
+<span class="normal">346</span>
+<span class="normal">347</span>
+<span class="normal">348</span>
+<span class="normal">349</span>
+<span class="normal">350</span>
+<span class="normal">351</span>
+<span class="normal">352</span>
+<span class="normal">353</span>
+<span class="normal">354</span>
+<span class="normal">355</span>
+<span class="normal">356</span>
+<span class="normal">357</span>
+<span class="normal">358</span>
+<span class="normal">359</span>
+<span class="normal">360</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">build_unit_timeline.py — generate reference/units/unit_timeline.csv</span>
+<span class="sd">===================================================================</span>
+<span class="sd">Where every Czechoslovak Legion unit was, whom it answered to and who commanded it,</span>
+<span class="sd">month by month, read from the unit entries of</span>
+
+<span class="sd">    Fidler, Jiří (2025). *Encyklopedie československých legií.* Praha: Universum.</span>
+
+<span class="sd">Why this exists</span>
+<span class="sd">---------------</span>
+<span class="sd">``unit_authority.csv`` says that a unit existed, in which theatre and from when. It</span>
+<span class="sd">does not say where the unit stood in a given month, and that is what a design with</span>
+<span class="sd">time-varying exposure needs: the shocks of the Russian theatre (November 1917, Brest-</span>
+<span class="sd">Litovsk, May 1918, the withdrawal from the front in 1919) hit every unit at once, so</span>
+<span class="sd">the only variation with a comparison group is *which unit was at the front, in a</span>
+<span class="sd">garrison or on the rails when*. The encyclopedia writes exactly that, in one formula</span>
+<span class="sd">per entry, down to the battalion:</span>
+
+<span class="sd">    Nacházelo se v -&gt; Borispolu, od prosince 1917 na přesunu a v -&gt; Kajevce, od března</span>
+<span class="sd">    1918 ..., podléhalo veliteli -&gt; X, od října 1917 veliteli -&gt; Y. Funkci velitele</span>
+<span class="sd">    pluku zastávali plk. A (srpen 1917 – září 1917), ...</span>
+
+<span class="sd">Each formula becomes rows of one long table:</span>
+
+<span class="sd">    kind = location     state ∈ {place, moving, field, moving_home}; value = the place,</span>
+<span class="sd">                        in the grammatical case the source uses (&quot;Borispolu&quot;)</span>
+<span class="sd">    kind = parent       value = the formation the unit answered to; state says which of</span>
+<span class="sd">                        two chains it is when the source gives two (professional, general)</span>
+<span class="sd">    kind = commander    value = rank and name, with the months of the tenure; state = the</span>
+<span class="sd">                        office when it is not the commander&#39;s (chief_of_staff, …)</span>
+<span class="sd">    kind = lifecycle    state ∈ {formed, renamed, merged, disbanded, sailed,</span>
+<span class="sd">                        arrived_home}; value = the unit it came from or became</span>
+<span class="sd">    kind = composition  (transports) the units that sailed</span>
+<span class="sd">    kind = strength     (transports) how many men</span>
+
+<span class="sd">Dates are as precise as the source: a lifecycle date is a day, a phase of the location</span>
+<span class="sd">and subordination chains opens in a month (&quot;od prosince 1917&quot;), and the first phase of</span>
+<span class="sd">a chain opens when the unit was formed (``date_from_precision = formation``). Several</span>
+<span class="sd">states inside one phase share its opening month and keep the order the source gives</span>
+<span class="sd">them in ``seq``; the source does not date the changes inside a phase.</span>
+
+<span class="sd">What it does NOT carry: detachments the source puts in brackets (&quot;části oddílu v X&quot;),</span>
+<span class="sd">and anything the entry says outside its formulas.</span>
+
+<span class="sd">The source&#39;s slips are kept and flagged, not corrected. A location chain that runs</span>
+<span class="sd">backwards in time (&quot;od prosince 1919 v Čeljabinsku, od ledna 1919 na přesunu&quot; — the</span>
+<span class="sd">year of one of the two is a misprint) keeps the dates as printed; the rows outside the</span>
+<span class="sd">longest run that is in order carry ``date_suspect = 1``. A sub-entry heading printed</span>
+<span class="sd">twice under one headword gets &quot;#2&quot; on its second occurrence.</span>
+
+<span class="sd">Copyright note</span>
+<span class="sd">--------------</span>
+<span class="sd">As for ``build_unit_authority.py``: the book is in copyright and stays in the</span>
+<span class="sd">gitignored ``library/``. This script emits facts only (unit, date, place, formation,</span>
+<span class="sd">name) and none of the encyclopedia&#39;s prose.</span>
+
+<span class="sd">Run:    python utils/reference_tools/units/build_unit_timeline.py [path/to/encyklopedie.epub]</span>
+<span class="sd">Emits:  reference/units/unit_timeline.csv</span>
+<span class="sd">Check:  python utils/reference_tools/units/check_unit_timeline.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span><span class="p">))</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">build_unit_authority</span><span class="w"> </span><span class="kn">import</span> <span class="n">DEFAULT_EPUB</span><span class="p">,</span> <span class="n">ROOT</span><span class="p">,</span> <span class="n">read_entries</span>  <span class="c1"># noqa: E402</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.0.0&quot;</span>
+
+<span class="n">OUT</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;units&quot;</span> <span class="o">/</span> <span class="s2">&quot;unit_timeline.csv&quot;</span>
+<span class="n">AUTHORITY</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;units&quot;</span> <span class="o">/</span> <span class="s2">&quot;unit_authority.csv&quot;</span>
+<span class="n">COLUMNS</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;unit_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;subunit&quot;</span><span class="p">,</span> <span class="s2">&quot;seq&quot;</span><span class="p">,</span> <span class="s2">&quot;kind&quot;</span><span class="p">,</span> <span class="s2">&quot;state&quot;</span><span class="p">,</span> <span class="s2">&quot;date_from&quot;</span><span class="p">,</span>
+           <span class="s2">&quot;date_from_precision&quot;</span><span class="p">,</span> <span class="s2">&quot;date_to&quot;</span><span class="p">,</span> <span class="s2">&quot;value&quot;</span><span class="p">,</span> <span class="s2">&quot;date_suspect&quot;</span><span class="p">]</span>
+
+<span class="c1"># Month names: nominative (&quot;srpen 1917&quot;) and genitive (&quot;od srpna 1917&quot;, &quot;15. srpna 1917&quot;).</span>
+<span class="n">_NOM</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;leden&quot;</span><span class="p">,</span> <span class="s2">&quot;únor&quot;</span><span class="p">,</span> <span class="s2">&quot;březen&quot;</span><span class="p">,</span> <span class="s2">&quot;duben&quot;</span><span class="p">,</span> <span class="s2">&quot;květen&quot;</span><span class="p">,</span> <span class="s2">&quot;červen&quot;</span><span class="p">,</span> <span class="s2">&quot;červenec&quot;</span><span class="p">,</span> <span class="s2">&quot;srpen&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;září&quot;</span><span class="p">,</span> <span class="s2">&quot;říjen&quot;</span><span class="p">,</span> <span class="s2">&quot;listopad&quot;</span><span class="p">,</span> <span class="s2">&quot;prosinec&quot;</span><span class="p">]</span>
+<span class="n">_GEN</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;ledna&quot;</span><span class="p">,</span> <span class="s2">&quot;února&quot;</span><span class="p">,</span> <span class="s2">&quot;března&quot;</span><span class="p">,</span> <span class="s2">&quot;dubna&quot;</span><span class="p">,</span> <span class="s2">&quot;května&quot;</span><span class="p">,</span> <span class="s2">&quot;června&quot;</span><span class="p">,</span> <span class="s2">&quot;července&quot;</span><span class="p">,</span> <span class="s2">&quot;srpna&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;září&quot;</span><span class="p">,</span> <span class="s2">&quot;října&quot;</span><span class="p">,</span> <span class="s2">&quot;listopadu&quot;</span><span class="p">,</span> <span class="s2">&quot;prosince&quot;</span><span class="p">]</span>
+<span class="n">MONTH</span> <span class="o">=</span> <span class="p">{</span><span class="n">m</span><span class="p">:</span> <span class="n">i</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">m</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">_NOM</span><span class="p">,</span> <span class="n">start</span><span class="o">=</span><span class="mi">1</span><span class="p">)}</span> <span class="o">|</span> <span class="p">{</span><span class="n">m</span><span class="p">:</span> <span class="n">i</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">m</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">_GEN</span><span class="p">,</span> <span class="n">start</span><span class="o">=</span><span class="mi">1</span><span class="p">)}</span>
+<span class="n">_M</span> <span class="o">=</span> <span class="s2">&quot;|&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="n">MONTH</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="nb">len</span><span class="p">,</span> <span class="n">reverse</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span>
+<span class="n">_UPPER</span> <span class="o">=</span> <span class="s2">&quot;A-ZÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ&quot;</span>
+
+<span class="c1"># Abbreviations after which a full stop does not end a sentence.</span>
+<span class="n">_ABBR</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;čs|Čs|plk|pplk|mjr|kpt|pkpt|škpt|por|ppor|npor|prap|gen|genmjr|genpor|brig|&quot;</span>
+         <span class="s2">&quot;div|rtm|šrtm|des|rtn|čet|svob|sv|tzv|např|resp|tj|Dr|Ing|JUDr|MUDr|MVDr|PhDr|&quot;</span>
+         <span class="s2">&quot;RNDr|PhMr|MgPh|MUC|JUC|doc|prof|ryt|hr|sl|st|ml|č|r|s|v|[&quot;</span> <span class="o">+</span> <span class="n">_UPPER</span> <span class="o">+</span> <span class="s2">&quot;]&quot;</span><span class="p">)</span>
+<span class="n">_STOP</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\.\s+(?=[&quot;</span> <span class="o">+</span> <span class="n">_UPPER</span> <span class="o">+</span> <span class="sa">r</span><span class="s2">&quot;(])|(?&lt;=\])\.(?=[&quot;</span> <span class="o">+</span> <span class="n">_UPPER</span> <span class="o">+</span> <span class="s2">&quot;])&quot;</span><span class="p">)</span>  <span class="c1"># &#39;[I].Součástí&#39;</span>
+<span class="n">_NO_END</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;(?:\b(?:&quot;</span> <span class="o">+</span> <span class="n">_ABBR</span> <span class="o">+</span> <span class="sa">r</span><span class="s2">&quot;)|(?&lt;!\d)\d{1,2})$&quot;</span><span class="p">)</span>   <span class="c1"># &#39;čs.&#39;, &#39;plk.&#39;, &#39;15.&#39;</span>
+
+<span class="n">_PHASE</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;(?:,\s*|\s+a\s+|^)od\s+(&quot;</span> <span class="o">+</span> <span class="n">_M</span> <span class="o">+</span> <span class="sa">r</span><span class="s2">&quot;)(?:\s+(\d</span><span class="si">{4}</span><span class="s2">))?\s+&quot;</span><span class="p">)</span>
+<span class="n">_DAY</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;(\d{1,2})\.\s*(&quot;</span> <span class="o">+</span> <span class="n">_M</span> <span class="o">+</span> <span class="sa">r</span><span class="s2">&quot;)\s+(\d</span><span class="si">{4}</span><span class="s2">)&quot;</span><span class="p">)</span>
+<span class="n">_SUBORD</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;(?:,|\s+a)?\s*(?:ve věcech (\w+)\s+)?podléh\w+\s+&quot;</span><span class="p">)</span>
+<span class="n">_BRACKET</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\([^()]*\)?&quot;</span><span class="p">)</span>
+<span class="n">_PERIODS</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;([^()]+?)\s*\(([^()]*\d</span><span class="si">{4}</span><span class="s2">[^()]*)\)&quot;</span><span class="p">)</span>
+<span class="n">_STATE_SPLIT</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;,\s*|\s+a\s+(?=(?:na přesunu|v poli|ve? |na |u |poblíž ))&quot;</span><span class="p">)</span>
+<span class="n">_SUPERIOR</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;^(?:přímo\s+)?(?:veliteli|velitelství|náčelníkovi|přednostovi|&quot;</span>
+                       <span class="sa">r</span><span class="s2">&quot;předsedovi)\s+&quot;</span><span class="p">)</span>
+<span class="n">_COMPOSITION</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;Tvořil[aoy]? jej\s+(.+?),\s*celkem\s+([\d\s ]+?)\s+&quot;</span>
+                          <span class="sa">r</span><span class="s2">&quot;(?:legionář|osob|mužů|dobrovolník)&quot;</span><span class="p">)</span>
+
+<span class="n">_SCOPE</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;odborných&quot;</span><span class="p">:</span> <span class="s2">&quot;professional&quot;</span><span class="p">,</span> <span class="s2">&quot;ostatních&quot;</span><span class="p">:</span> <span class="s2">&quot;general&quot;</span><span class="p">}</span>
+<span class="n">_OFFICE</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;velitele&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;náčelníka štábu&quot;</span><span class="p">:</span> <span class="s2">&quot;chief_of_staff&quot;</span><span class="p">,</span>
+           <span class="s2">&quot;veřejného žalobce&quot;</span><span class="p">:</span> <span class="s2">&quot;prosecutor&quot;</span><span class="p">,</span> <span class="s2">&quot;předsedy&quot;</span><span class="p">:</span> <span class="s2">&quot;president&quot;</span><span class="p">}</span>
+<span class="n">_LIFECYCLE</span> <span class="o">=</span> <span class="p">[</span>  <span class="c1"># first match wins</span>
+    <span class="p">(</span><span class="s2">&quot;arrived_home&quot;</span><span class="p">,</span> <span class="sa">r</span><span class="s2">&quot;dorazil[oayi]?\b.*\bna čs\. území&quot;</span><span class="p">),</span>
+    <span class="p">(</span><span class="s2">&quot;sailed&quot;</span><span class="p">,</span> <span class="sa">r</span><span class="s2">&quot;vyplul[oayi]?\b&quot;</span><span class="p">),</span>
+    <span class="p">(</span><span class="s2">&quot;renamed&quot;</span><span class="p">,</span> <span class="sa">r</span><span class="s2">&quot;přejmenov[áa]n[oay]?\b|přeměněn[oay]?\b|změněn[oay]?\b&quot;</span><span class="p">),</span>
+    <span class="p">(</span><span class="s2">&quot;merged&quot;</span><span class="p">,</span> <span class="sa">r</span><span class="s2">&quot;slouč\w+|začleněn[oay]?\b|včleněn[oay]?\b|vplynul[oay]?\b&quot;</span><span class="p">),</span>
+    <span class="p">(</span><span class="s2">&quot;disbanded&quot;</span><span class="p">,</span> <span class="sa">r</span><span class="s2">&quot;zrušen[oay]?\b|zanikl[oay]?\b|rozpuštěn[oay]?\b|likvidov\w+&quot;</span><span class="p">),</span>
+    <span class="p">(</span><span class="s2">&quot;formed&quot;</span><span class="p">,</span> <span class="sa">r</span><span class="s2">&quot;vznikl[oay]?\b|zřízen[oay]?\b|ustaven[oay]?\b|vytvořen[oay]?\b|&quot;</span>
+               <span class="sa">r</span><span class="s2">&quot;zformov\w+|postaven[oay]?\b|sestaven[oay]?\b&quot;</span><span class="p">),</span>
+<span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">sentences</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Split an entry into sentences, keeping &#39;čs.&#39;, ranks and ordinals intact.&quot;&quot;&quot;</span>
+    <span class="n">out</span><span class="p">,</span> <span class="n">last</span> <span class="o">=</span> <span class="p">[],</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="n">_STOP</span><span class="o">.</span><span class="n">finditer</span><span class="p">(</span><span class="n">text</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">_NO_END</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">text</span><span class="p">[</span><span class="n">last</span><span class="p">:</span><span class="n">m</span><span class="o">.</span><span class="n">start</span><span class="p">()]):</span>
+            <span class="k">continue</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">text</span><span class="p">[</span><span class="n">last</span><span class="p">:</span><span class="n">m</span><span class="o">.</span><span class="n">start</span><span class="p">()]</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span>
+        <span class="n">last</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">end</span><span class="p">()</span>
+    <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">text</span><span class="p">[</span><span class="n">last</span><span class="p">:]</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s2">&quot; .&quot;</span><span class="p">))</span>
+    <span class="k">return</span> <span class="p">[</span><span class="n">s</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">out</span> <span class="k">if</span> <span class="n">s</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_ym</span><span class="p">(</span><span class="n">month</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">year</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">year</span><span class="si">}</span><span class="s2">-</span><span class="si">{</span><span class="n">MONTH</span><span class="p">[</span><span class="n">month</span><span class="p">]</span><span class="si">:</span><span class="s2">02d</span><span class="si">}</span><span class="s2">&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_iso</span><span class="p">(</span><span class="n">day</span><span class="p">:</span> <span class="n">re</span><span class="o">.</span><span class="n">Match</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">day</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span><span class="si">}</span><span class="s2">-</span><span class="si">{</span><span class="n">MONTH</span><span class="p">[</span><span class="n">day</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">2</span><span class="p">)]</span><span class="si">:</span><span class="s2">02d</span><span class="si">}</span><span class="s2">-</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">day</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span><span class="si">:</span><span class="s2">02d</span><span class="si">}</span><span class="s2">&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_strip_ref</span><span class="p">(</span><span class="n">s</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\s+&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">s</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;-&gt;&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="p">))</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s2">&quot; ,.;&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">split_phases</span><span class="p">(</span><span class="n">chain</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``&#39;v A, od března 1918 v B a od června v poli&#39;`` -&gt;</span>
+<span class="sd">    ``[(&#39;&#39;, &#39;v A&#39;), (&#39;1918-03&#39;, &#39;v B&#39;), (&#39;1918-06&#39;, &#39;v poli&#39;)]``.</span>
+
+<span class="sd">    A phase written without its year takes the year of the phase before it, or the</span>
+<span class="sd">    next one if the month runs backwards.&quot;&quot;&quot;</span>
+    <span class="n">out</span><span class="p">,</span> <span class="n">last</span><span class="p">,</span> <span class="n">start</span><span class="p">,</span> <span class="n">year</span> <span class="o">=</span> <span class="p">[],</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span>
+    <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="n">_PHASE</span><span class="o">.</span><span class="n">finditer</span><span class="p">(</span><span class="n">chain</span><span class="p">):</span>
+        <span class="n">body</span> <span class="o">=</span> <span class="n">chain</span><span class="p">[</span><span class="n">last</span><span class="p">:</span><span class="n">m</span><span class="o">.</span><span class="n">start</span><span class="p">()]</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s2">&quot; ,&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">body</span> <span class="ow">or</span> <span class="n">out</span><span class="p">:</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">start</span><span class="p">,</span> <span class="n">body</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">2</span><span class="p">):</span>
+            <span class="n">year</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">year</span> <span class="ow">and</span> <span class="n">start</span> <span class="ow">and</span> <span class="n">MONTH</span><span class="p">[</span><span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)]</span> <span class="o">&lt;</span> <span class="nb">int</span><span class="p">(</span><span class="n">start</span><span class="p">[</span><span class="mi">5</span><span class="p">:</span><span class="mi">7</span><span class="p">]):</span>
+            <span class="n">year</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">year</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="n">start</span><span class="p">,</span> <span class="n">last</span> <span class="o">=</span> <span class="p">(</span><span class="n">_ym</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span> <span class="n">year</span><span class="p">)</span> <span class="k">if</span> <span class="n">year</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">),</span> <span class="n">m</span><span class="o">.</span><span class="n">end</span><span class="p">()</span>
+    <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">start</span><span class="p">,</span> <span class="n">chain</span><span class="p">[</span><span class="n">last</span><span class="p">:]</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s2">&quot; ,&quot;</span><span class="p">)))</span>
+    <span class="k">return</span> <span class="p">[(</span><span class="n">d</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span> <span class="k">for</span> <span class="n">d</span><span class="p">,</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">out</span> <span class="k">if</span> <span class="n">b</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">parse_states</span><span class="p">(</span><span class="n">body</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;One phase of a location chain -&gt; ordered ``(state, place)`` pairs.&quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">part</span> <span class="ow">in</span> <span class="n">_STATE_SPLIT</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="n">_BRACKET</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">body</span><span class="p">)):</span>
+        <span class="n">p</span> <span class="o">=</span> <span class="n">_strip_ref</span><span class="p">(</span><span class="n">part</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">p</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="k">if</span> <span class="n">p</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;na přesunu do vlasti&quot;</span><span class="p">):</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s2">&quot;moving_home&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+        <span class="k">elif</span> <span class="n">p</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;na přesunu&quot;</span><span class="p">):</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s2">&quot;moving&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+            <span class="n">rest</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;na přesunu\s+(?:a\s+)?(?:ve?|na|u)\s+(.+)$&quot;</span><span class="p">,</span> <span class="n">p</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">rest</span><span class="p">:</span>
+                <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s2">&quot;place&quot;</span><span class="p">,</span> <span class="n">_strip_ref</span><span class="p">(</span><span class="n">rest</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">))))</span>
+        <span class="k">elif</span> <span class="n">p</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;v poli&quot;</span><span class="p">):</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s2">&quot;field&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s2">&quot;place&quot;</span><span class="p">,</span> <span class="n">_strip_ref</span><span class="p">(</span><span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;^(?:ve?|na|u|poblíž)\s+&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">p</span><span class="p">))))</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">parse_period</span><span class="p">(</span><span class="n">s</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``&#39;srpen 1917 – září 1917&#39;`` -&gt; ``(&#39;1917-08&#39;, &#39;1917-09&#39;)``; open ends are &#39;&#39;.&quot;&quot;&quot;</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="n">ms</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;(&quot;</span> <span class="o">+</span> <span class="n">_M</span> <span class="o">+</span> <span class="sa">r</span><span class="s2">&quot;)\s+(\d</span><span class="si">{4}</span><span class="s2">)&quot;</span><span class="p">,</span> <span class="n">s</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">ms</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">first</span><span class="p">,</span> <span class="n">last</span> <span class="o">=</span> <span class="n">_ym</span><span class="p">(</span><span class="o">*</span><span class="n">ms</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="n">_ym</span><span class="p">(</span><span class="o">*</span><span class="n">ms</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">ms</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span> <span class="ow">and</span> <span class="n">s</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;od &quot;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">first</span><span class="p">,</span> <span class="s2">&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">ms</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span> <span class="ow">and</span> <span class="n">s</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;do &quot;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">first</span>
+    <span class="k">return</span> <span class="n">first</span><span class="p">,</span> <span class="n">last</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">parse_commanders</span><span class="p">(</span><span class="n">sentence</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;&#39;Funkci velitele pluku zastávali A (…), B (…), funkci náčelníka štábu zastával</span>
+<span class="sd">    C (…)&#39; -&gt; ``(office, name, from, to)``; the commander&#39;s own office is &#39;&#39;.&quot;&quot;&quot;</span>
+    <span class="n">parts</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;[Ff]unkci\s+(.+?)\s+zastával[iay]?\s+&quot;</span><span class="p">,</span> <span class="n">sentence</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">office</span><span class="p">,</span> <span class="n">body</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">parts</span><span class="p">[</span><span class="mi">1</span><span class="p">::</span><span class="mi">2</span><span class="p">],</span> <span class="n">parts</span><span class="p">[</span><span class="mi">2</span><span class="p">::</span><span class="mi">2</span><span class="p">]):</span>
+        <span class="n">role</span> <span class="o">=</span> <span class="nb">next</span><span class="p">((</span><span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">_OFFICE</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">office</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">k</span><span class="p">)),</span> <span class="n">office</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">period</span> <span class="ow">in</span> <span class="n">_PERIODS</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="n">body</span><span class="p">):</span>
+            <span class="n">name</span> <span class="o">=</span> <span class="n">_strip_ref</span><span class="p">(</span><span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;^\s*(?:,|a\b|postupně)\s*&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">name</span><span class="o">.</span><span class="n">strip</span><span class="p">()))</span>
+            <span class="k">for</span> <span class="n">one</span> <span class="ow">in</span> <span class="n">re</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;,\s*(?=(?:od |do )?(?:&quot;</span> <span class="o">+</span> <span class="n">_M</span> <span class="o">+</span> <span class="sa">r</span><span class="s2">&quot;))&quot;</span><span class="p">,</span> <span class="n">period</span><span class="p">):</span>
+                <span class="n">start</span><span class="p">,</span> <span class="n">end</span> <span class="o">=</span> <span class="n">parse_period</span><span class="p">(</span><span class="n">one</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">name</span> <span class="ow">and</span> <span class="p">(</span><span class="n">start</span> <span class="ow">or</span> <span class="n">end</span><span class="p">):</span>
+                    <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">role</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">start</span><span class="p">,</span> <span class="n">end</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">parse_parents</span><span class="p">(</span><span class="n">sub</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The subordination chain -&gt; ``(scope, month, formation)``.</span>
+
+<span class="sd">    A unit that answered to one superior in its own branch and to another in everything</span>
+<span class="sd">    else carries two chains (&#39;ve věcech odborných …, ve věcech ostatních …&#39;); ``scope``</span>
+<span class="sd">    tells them apart and is &#39;&#39; when there is only one.&quot;&quot;&quot;</span>
+    <span class="n">pieces</span> <span class="o">=</span> <span class="n">_SUBORD</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="n">sub</span><span class="p">)</span>              <span class="c1"># [&#39;&#39;, scope, chain, scope, chain, …]</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">scope</span><span class="p">,</span> <span class="n">chain</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">pieces</span><span class="p">[</span><span class="mi">1</span><span class="p">::</span><span class="mi">2</span><span class="p">],</span> <span class="n">pieces</span><span class="p">[</span><span class="mi">2</span><span class="p">::</span><span class="mi">2</span><span class="p">]):</span>
+        <span class="k">for</span> <span class="n">start</span><span class="p">,</span> <span class="n">body</span> <span class="ow">in</span> <span class="n">split_phases</span><span class="p">(</span><span class="n">_BRACKET</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">chain</span><span class="p">)):</span>
+            <span class="n">parent</span> <span class="o">=</span> <span class="n">_strip_ref</span><span class="p">(</span><span class="n">_SUPERIOR</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">_strip_ref</span><span class="p">(</span><span class="n">body</span><span class="p">)))</span>
+            <span class="k">if</span> <span class="n">parent</span><span class="p">:</span>
+                <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">_SCOPE</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">scope</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span> <span class="n">start</span><span class="p">,</span> <span class="n">parent</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">parse_lifecycle</span><span class="p">(</span><span class="n">sentence</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A sentence with a full date and a lifecycle verb -&gt; ``(state, date, target)``.&quot;&quot;&quot;</span>
+    <span class="n">day</span> <span class="o">=</span> <span class="n">_DAY</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">sentence</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">day</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">for</span> <span class="n">state</span><span class="p">,</span> <span class="n">pattern</span> <span class="ow">in</span> <span class="n">_LIFECYCLE</span><span class="p">:</span>
+        <span class="n">verb</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">pattern</span><span class="p">,</span> <span class="n">sentence</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">verb</span><span class="p">:</span>
+            <span class="n">tail</span> <span class="o">=</span> <span class="n">sentence</span><span class="p">[</span><span class="nb">max</span><span class="p">(</span><span class="n">day</span><span class="o">.</span><span class="n">end</span><span class="p">(),</span> <span class="n">verb</span><span class="o">.</span><span class="n">end</span><span class="p">()):]</span>
+            <span class="n">target</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\b(?:z|ze|na|do|v)\s+(.+)$&quot;</span><span class="p">,</span> <span class="n">tail</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">state</span><span class="p">,</span> <span class="n">_iso</span><span class="p">(</span><span class="n">day</span><span class="p">),</span> <span class="n">_strip_ref</span><span class="p">(</span><span class="n">target</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">))[:</span><span class="mi">160</span><span class="p">]</span> <span class="k">if</span> <span class="n">target</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+    <span class="k">return</span> <span class="kc">None</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">parse_transport</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A transport entry: the units that travelled and their number.&quot;&quot;&quot;</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">_COMPOSITION</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">m</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[]</span>
+    <span class="n">day</span> <span class="o">=</span> <span class="n">_DAY</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="n">common</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">state</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">date_from</span><span class="o">=</span><span class="n">_iso</span><span class="p">(</span><span class="n">day</span><span class="p">)</span> <span class="k">if</span> <span class="n">day</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+                  <span class="n">date_from_precision</span><span class="o">=</span><span class="s2">&quot;day&quot;</span> <span class="k">if</span> <span class="n">day</span> <span class="k">else</span> <span class="s2">&quot;unknown&quot;</span><span class="p">,</span> <span class="n">date_to</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">[</span><span class="nb">dict</span><span class="p">(</span><span class="n">kind</span><span class="o">=</span><span class="s2">&quot;composition&quot;</span><span class="p">,</span> <span class="n">value</span><span class="o">=</span><span class="n">_strip_ref</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)),</span> <span class="o">**</span><span class="n">common</span><span class="p">),</span>
+            <span class="nb">dict</span><span class="p">(</span><span class="n">kind</span><span class="o">=</span><span class="s2">&quot;strength&quot;</span><span class="p">,</span> <span class="n">value</span><span class="o">=</span><span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\D&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">2</span><span class="p">)),</span> <span class="o">**</span><span class="n">common</span><span class="p">)]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_phase_row</span><span class="p">(</span><span class="n">kind</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">state</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">start</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">formed</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">start</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">dict</span><span class="p">(</span><span class="n">kind</span><span class="o">=</span><span class="n">kind</span><span class="p">,</span> <span class="n">state</span><span class="o">=</span><span class="n">state</span><span class="p">,</span> <span class="n">value</span><span class="o">=</span><span class="n">value</span><span class="p">,</span> <span class="n">date_from</span><span class="o">=</span><span class="n">start</span><span class="p">,</span>
+                    <span class="n">date_from_precision</span><span class="o">=</span><span class="s2">&quot;month&quot;</span><span class="p">,</span> <span class="n">date_to</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">dict</span><span class="p">(</span><span class="n">kind</span><span class="o">=</span><span class="n">kind</span><span class="p">,</span> <span class="n">state</span><span class="o">=</span><span class="n">state</span><span class="p">,</span> <span class="n">value</span><span class="o">=</span><span class="n">value</span><span class="p">,</span> <span class="n">date_from</span><span class="o">=</span><span class="n">formed</span><span class="p">,</span>
+                <span class="n">date_from_precision</span><span class="o">=</span><span class="s2">&quot;formation&quot;</span> <span class="k">if</span> <span class="n">formed</span> <span class="k">else</span> <span class="s2">&quot;unknown&quot;</span><span class="p">,</span> <span class="n">date_to</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">parse_entry</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;All timeline rows of one entry or sub-entry (without the unit columns).&quot;&quot;&quot;</span>
+    <span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">formed</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+    <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">sentences</span><span class="p">(</span><span class="n">text</span><span class="p">):</span>
+        <span class="n">loc</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;Nacház\w+ se (?:se )?(.*)$&quot;</span><span class="p">,</span> <span class="n">s</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">loc</span><span class="p">:</span>
+            <span class="n">cut</span> <span class="o">=</span> <span class="n">_SUBORD</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">loc</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span>
+            <span class="n">chain</span> <span class="o">=</span> <span class="n">loc</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)[:</span><span class="n">cut</span><span class="o">.</span><span class="n">start</span><span class="p">()]</span> <span class="k">if</span> <span class="n">cut</span> <span class="k">else</span> <span class="n">loc</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">start</span><span class="p">,</span> <span class="n">body</span> <span class="ow">in</span> <span class="n">split_phases</span><span class="p">(</span><span class="n">chain</span><span class="p">):</span>
+                <span class="k">for</span> <span class="n">state</span><span class="p">,</span> <span class="n">place</span> <span class="ow">in</span> <span class="n">parse_states</span><span class="p">(</span><span class="n">body</span><span class="p">):</span>
+                    <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">_phase_row</span><span class="p">(</span><span class="s2">&quot;location&quot;</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">place</span><span class="p">,</span> <span class="n">start</span><span class="p">,</span> <span class="n">formed</span><span class="p">))</span>
+            <span class="k">if</span> <span class="n">cut</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">scope</span><span class="p">,</span> <span class="n">start</span><span class="p">,</span> <span class="n">parent</span> <span class="ow">in</span> <span class="n">parse_parents</span><span class="p">(</span><span class="n">loc</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)[</span><span class="n">cut</span><span class="o">.</span><span class="n">start</span><span class="p">():]):</span>
+                    <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">_phase_row</span><span class="p">(</span><span class="s2">&quot;parent&quot;</span><span class="p">,</span> <span class="n">scope</span><span class="p">,</span> <span class="n">parent</span><span class="p">,</span> <span class="n">start</span><span class="p">,</span> <span class="n">formed</span><span class="p">))</span>
+            <span class="k">continue</span>
+        <span class="k">if</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;[Ff]unkci\b.*zastával&quot;</span><span class="p">,</span> <span class="n">s</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">office</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">start</span><span class="p">,</span> <span class="n">end</span> <span class="ow">in</span> <span class="n">parse_commanders</span><span class="p">(</span><span class="n">s</span><span class="p">):</span>
+                <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">dict</span><span class="p">(</span><span class="n">kind</span><span class="o">=</span><span class="s2">&quot;commander&quot;</span><span class="p">,</span> <span class="n">state</span><span class="o">=</span><span class="n">office</span><span class="p">,</span> <span class="n">value</span><span class="o">=</span><span class="n">name</span><span class="p">,</span>
+                                 <span class="n">date_from</span><span class="o">=</span><span class="n">start</span><span class="p">,</span>
+                                 <span class="n">date_from_precision</span><span class="o">=</span><span class="s2">&quot;month&quot;</span> <span class="k">if</span> <span class="n">start</span> <span class="k">else</span> <span class="s2">&quot;unknown&quot;</span><span class="p">,</span>
+                                 <span class="n">date_to</span><span class="o">=</span><span class="n">end</span><span class="p">))</span>
+            <span class="k">continue</span>
+        <span class="n">life</span> <span class="o">=</span> <span class="n">parse_lifecycle</span><span class="p">(</span><span class="n">s</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">life</span><span class="p">:</span>
+            <span class="n">state</span><span class="p">,</span> <span class="n">date</span><span class="p">,</span> <span class="n">target</span> <span class="o">=</span> <span class="n">life</span>
+            <span class="k">if</span> <span class="n">state</span> <span class="o">==</span> <span class="s2">&quot;formed&quot;</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">formed</span><span class="p">:</span>
+                <span class="n">formed</span> <span class="o">=</span> <span class="n">date</span>
+            <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">dict</span><span class="p">(</span><span class="n">kind</span><span class="o">=</span><span class="s2">&quot;lifecycle&quot;</span><span class="p">,</span> <span class="n">state</span><span class="o">=</span><span class="n">state</span><span class="p">,</span> <span class="n">value</span><span class="o">=</span><span class="n">target</span><span class="p">,</span> <span class="n">date_from</span><span class="o">=</span><span class="n">date</span><span class="p">,</span>
+                             <span class="n">date_from_precision</span><span class="o">=</span><span class="s2">&quot;day&quot;</span><span class="p">,</span> <span class="n">date_to</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">text</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;Dopravní jednotka&quot;</span><span class="p">):</span>
+        <span class="n">rows</span> <span class="o">+=</span> <span class="n">parse_transport</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">rows</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">out_of_order</span><span class="p">(</span><span class="n">months</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">bool</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;True for the items outside the longest non-decreasing run of *months*.&quot;&quot;&quot;</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">months</span><span class="p">)</span>
+    <span class="n">best</span><span class="p">,</span> <span class="n">prev</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">*</span> <span class="n">n</span><span class="p">,</span> <span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">*</span> <span class="n">n</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">i</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">months</span><span class="p">[</span><span class="n">j</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">months</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="ow">and</span> <span class="n">best</span><span class="p">[</span><span class="n">j</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span> <span class="o">&gt;</span> <span class="n">best</span><span class="p">[</span><span class="n">i</span><span class="p">]:</span>
+                <span class="n">best</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">prev</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">best</span><span class="p">[</span><span class="n">j</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">j</span>
+    <span class="n">keep</span><span class="p">,</span> <span class="n">i</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(),</span> <span class="nb">max</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">),</span> <span class="n">key</span><span class="o">=</span><span class="n">best</span><span class="o">.</span><span class="fm">__getitem__</span><span class="p">)</span> <span class="k">if</span> <span class="n">n</span> <span class="k">else</span> <span class="o">-</span><span class="mi">1</span>
+    <span class="k">while</span> <span class="n">i</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">keep</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+        <span class="n">i</span> <span class="o">=</span> <span class="n">prev</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+    <span class="k">return</span> <span class="p">[</span><span class="n">k</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">keep</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">)]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">flag_suspect</span><span class="p">(</span><span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Mark the location rows of one entry whose month breaks the chain&#39;s order.&quot;&quot;&quot;</span>
+    <span class="n">chain</span> <span class="o">=</span> <span class="p">[</span><span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;kind&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;location&quot;</span> <span class="ow">and</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;date_from&quot;</span><span class="p">]]</span>
+    <span class="k">for</span> <span class="n">r</span><span class="p">,</span> <span class="n">bad</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">chain</span><span class="p">,</span> <span class="n">out_of_order</span><span class="p">([</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;date_from&quot;</span><span class="p">][:</span><span class="mi">7</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">chain</span><span class="p">])):</span>
+        <span class="n">r</span><span class="p">[</span><span class="s2">&quot;date_suspect&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">bad</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">build</span><span class="p">(</span><span class="n">epub</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+    <span class="n">entries</span> <span class="o">=</span> <span class="n">read_entries</span><span class="p">(</span><span class="n">epub</span><span class="p">)</span>
+    <span class="n">auth</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">AUTHORITY</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="n">units</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">auth</span><span class="p">[</span><span class="s2">&quot;unit_cs&quot;</span><span class="p">])</span>
+    <span class="n">rows</span><span class="p">,</span> <span class="n">seen</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">head</span><span class="p">,</span> <span class="n">sub</span><span class="p">,</span> <span class="n">text</span> <span class="ow">in</span> <span class="n">entries</span><span class="o">.</span><span class="n">itertuples</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">head</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">units</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">sub</span> <span class="o">=</span> <span class="n">sub</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span>
+        <span class="n">seen</span><span class="p">[</span><span class="n">head</span><span class="p">,</span> <span class="n">sub</span><span class="p">]</span> <span class="o">=</span> <span class="n">seen</span><span class="o">.</span><span class="n">get</span><span class="p">((</span><span class="n">head</span><span class="p">,</span> <span class="n">sub</span><span class="p">),</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="k">if</span> <span class="n">seen</span><span class="p">[</span><span class="n">head</span><span class="p">,</span> <span class="n">sub</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">sub</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">sub</span><span class="si">}</span><span class="s2"> #</span><span class="si">{</span><span class="n">seen</span><span class="p">[</span><span class="n">head</span><span class="p">,</span><span class="w"> </span><span class="n">sub</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="n">entry</span> <span class="o">=</span> <span class="p">[</span><span class="nb">dict</span><span class="p">(</span><span class="n">date_suspect</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="o">**</span><span class="n">r</span><span class="p">)</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">parse_entry</span><span class="p">(</span><span class="n">text</span><span class="p">)]</span>
+        <span class="n">flag_suspect</span><span class="p">(</span><span class="n">entry</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">entry</span><span class="p">,</span> <span class="n">start</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+            <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">dict</span><span class="p">(</span><span class="n">unit_cs</span><span class="o">=</span><span class="n">head</span><span class="p">,</span> <span class="n">subunit</span><span class="o">=</span><span class="n">sub</span><span class="p">,</span> <span class="n">seq</span><span class="o">=</span><span class="n">i</span><span class="p">,</span> <span class="o">**</span><span class="n">r</span><span class="p">))</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="n">COLUMNS</span><span class="p">)</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">out</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span><span class="n">auth</span><span class="p">[[</span><span class="s2">&quot;unit_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;theatre&quot;</span><span class="p">,</span> <span class="s2">&quot;number&quot;</span><span class="p">]],</span> <span class="n">on</span><span class="o">=</span><span class="s2">&quot;unit_cs&quot;</span><span class="p">,</span>
+                    <span class="n">how</span><span class="o">=</span><span class="s2">&quot;left&quot;</span><span class="p">,</span> <span class="n">validate</span><span class="o">=</span><span class="s2">&quot;m:1&quot;</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">out</span><span class="p">)</span> <span class="o">==</span> <span class="n">n</span> <span class="ow">and</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;theatre&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;source&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;Fidler 2025, entry &quot;</span> <span class="o">+</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;unit_cs&quot;</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">epub</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="k">else</span> <span class="n">DEFAULT_EPUB</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">epub</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;epub not found: </span><span class="si">{</span><span class="n">epub</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">tab</span> <span class="o">=</span> <span class="n">build</span><span class="p">(</span><span class="n">epub</span><span class="p">)</span>
+    <span class="n">tab</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">OUT</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="n">with_sub</span> <span class="o">=</span> <span class="p">(</span><span class="n">tab</span><span class="p">[</span><span class="s2">&quot;subunit&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="n">tab</span><span class="p">[</span><span class="s2">&quot;unit_cs&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">any</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;wrote </span><span class="si">{</span><span class="n">OUT</span><span class="o">.</span><span class="n">relative_to</span><span class="p">(</span><span class="n">ROOT</span><span class="p">)</span><span class="si">}</span><span class="s2">  (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">tab</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> rows, &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">tab</span><span class="p">[</span><span class="s1">&#39;unit_cs&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">nunique</span><span class="p">()</span><span class="si">}</span><span class="s2"> units, </span><span class="si">{</span><span class="n">with_sub</span><span class="si">}</span><span class="s2"> with sub-units)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">tab</span><span class="o">.</span><span class="n">groupby</span><span class="p">([</span><span class="s2">&quot;kind&quot;</span><span class="p">,</span> <span class="s2">&quot;state&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">size</span><span class="p">()</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">main</span><span class="p">()</span>
+</pre></div></td></tr></table></div>
+</details>

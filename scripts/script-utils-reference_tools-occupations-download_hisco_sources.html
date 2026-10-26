@@ -1,0 +1,881 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>The occupation pipeline needs two external ingredients, and only one of them can be
+downloaded unattended:</p><p class="tldr-facts"><b>Reference tools</b> · v1.0.0 · 256 lines · 6 public functions · 10 constants · used by nothing else · <code>utils/reference_tools/occupations/download_hisco_sources.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-reference_tools-occupations-download_hisco_sources-sha256">sha256</a><a class="chip" href="#fn-utils-reference_tools-occupations-download_hisco_sources-fetch">fetch</a><a class="chip" href="#fn-utils-reference_tools-occupations-download_hisco_sources-download_druid">download_druid</a><a class="chip" href="#fn-utils-reference_tools-occupations-download_hisco_sources-check_hsn">check_hsn</a><a class="chip" href="#fn-utils-reference_tools-occupations-download_hisco_sources-write_manifest">write_manifest</a><a class="chip" href="#fn-utils-reference_tools-occupations-download_hisco_sources-main">main</a><a class="chip const" href="#c-utils-reference_tools-occupations-download_hisco_sources-ROOT">ROOT</a><a class="chip const" href="#c-utils-reference_tools-occupations-download_hisco_sources-RAW">RAW</a><a class="chip const" href="#c-utils-reference_tools-occupations-download_hisco_sources-DRUID_DATASET">DRUID_DATASET</a><a class="chip const" href="#c-utils-reference_tools-occupations-download_hisco_sources-DRUID_SPARQL">DRUID_SPARQL</a><a class="chip const" href="#c-utils-reference_tools-occupations-download_hisco_sources-DRUID_BASE">DRUID_BASE</a><a class="chip const" href="#c-utils-reference_tools-occupations-download_hisco_sources-DRUID_LICENCE">DRUID_LICENCE</a><a class="chip const" href="#c-utils-reference_tools-occupations-download_hisco_sources-DRUID_ASSETS">DRUID_ASSETS</a><a class="chip const" href="#c-utils-reference_tools-occupations-download_hisco_sources-HSN_LANDING">HSN_LANDING</a><a class="chip const" href="#c-utils-reference_tools-occupations-download_hisco_sources-HSN_LICENCE">HSN_LICENCE</a><a class="chip const" href="#c-utils-reference_tools-occupations-download_hisco_sources-HSN_FILES">HSN_FILES</a></div>
+<h2>How it works</h2><ul>
+<li><strong>History of Work — HISCO</strong> (IISG / Datalegend, CC-BY-SA 4.0). Five CSV assets served
+  straight off the druid asset endpoint. This script fetches them. They supply the HISCO
+  <em>hierarchy</em> (major → minor → unit → micro, with English labels and task descriptions),
+  the 246k multilingual <strong>occupational title → HISCO</strong> links, and the status / relation /
+  product modifier code lists.</li>
+<li><strong>HSN standardised, HISCO-coded occupational titles, release 2020.02</strong> (IISG). Behind a
+  click-through on the IISG site, so it is <em>not</em> fetched here — the script only checks the
+  two CSVs are present and points at the landing page if they are not. Its value to this
+  project is the HISCO → HISCLASS / HISCAM / SOCPO crosswalk; its Dutch title strings are
+  of no use for Czech input.</li>
+</ul>
+<p>Every file present afterwards — downloaded or hand-placed — is recorded in
+<code>MANIFEST.TXT</code> with byte size, SHA-256, source URL, retrieval date and licence, so the
+provenance of the whole folder lives in one auditable place.</p>
+<p>Run:    python utils/reference_tools/occupations/download_hisco_sources.py [--force]
+Emits:  data/raw/hisco/{hisco_45_full_03.csv, hisco_occupation_link_combined.csv,
+                        status.csv, relation.csv, product.csv, MANIFEST.TXT}
+Consumed by utils/reference_tools/occupations/build_hisco_authority.py.</p>
+<p>Idempotent: a file already on disk whose SHA-256 matches the recorded one is skipped.
+<code>--force</code> re-downloads regardless.</p>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-reference_tools-occupations-download_hisco_sources-sha256">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">sha256</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<div class="fndoc"><p>SHA-256 of a file, read in chunks — these are tens of megabytes.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/lexikon_1910/extract_prose_pages.py</code> <code>utils/lexikon_1910/run_frozen.py</code> <code>utils/lexikon_1910/run_lexikon_1910_pilot.py</code> <code>utils/lexikon_1910/run_r5_german_notes.py</code> <code>utils/scraping/fetch_vua_courts.py</code></p>
+<details><summary>source · lines 97–103 (7 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">sha256</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;SHA-256 of a file, read in chunks — these are tens of megabytes.&quot;&quot;&quot;</span>
+    <span class="n">h</span> <span class="o">=</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">sha256</span><span class="p">()</span>
+    <span class="k">with</span> <span class="n">path</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;rb&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">chunk</span> <span class="ow">in</span> <span class="nb">iter</span><span class="p">(</span><span class="k">lambda</span><span class="p">:</span> <span class="n">fh</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="mi">20</span><span class="p">),</span> <span class="sa">b</span><span class="s2">&quot;&quot;</span><span class="p">):</span>
+            <span class="n">h</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">chunk</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">h</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-download_hisco_sources-fetch">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">fetch</span><span class="p">(</span><span class="n">url</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">dest</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span></pre>
+<div class="fndoc"><p>Stream <code>url</code> to <code>dest</code> via a temp file, so a failed download leaves nothing.</p>
+<p>Returns True if the transfer was TLS-verified. Verification is attempted first and
+only relaxed if the local trust store rejects the chain — which it does on this
+project's Windows machine, where TLS is intercepted and even the <code>certifi</code> bundle
+fails. The same relaxation is already needed elsewhere in the repo (see
+<code>utils/scraping/scraper_vuapraha.py</code>, and the <code>curl --ssl-no-revoke</code> note in
+DATA_SOURCES.md §3). Integrity is covered instead by the recorded SHA-256 and the
+expected byte size — check them if the provenance matters to you.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_scraper_verlustlisten.py</code> <code>utils/docs/build_docs.py</code> <code>utils/scraping/scraper_kramerius.py</code> <code>utils/scraping/scraper_kramerius7.py</code> <code>utils/scraping/scraper_verlustlisten.py</code></p>
+<details><summary>source · lines 118–139 (22 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">fetch</span><span class="p">(</span><span class="n">url</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">dest</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Stream ``url`` to ``dest`` via a temp file, so a failed download leaves nothing.</span>
+
+<span class="sd">    Returns True if the transfer was TLS-verified. Verification is attempted first and</span>
+<span class="sd">    only relaxed if the local trust store rejects the chain — which it does on this</span>
+<span class="sd">    project&#39;s Windows machine, where TLS is intercepted and even the ``certifi`` bundle</span>
+<span class="sd">    fails. The same relaxation is already needed elsewhere in the repo (see</span>
+<span class="sd">    ``utils/scraping/scraper_vuapraha.py``, and the ``curl --ssl-no-revoke`` note in</span>
+<span class="sd">    DATA_SOURCES.md §3). Integrity is covered instead by the recorded SHA-256 and the</span>
+<span class="sd">    expected byte size — check them if the provenance matters to you.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">requests</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">_stream</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">dest</span><span class="p">,</span> <span class="n">verify</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="k">except</span> <span class="n">requests</span><span class="o">.</span><span class="n">exceptions</span><span class="o">.</span><span class="n">SSLError</span><span class="p">:</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">urllib3</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">urllib3.exceptions</span><span class="w"> </span><span class="kn">import</span> <span class="n">InsecureRequestWarning</span>
+        <span class="n">urllib3</span><span class="o">.</span><span class="n">disable_warnings</span><span class="p">(</span><span class="n">InsecureRequestWarning</span><span class="p">)</span>
+        <span class="n">_stream</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">dest</span><span class="p">,</span> <span class="n">verify</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">False</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-download_hisco_sources-download_druid">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">download_druid</span><span class="p">(</span><span class="n">force</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span></pre>
+<div class="fndoc"><p>Fetch the five druid assets. Returns filename → sha256 for those on disk.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 142–165 (24 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">download_druid</span><span class="p">(</span><span class="n">force</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Fetch the five druid assets. Returns filename → sha256 for those on disk.&quot;&quot;&quot;</span>
+    <span class="n">RAW</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">digests</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">unverified</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="p">(</span><span class="n">asset_id</span><span class="p">,</span> <span class="n">expected_size</span><span class="p">,</span> <span class="n">_role</span><span class="p">)</span> <span class="ow">in</span> <span class="n">DRUID_ASSETS</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">dest</span> <span class="o">=</span> <span class="n">RAW</span> <span class="o">/</span> <span class="n">name</span>
+        <span class="k">if</span> <span class="n">dest</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">force</span><span class="p">:</span>
+            <span class="n">digests</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">sha256</span><span class="p">(</span><span class="n">dest</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  skip     </span><span class="si">{</span><span class="n">name</span><span class="si">:</span><span class="s2">&lt;38</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">dest</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span><span class="si">:</span><span class="s2">&gt;10,</span><span class="si">}</span><span class="s2"> B  (present)&quot;</span><span class="p">)</span>
+            <span class="k">continue</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  download </span><span class="si">{</span><span class="n">name</span><span class="si">:</span><span class="s2">&lt;38</span><span class="si">}</span><span class="s2"> ...&quot;</span><span class="p">,</span> <span class="n">end</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">flush</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">verified</span> <span class="o">=</span> <span class="n">fetch</span><span class="p">(</span><span class="n">DRUID_BASE</span> <span class="o">+</span> <span class="n">asset_id</span><span class="p">,</span> <span class="n">dest</span><span class="p">)</span>
+        <span class="n">unverified</span> <span class="o">+=</span> <span class="ow">not</span> <span class="n">verified</span>
+        <span class="n">size</span> <span class="o">=</span> <span class="n">dest</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span>
+        <span class="n">digests</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">sha256</span><span class="p">(</span><span class="n">dest</span><span class="p">)</span>
+        <span class="n">flag</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">size</span> <span class="o">==</span> <span class="n">expected_size</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">&quot;  ** size differs from </span><span class="si">{</span><span class="n">expected_size</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> **&quot;</span>
+        <span class="n">tls</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">verified</span> <span class="k">else</span> <span class="s2">&quot;  [TLS unverified]&quot;</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\r</span><span class="s2">  download </span><span class="si">{</span><span class="n">name</span><span class="si">:</span><span class="s2">&lt;38</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">size</span><span class="si">:</span><span class="s2">&gt;10,</span><span class="si">}</span><span class="s2"> B</span><span class="si">{</span><span class="n">flag</span><span class="si">}{</span><span class="n">tls</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">unverified</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  note: </span><span class="si">{</span><span class="n">unverified</span><span class="si">}</span><span class="s2"> file(s) fetched with TLS verification relaxed — the &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;local trust store rejects this host&#39;s chain.</span><span class="se">\n</span><span class="s2">&quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;        Sizes matched the published values; SHA-256 recorded in MANIFEST.TXT.&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">digests</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-download_hisco_sources-check_hsn">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">check_hsn</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span></pre>
+<div class="fndoc"><p>Verify the click-through HSN files are present; never fetch them.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 168–182 (15 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">check_hsn</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Verify the click-through HSN files are present; never fetch them.&quot;&quot;&quot;</span>
+    <span class="n">digests</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">missing</span> <span class="o">=</span> <span class="p">[</span><span class="n">n</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">HSN_FILES</span> <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="n">RAW</span> <span class="o">/</span> <span class="n">n</span><span class="p">)</span><span class="o">.</span><span class="n">exists</span><span class="p">()]</span>
+    <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">HSN_FILES</span><span class="p">:</span>
+        <span class="n">path</span> <span class="o">=</span> <span class="n">RAW</span> <span class="o">/</span> <span class="n">name</span>
+        <span class="k">if</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="n">digests</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">sha256</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  present  </span><span class="si">{</span><span class="n">name</span><span class="si">:</span><span class="s2">&lt;38</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">path</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span><span class="si">:</span><span class="s2">&gt;10,</span><span class="si">}</span><span class="s2"> B&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">missing</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  HSN files not on disk (download by hand, click-through required):&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">missing</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    - </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">HSN_LANDING</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">digests</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-download_hisco_sources-write_manifest">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">write_manifest</span><span class="p">(</span><span class="n">digests</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Path</span></pre>
+<div class="fndoc"><p>Rewrite MANIFEST.TXT with full provenance for every file in data/raw/hisco/.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 185–235 (51 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">write_manifest</span><span class="p">(</span><span class="n">digests</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Rewrite MANIFEST.TXT with full provenance for every file in data/raw/hisco/.&quot;&quot;&quot;</span>
+    <span class="n">today</span> <span class="o">=</span> <span class="n">date</span><span class="o">.</span><span class="n">today</span><span class="p">()</span><span class="o">.</span><span class="n">isoformat</span><span class="p">()</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="s2">&quot;data/raw/hisco/ — HISCO source files&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;Manifest written </span><span class="si">{</span><span class="n">today</span><span class="si">}</span><span class="s2"> by utils/reference_tools/occupations/download_hisco_sources.py &quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;v</span><span class="si">{</span><span class="n">__version__</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;SOURCE A — History of Work (HISCO)&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;  dataset : </span><span class="si">{</span><span class="n">DRUID_DATASET</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;  sparql  : </span><span class="si">{</span><span class="n">DRUID_SPARQL</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;  assets  : </span><span class="si">{</span><span class="n">DRUID_BASE</span><span class="si">}</span><span class="s2">&lt;asset_id&gt;&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;  licence : </span><span class="si">{</span><span class="n">DRUID_LICENCE</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;SOURCE B — HSN standardised, HISCO-coded occupational titles, release 2020.02&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;  landing : </span><span class="si">{</span><span class="n">HSN_LANDING</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;  licence : </span><span class="si">{</span><span class="n">HSN_LICENCE</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;  note    : click-through download; placed by hand, not fetched by the script&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;FILES&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;-&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">,</span>
+    <span class="p">]</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="p">(</span><span class="n">asset_id</span><span class="p">,</span> <span class="n">_size</span><span class="p">,</span> <span class="n">role</span><span class="p">)</span> <span class="ow">in</span> <span class="n">DRUID_ASSETS</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">path</span> <span class="o">=</span> <span class="n">RAW</span> <span class="o">/</span> <span class="n">name</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="k">continue</span>
+        <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;  source    : A (</span><span class="si">{</span><span class="n">DRUID_BASE</span><span class="si">}{</span><span class="n">asset_id</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;  bytes     : </span><span class="si">{</span><span class="n">path</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;  sha256    : </span><span class="si">{</span><span class="n">digests</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;-&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;  retrieved : </span><span class="si">{</span><span class="n">today</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;  role      : </span><span class="si">{</span><span class="n">role</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="p">]</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">role</span> <span class="ow">in</span> <span class="n">HSN_FILES</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">path</span> <span class="o">=</span> <span class="n">RAW</span> <span class="o">/</span> <span class="n">name</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="k">continue</span>
+        <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;  source    : B (hand-placed)&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;  bytes     : </span><span class="si">{</span><span class="n">path</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;  sha256    : </span><span class="si">{</span><span class="n">digests</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;-&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;  role      : </span><span class="si">{</span><span class="n">role</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="p">]</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">RAW</span> <span class="o">/</span> <span class="s2">&quot;MANIFEST.TXT&quot;</span>
+    <span class="n">out</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">),</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-download_hisco_sources-main">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 238–252 (15 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()[</span><span class="mi">1</span><span class="p">])</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--force&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;re-download the druid assets even if already on disk&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;HISCO sources -&gt; </span><span class="si">{</span><span class="n">RAW</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">History of Work (druid):&quot;</span><span class="p">)</span>
+    <span class="n">digests</span> <span class="o">=</span> <span class="n">download_druid</span><span class="p">(</span><span class="n">force</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">force</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">HSN release 2020.02:&quot;</span><span class="p">)</span>
+    <span class="n">digests</span> <span class="o">|=</span> <span class="n">check_hsn</span><span class="p">()</span>
+
+    <span class="n">manifest</span> <span class="o">=</span> <span class="n">write_manifest</span><span class="p">(</span><span class="n">digests</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Manifest: </span><span class="si">{</span><span class="n">manifest</span><span class="si">}</span><span class="s2">  (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">digests</span><span class="p">)</span><span class="si">}</span><span class="s2"> files recorded)&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-reference_tools-occupations-download_hisco_sources-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-download_hisco_sources-RAW"><pre class="sig">RAW<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;data&#39;</span> <span class="o">/</span> <span class="s1">&#39;raw&#39;</span> <span class="o">/</span> <span class="s1">&#39;hisco&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-download_hisco_sources-DRUID_DATASET"><pre class="sig">DRUID_DATASET<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;https://druid.datalegend.net/HistoryOfWork/historyOfWork-all-latest/&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-download_hisco_sources-DRUID_SPARQL"><pre class="sig">DRUID_SPARQL<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;https://api.druid.datalegend.net/datasets/HistoryOfWork/historyOfWork-all-latest/sparql&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-download_hisco_sources-DRUID_BASE"><pre class="sig">DRUID_BASE<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;https://api.druid.datalegend.net/datasets/HistoryOfWork/historyOfWork-all-latest/assets/&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-download_hisco_sources-DRUID_LICENCE"><pre class="sig">DRUID_LICENCE<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;CC-BY-SA 4.0 — IISG / Datalegend, maint. Richard Zijdeman&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-download_hisco_sources-DRUID_ASSETS"><pre class="sig">DRUID_ASSETS<span class="kind">dict · 5 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;hisco_45_full_03.csv&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;67fad454332bfd5b6856571a&#39;</span><span class="p">,</span> <span class="mi">3024229</span><span class="p">,</span> <span class="s1">&#39;HISCO hierarchy: major/minor/unit/micro + English labels + task descriptions&#39;</span><span class="p">),</span> <span class="s1">&#39;hisco_occupation_link_combined.csv&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;67fad454332bfd5b685655aa&#39;</span><span class="p">,</span> <span class="mi">2861389</span><span class="p">,</span> <span class="s1">&#39;246k occupational title -&gt; HISCO links, multilingual (lang_code); the German rows are the bridge used to draft Czech codes&#39;</span><span class="p">),</span> <span class="s1">&#39;status.csv&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;67fad454332bfd5b685655fa&#39;</span><span class="p">,</span> <span class="mi">444</span><span class="p">,</span> <span class="s1">&#39;HISCO status modifier codes (master / journeyman / apprentice ...)&#39;</span><span class="p">),</span> <span class="s1">&#39;relation.csv&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;67fad454332bfd5b685655a3&#39;</span><span class="p">,</span> <span class="mi">344</span><span class="p">,</span> <span class="s1">&#39;HISCO relation modifier codes (wife of / former ...)&#39;</span><span class="p">),</span> <span class="s1">&#39;product.csv&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;67fad454332bfd5b685655f7&#39;</span><span class="p">,</span> <span class="mi">469</span><span class="p">,</span> <span class="s1">&#39;HISCO product modifier codes&#39;</span><span class="p">)}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-download_hisco_sources-HSN_LANDING"><pre class="sig">HSN_LANDING<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;https://socialhistory.org/en/hsn/hsn-standardized-hisco-coded-and-classified-occupational-titles-release-201801&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-download_hisco_sources-HSN_LICENCE"><pre class="sig">HSN_LICENCE<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;IISG / HSN — academic use, cite van Leeuwen, Maas &amp; Miles (2002)&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-download_hisco_sources-HSN_FILES"><pre class="sig">HSN_FILES<span class="kind">dict · 3 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;HSN_HISCO_release_2020_02.csv&#39;</span><span class="p">:</span> <span class="s1">&#39;281,355 coded Dutch titles; source of the HISCO -&gt; HISCLASS / HISCLASS_5 / HISCAM / SOCPO / OCC1950 crosswalk&#39;</span><span class="p">,</span> <span class="s1">&#39;HSN_DOUBLE_release_2020_02.csv&#39;</span><span class="p">:</span> <span class="s1">&#39;compound-occupation splitter (aannemer en architect -&gt; two titles)&#39;</span><span class="p">,</span> <span class="s1">&#39;HSN_HISCO_release_2020_02.pdf&#39;</span><span class="p">:</span> <span class="s1">&#39;release documentation (codebook, sentinel values)&#39;</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/reference_tools/occupations/download_hisco_sources.py · 256 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">download_hisco_sources.py — fetch the HISCO authority tables into data/raw/hisco/</span>
+<span class="sd">=================================================================================</span>
+<span class="sd">The occupation pipeline needs two external ingredients, and only one of them can be</span>
+<span class="sd">downloaded unattended:</span>
+
+<span class="sd">* **History of Work — HISCO** (IISG / Datalegend, CC-BY-SA 4.0). Five CSV assets served</span>
+<span class="sd">  straight off the druid asset endpoint. This script fetches them. They supply the HISCO</span>
+<span class="sd">  *hierarchy* (major → minor → unit → micro, with English labels and task descriptions),</span>
+<span class="sd">  the 246k multilingual **occupational title → HISCO** links, and the status / relation /</span>
+<span class="sd">  product modifier code lists.</span>
+<span class="sd">* **HSN standardised, HISCO-coded occupational titles, release 2020.02** (IISG). Behind a</span>
+<span class="sd">  click-through on the IISG site, so it is *not* fetched here — the script only checks the</span>
+<span class="sd">  two CSVs are present and points at the landing page if they are not. Its value to this</span>
+<span class="sd">  project is the HISCO → HISCLASS / HISCAM / SOCPO crosswalk; its Dutch title strings are</span>
+<span class="sd">  of no use for Czech input.</span>
+
+<span class="sd">Every file present afterwards — downloaded or hand-placed — is recorded in</span>
+<span class="sd">``MANIFEST.TXT`` with byte size, SHA-256, source URL, retrieval date and licence, so the</span>
+<span class="sd">provenance of the whole folder lives in one auditable place.</span>
+
+<span class="sd">Run:    python utils/reference_tools/occupations/download_hisco_sources.py [--force]</span>
+<span class="sd">Emits:  data/raw/hisco/{hisco_45_full_03.csv, hisco_occupation_link_combined.csv,</span>
+<span class="sd">                        status.csv, relation.csv, product.csv, MANIFEST.TXT}</span>
+<span class="sd">Consumed by utils/reference_tools/occupations/build_hisco_authority.py.</span>
+
+<span class="sd">Idempotent: a file already on disk whose SHA-256 matches the recorded one is skipped.</span>
+<span class="sd">``--force`` re-downloads regardless.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">hashlib</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">date</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+<span class="n">RAW</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;data&quot;</span> <span class="o">/</span> <span class="s2">&quot;raw&quot;</span> <span class="o">/</span> <span class="s2">&quot;hisco&quot;</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.0.0&quot;</span>
+
+<span class="c1"># ── History of Work, April-2025 release ──────────────────────────────────────────</span>
+<span class="n">DRUID_DATASET</span> <span class="o">=</span> <span class="s2">&quot;https://druid.datalegend.net/HistoryOfWork/historyOfWork-all-latest/&quot;</span>
+<span class="n">DRUID_SPARQL</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="s2">&quot;https://api.druid.datalegend.net/datasets/HistoryOfWork/&quot;</span>
+    <span class="s2">&quot;historyOfWork-all-latest/sparql&quot;</span>
+<span class="p">)</span>
+<span class="n">DRUID_BASE</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="s2">&quot;https://api.druid.datalegend.net/datasets/HistoryOfWork/&quot;</span>
+    <span class="s2">&quot;historyOfWork-all-latest/assets/&quot;</span>
+<span class="p">)</span>
+<span class="n">DRUID_LICENCE</span> <span class="o">=</span> <span class="s2">&quot;CC-BY-SA 4.0 — IISG / Datalegend, maint. Richard Zijdeman&quot;</span>
+
+<span class="c1"># filename → (asset id, expected byte size at time of writing, what we use it for)</span>
+<span class="n">DRUID_ASSETS</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;hisco_45_full_03.csv&quot;</span><span class="p">:</span> <span class="p">(</span>
+        <span class="s2">&quot;67fad454332bfd5b6856571a&quot;</span><span class="p">,</span> <span class="mi">3_024_229</span><span class="p">,</span>
+        <span class="s2">&quot;HISCO hierarchy: major/minor/unit/micro + English labels + task descriptions&quot;</span><span class="p">,</span>
+    <span class="p">),</span>
+    <span class="s2">&quot;hisco_occupation_link_combined.csv&quot;</span><span class="p">:</span> <span class="p">(</span>
+        <span class="s2">&quot;67fad454332bfd5b685655aa&quot;</span><span class="p">,</span> <span class="mi">2_861_389</span><span class="p">,</span>
+        <span class="s2">&quot;246k occupational title -&gt; HISCO links, multilingual (lang_code); the German &quot;</span>
+        <span class="s2">&quot;rows are the bridge used to draft Czech codes&quot;</span><span class="p">,</span>
+    <span class="p">),</span>
+    <span class="s2">&quot;status.csv&quot;</span><span class="p">:</span> <span class="p">(</span>
+        <span class="s2">&quot;67fad454332bfd5b685655fa&quot;</span><span class="p">,</span> <span class="mi">444</span><span class="p">,</span>
+        <span class="s2">&quot;HISCO status modifier codes (master / journeyman / apprentice ...)&quot;</span><span class="p">,</span>
+    <span class="p">),</span>
+    <span class="s2">&quot;relation.csv&quot;</span><span class="p">:</span> <span class="p">(</span>
+        <span class="s2">&quot;67fad454332bfd5b685655a3&quot;</span><span class="p">,</span> <span class="mi">344</span><span class="p">,</span>
+        <span class="s2">&quot;HISCO relation modifier codes (wife of / former ...)&quot;</span><span class="p">,</span>
+    <span class="p">),</span>
+    <span class="s2">&quot;product.csv&quot;</span><span class="p">:</span> <span class="p">(</span>
+        <span class="s2">&quot;67fad454332bfd5b685655f7&quot;</span><span class="p">,</span> <span class="mi">469</span><span class="p">,</span>
+        <span class="s2">&quot;HISCO product modifier codes&quot;</span><span class="p">,</span>
+    <span class="p">),</span>
+<span class="p">}</span>
+
+<span class="c1"># ── HSN 2020.02 — click-through download, checked but never fetched ──────────────</span>
+<span class="n">HSN_LANDING</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="s2">&quot;https://socialhistory.org/en/hsn/&quot;</span>
+    <span class="s2">&quot;hsn-standardized-hisco-coded-and-classified-occupational-titles-release-201801&quot;</span>
+<span class="p">)</span>
+<span class="n">HSN_LICENCE</span> <span class="o">=</span> <span class="s2">&quot;IISG / HSN — academic use, cite van Leeuwen, Maas &amp; Miles (2002)&quot;</span>
+<span class="n">HSN_FILES</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;HSN_HISCO_release_2020_02.csv&quot;</span><span class="p">:</span>
+        <span class="s2">&quot;281,355 coded Dutch titles; source of the HISCO -&gt; HISCLASS / HISCLASS_5 / &quot;</span>
+        <span class="s2">&quot;HISCAM / SOCPO / OCC1950 crosswalk&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;HSN_DOUBLE_release_2020_02.csv&quot;</span><span class="p">:</span>
+        <span class="s2">&quot;compound-occupation splitter (aannemer en architect -&gt; two titles)&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;HSN_HISCO_release_2020_02.pdf&quot;</span><span class="p">:</span>
+        <span class="s2">&quot;release documentation (codebook, sentinel values)&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">sha256</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;SHA-256 of a file, read in chunks — these are tens of megabytes.&quot;&quot;&quot;</span>
+    <span class="n">h</span> <span class="o">=</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">sha256</span><span class="p">()</span>
+    <span class="k">with</span> <span class="n">path</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;rb&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">chunk</span> <span class="ow">in</span> <span class="nb">iter</span><span class="p">(</span><span class="k">lambda</span><span class="p">:</span> <span class="n">fh</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="mi">20</span><span class="p">),</span> <span class="sa">b</span><span class="s2">&quot;&quot;</span><span class="p">):</span>
+            <span class="n">h</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">chunk</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">h</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_stream</span><span class="p">(</span><span class="n">url</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">dest</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">verify</span><span class="p">:</span> <span class="nb">bool</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">requests</span>
+
+    <span class="n">tmp</span> <span class="o">=</span> <span class="n">dest</span><span class="o">.</span><span class="n">with_suffix</span><span class="p">(</span><span class="n">dest</span><span class="o">.</span><span class="n">suffix</span> <span class="o">+</span> <span class="s2">&quot;.part&quot;</span><span class="p">)</span>
+    <span class="k">with</span> <span class="n">requests</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">stream</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mi">120</span><span class="p">,</span> <span class="n">verify</span><span class="o">=</span><span class="n">verify</span><span class="p">)</span> <span class="k">as</span> <span class="n">r</span><span class="p">:</span>
+        <span class="n">r</span><span class="o">.</span><span class="n">raise_for_status</span><span class="p">()</span>
+        <span class="k">with</span> <span class="n">tmp</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;wb&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">chunk</span> <span class="ow">in</span> <span class="n">r</span><span class="o">.</span><span class="n">iter_content</span><span class="p">(</span><span class="n">chunk_size</span><span class="o">=</span><span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="mi">20</span><span class="p">):</span>
+                <span class="n">fh</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">chunk</span><span class="p">)</span>
+    <span class="n">tmp</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="n">dest</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">fetch</span><span class="p">(</span><span class="n">url</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">dest</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Stream ``url`` to ``dest`` via a temp file, so a failed download leaves nothing.</span>
+
+<span class="sd">    Returns True if the transfer was TLS-verified. Verification is attempted first and</span>
+<span class="sd">    only relaxed if the local trust store rejects the chain — which it does on this</span>
+<span class="sd">    project&#39;s Windows machine, where TLS is intercepted and even the ``certifi`` bundle</span>
+<span class="sd">    fails. The same relaxation is already needed elsewhere in the repo (see</span>
+<span class="sd">    ``utils/scraping/scraper_vuapraha.py``, and the ``curl --ssl-no-revoke`` note in</span>
+<span class="sd">    DATA_SOURCES.md §3). Integrity is covered instead by the recorded SHA-256 and the</span>
+<span class="sd">    expected byte size — check them if the provenance matters to you.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">requests</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">_stream</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">dest</span><span class="p">,</span> <span class="n">verify</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="k">except</span> <span class="n">requests</span><span class="o">.</span><span class="n">exceptions</span><span class="o">.</span><span class="n">SSLError</span><span class="p">:</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">urllib3</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">urllib3.exceptions</span><span class="w"> </span><span class="kn">import</span> <span class="n">InsecureRequestWarning</span>
+        <span class="n">urllib3</span><span class="o">.</span><span class="n">disable_warnings</span><span class="p">(</span><span class="n">InsecureRequestWarning</span><span class="p">)</span>
+        <span class="n">_stream</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">dest</span><span class="p">,</span> <span class="n">verify</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">False</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">download_druid</span><span class="p">(</span><span class="n">force</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Fetch the five druid assets. Returns filename → sha256 for those on disk.&quot;&quot;&quot;</span>
+    <span class="n">RAW</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">digests</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">unverified</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="p">(</span><span class="n">asset_id</span><span class="p">,</span> <span class="n">expected_size</span><span class="p">,</span> <span class="n">_role</span><span class="p">)</span> <span class="ow">in</span> <span class="n">DRUID_ASSETS</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">dest</span> <span class="o">=</span> <span class="n">RAW</span> <span class="o">/</span> <span class="n">name</span>
+        <span class="k">if</span> <span class="n">dest</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">force</span><span class="p">:</span>
+            <span class="n">digests</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">sha256</span><span class="p">(</span><span class="n">dest</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  skip     </span><span class="si">{</span><span class="n">name</span><span class="si">:</span><span class="s2">&lt;38</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">dest</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span><span class="si">:</span><span class="s2">&gt;10,</span><span class="si">}</span><span class="s2"> B  (present)&quot;</span><span class="p">)</span>
+            <span class="k">continue</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  download </span><span class="si">{</span><span class="n">name</span><span class="si">:</span><span class="s2">&lt;38</span><span class="si">}</span><span class="s2"> ...&quot;</span><span class="p">,</span> <span class="n">end</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">flush</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">verified</span> <span class="o">=</span> <span class="n">fetch</span><span class="p">(</span><span class="n">DRUID_BASE</span> <span class="o">+</span> <span class="n">asset_id</span><span class="p">,</span> <span class="n">dest</span><span class="p">)</span>
+        <span class="n">unverified</span> <span class="o">+=</span> <span class="ow">not</span> <span class="n">verified</span>
+        <span class="n">size</span> <span class="o">=</span> <span class="n">dest</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span>
+        <span class="n">digests</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">sha256</span><span class="p">(</span><span class="n">dest</span><span class="p">)</span>
+        <span class="n">flag</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">size</span> <span class="o">==</span> <span class="n">expected_size</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">&quot;  ** size differs from </span><span class="si">{</span><span class="n">expected_size</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> **&quot;</span>
+        <span class="n">tls</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">verified</span> <span class="k">else</span> <span class="s2">&quot;  [TLS unverified]&quot;</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\r</span><span class="s2">  download </span><span class="si">{</span><span class="n">name</span><span class="si">:</span><span class="s2">&lt;38</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">size</span><span class="si">:</span><span class="s2">&gt;10,</span><span class="si">}</span><span class="s2"> B</span><span class="si">{</span><span class="n">flag</span><span class="si">}{</span><span class="n">tls</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">unverified</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  note: </span><span class="si">{</span><span class="n">unverified</span><span class="si">}</span><span class="s2"> file(s) fetched with TLS verification relaxed — the &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;local trust store rejects this host&#39;s chain.</span><span class="se">\n</span><span class="s2">&quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;        Sizes matched the published values; SHA-256 recorded in MANIFEST.TXT.&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">digests</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">check_hsn</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Verify the click-through HSN files are present; never fetch them.&quot;&quot;&quot;</span>
+    <span class="n">digests</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">missing</span> <span class="o">=</span> <span class="p">[</span><span class="n">n</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">HSN_FILES</span> <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="n">RAW</span> <span class="o">/</span> <span class="n">n</span><span class="p">)</span><span class="o">.</span><span class="n">exists</span><span class="p">()]</span>
+    <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">HSN_FILES</span><span class="p">:</span>
+        <span class="n">path</span> <span class="o">=</span> <span class="n">RAW</span> <span class="o">/</span> <span class="n">name</span>
+        <span class="k">if</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="n">digests</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">sha256</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  present  </span><span class="si">{</span><span class="n">name</span><span class="si">:</span><span class="s2">&lt;38</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">path</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span><span class="si">:</span><span class="s2">&gt;10,</span><span class="si">}</span><span class="s2"> B&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">missing</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  HSN files not on disk (download by hand, click-through required):&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">missing</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    - </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">HSN_LANDING</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">digests</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">write_manifest</span><span class="p">(</span><span class="n">digests</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Rewrite MANIFEST.TXT with full provenance for every file in data/raw/hisco/.&quot;&quot;&quot;</span>
+    <span class="n">today</span> <span class="o">=</span> <span class="n">date</span><span class="o">.</span><span class="n">today</span><span class="p">()</span><span class="o">.</span><span class="n">isoformat</span><span class="p">()</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="s2">&quot;data/raw/hisco/ — HISCO source files&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;Manifest written </span><span class="si">{</span><span class="n">today</span><span class="si">}</span><span class="s2"> by utils/reference_tools/occupations/download_hisco_sources.py &quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;v</span><span class="si">{</span><span class="n">__version__</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;SOURCE A — History of Work (HISCO)&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;  dataset : </span><span class="si">{</span><span class="n">DRUID_DATASET</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;  sparql  : </span><span class="si">{</span><span class="n">DRUID_SPARQL</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;  assets  : </span><span class="si">{</span><span class="n">DRUID_BASE</span><span class="si">}</span><span class="s2">&lt;asset_id&gt;&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;  licence : </span><span class="si">{</span><span class="n">DRUID_LICENCE</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;SOURCE B — HSN standardised, HISCO-coded occupational titles, release 2020.02&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;  landing : </span><span class="si">{</span><span class="n">HSN_LANDING</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;  licence : </span><span class="si">{</span><span class="n">HSN_LICENCE</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;  note    : click-through download; placed by hand, not fetched by the script&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;FILES&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;-&quot;</span> <span class="o">*</span> <span class="mi">72</span><span class="p">,</span>
+    <span class="p">]</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="p">(</span><span class="n">asset_id</span><span class="p">,</span> <span class="n">_size</span><span class="p">,</span> <span class="n">role</span><span class="p">)</span> <span class="ow">in</span> <span class="n">DRUID_ASSETS</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">path</span> <span class="o">=</span> <span class="n">RAW</span> <span class="o">/</span> <span class="n">name</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="k">continue</span>
+        <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;  source    : A (</span><span class="si">{</span><span class="n">DRUID_BASE</span><span class="si">}{</span><span class="n">asset_id</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;  bytes     : </span><span class="si">{</span><span class="n">path</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;  sha256    : </span><span class="si">{</span><span class="n">digests</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;-&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;  retrieved : </span><span class="si">{</span><span class="n">today</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;  role      : </span><span class="si">{</span><span class="n">role</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="p">]</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">role</span> <span class="ow">in</span> <span class="n">HSN_FILES</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">path</span> <span class="o">=</span> <span class="n">RAW</span> <span class="o">/</span> <span class="n">name</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="k">continue</span>
+        <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;  source    : B (hand-placed)&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;  bytes     : </span><span class="si">{</span><span class="n">path</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;  sha256    : </span><span class="si">{</span><span class="n">digests</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;-&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;  role      : </span><span class="si">{</span><span class="n">role</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="p">]</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">RAW</span> <span class="o">/</span> <span class="s2">&quot;MANIFEST.TXT&quot;</span>
+    <span class="n">out</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">),</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()[</span><span class="mi">1</span><span class="p">])</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--force&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;re-download the druid assets even if already on disk&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;HISCO sources -&gt; </span><span class="si">{</span><span class="n">RAW</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">History of Work (druid):&quot;</span><span class="p">)</span>
+    <span class="n">digests</span> <span class="o">=</span> <span class="n">download_druid</span><span class="p">(</span><span class="n">force</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">force</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">HSN release 2020.02:&quot;</span><span class="p">)</span>
+    <span class="n">digests</span> <span class="o">|=</span> <span class="n">check_hsn</span><span class="p">()</span>
+
+    <span class="n">manifest</span> <span class="o">=</span> <span class="n">write_manifest</span><span class="p">(</span><span class="n">digests</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Manifest: </span><span class="si">{</span><span class="n">manifest</span><span class="si">}</span><span class="s2">  (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">digests</span><span class="p">)</span><span class="si">}</span><span class="s2"> files recorded)&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>

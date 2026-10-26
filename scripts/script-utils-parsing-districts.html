@@ -1,0 +1,1373 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Builds the <strong>authoritative</strong> 1910 district crosswalk for the Czech crown lands from the
+<strong><a class="cite" data-ref="mpidr_2012" href="#references" onclick="return bibGo(event)">MPIDR</a> / <a class="cite" data-ref="rumpler_seger_2010" href="#references" onclick="return bibGo(event)">Rumpler-Seger</a></strong> GIS boundary file (<code>reference/places/mpidr/</code>) — the spine — with
+curated Czech names from <code>reference/places/district_cs_curation.csv</code>.</p><p class="tldr-facts"><b>Geography &amp; census</b> · v1.2.0 · 410 lines · 7 public functions · 3 constants · used by <code>02_data_cleaning.ipynb</code>, <code>utils/docs/build_docs.py</code>, <code>utils/parsing/districts_hu.py</code> +2 · <code>utils/parsing/districts.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-parsing-districts-read_dbf">read_dbf</a><a class="chip" href="#fn-utils-parsing-districts-parse_mpidr">parse_mpidr</a><a class="chip" href="#fn-utils-parsing-districts-attach_gazetteer_names">attach_gazetteer_names</a><a class="chip" href="#fn-utils-parsing-districts-build_district_backbone">build_district_backbone</a><a class="chip" href="#fn-utils-parsing-districts-write_curation_template">write_curation_template</a><a class="chip" href="#fn-utils-parsing-districts-districts_report">districts_report</a><a class="chip" href="#fn-utils-parsing-districts-validate_against_code">validate_against_code</a><a class="chip const" href="#c-utils-parsing-districts-LAND_MAP">LAND_MAP</a><a class="chip const" href="#c-utils-parsing-districts-OKRES_DE_OVERRIDE">OKRES_DE_OVERRIDE</a><a class="chip const" href="#c-utils-parsing-districts-GERMAN_NAME_FIX">GERMAN_NAME_FIX</a></div>
+<h2>How it works</h2><h4>Why <a class="cite" data-ref="mpidr_2012" href="#references" onclick="return bibGo(event)">MPIDR</a> is the spine</h4>
+<p>The <a class="cite" data-ref="mpidr_2012" href="#references" onclick="return bibGo(event)">MPIDR</a> shapefile (<a class="cite" data-ref="mpidr_2012" href="#references" onclick="return bibGo(event)">MPIDR &amp; CGG</a> 2012, after <a class="cite" data-ref="rumpler_seger_2010" href="#references" onclick="return bibGo(event)">Rumpler &amp; Seger 2010</a>) is a clean, complete
+polygon layer of the 1910 census administrative units with a stable 3-level hierarchy
+encoded in <code>ID_1 = REGION·10^6 + DISTRICT·10^3 + LOCAL_</code>:</p>
+<pre><code>LAND (crown land)  →  DISTRICT (political okres)  →  LOCAL_ (Gerichtsbezirk / soudní okres)
+</code></pre>
+<p>so it authoritatively fixes <strong>which court districts belong to which political okres</strong>,
+carries <strong>stable geo-IDs + polygons</strong> (the census-merge key and the spatial backbone), and
+its German names are clean apart from six transliterations repaired by
+<code>GERMAN_NAME_FIX</code> (<code>Sziszkow</code> = Žižkow).</p>
+<h4>Czech names — provenance</h4>
+<p>Each district's canonical Czech name (<code>*_cs</code>) is resolved, best-first:</p>
+<ol>
+<li><strong>curated</strong> (<code>district_cs_curation.csv</code>) — the accented canonical form; all 330
+     court and 158 okres names are curated, so this is the only tier in use;</li>
+<li><strong><a class="cite" data-ref="mpidr_2012" href="#references" onclick="return bibGo(event)">MPIDR</a> de-accented</strong> Czech (the <code>NAME</code> field's post-slash part) — a fallback that
+     is the right name minus diacritics, flagged <code>needs_review</code>.</li>
+</ol>
+<p>The OCR <em>Ortsverzeichnis</em> gazetteer once supplied a third tier; its Czech district names
+proved unusable ("Bude jo vice") and it is archived (<code>_archive/gazetteer.py</code>).
+<code>attach_gazetteer_names</code> is kept only for that history.</p>
+<p>Note on the city/rural twins: both members of a pair carry the same <code>okres_de</code> (the
+seat court's German name, e.g. <code>Olmuetz</code>); <code>okres_cs</code> is what tells them apart
+(<code>Olomouc</code> / <code>Olomouc (město)</code>).</p>
+<h4>Usage</h4>
+<pre><code>from utils.parsing import districts as dz
+backbone = dz.build_district_backbone(DBF_PATH, curation_csv=CURATION)   # 339 court districts
+dz.districts_report(backbone)
+dz.write_curation_template(backbone, "reference/places/district_cs_curation.csv")
+</code></pre>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-parsing-districts-read_dbf">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">read_dbf</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">encodings</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span><span class="o">=</span><span class="p">(</span><span class="s1">&#39;cp1250&#39;</span><span class="p">,</span> <span class="s1">&#39;latin-1&#39;</span><span class="p">,</span> <span class="s1">&#39;utf-8&#39;</span><span class="p">))</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span></pre>
+<div class="fndoc"><p>Read a .dbf attribute table into a list of <code>{field: value}</code> dicts.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/docs/build_docs.py</code> <code>utils/parsing/districts_hu.py</code> <code>utils/parsing/spatial.py</code></p>
+<details><summary>source · lines 67–100 (34 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">read_dbf</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">encodings</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;cp1250&quot;</span><span class="p">,</span> <span class="s2">&quot;latin-1&quot;</span><span class="p">,</span> <span class="s2">&quot;utf-8&quot;</span><span class="p">))</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Read a .dbf attribute table into a list of ``{field: value}`` dicts.&quot;&quot;&quot;</span>
+    <span class="n">raw</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span><span class="o">.</span><span class="n">read_bytes</span><span class="p">()</span>
+    <span class="n">n_rec</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="s2">&quot;&lt;I&quot;</span><span class="p">,</span> <span class="n">raw</span><span class="p">[</span><span class="mi">4</span><span class="p">:</span><span class="mi">8</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">hdr_len</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="s2">&quot;&lt;H&quot;</span><span class="p">,</span> <span class="n">raw</span><span class="p">[</span><span class="mi">8</span><span class="p">:</span><span class="mi">10</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">rec_len</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="s2">&quot;&lt;H&quot;</span><span class="p">,</span> <span class="n">raw</span><span class="p">[</span><span class="mi">10</span><span class="p">:</span><span class="mi">12</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
+
+    <span class="n">fields</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">off</span> <span class="o">=</span> <span class="mi">32</span>
+    <span class="k">while</span> <span class="n">raw</span><span class="p">[</span><span class="n">off</span><span class="p">]</span> <span class="o">!=</span> <span class="mh">0x0D</span><span class="p">:</span>                                   <span class="c1"># 0x0D terminates the descriptor array</span>
+        <span class="n">desc</span> <span class="o">=</span> <span class="n">raw</span><span class="p">[</span><span class="n">off</span><span class="p">:</span><span class="n">off</span> <span class="o">+</span> <span class="mi">32</span><span class="p">]</span>
+        <span class="n">name</span> <span class="o">=</span> <span class="n">desc</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="mi">11</span><span class="p">]</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="sa">b</span><span class="s2">&quot;</span><span class="se">\x00</span><span class="s2">&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s2">&quot;latin-1&quot;</span><span class="p">)</span>
+        <span class="n">fields</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">name</span><span class="p">,</span> <span class="n">desc</span><span class="p">[</span><span class="mi">16</span><span class="p">]))</span>                      <span class="c1"># byte 16 = field length</span>
+        <span class="n">off</span> <span class="o">+=</span> <span class="mi">32</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_decode</span><span class="p">(</span><span class="n">b</span><span class="p">:</span> <span class="nb">bytes</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">enc</span> <span class="ow">in</span> <span class="n">encodings</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">b</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">enc</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+            <span class="k">except</span> <span class="ne">UnicodeDecodeError</span><span class="p">:</span>
+                <span class="k">continue</span>
+        <span class="k">return</span> <span class="n">b</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s2">&quot;latin-1&quot;</span><span class="p">,</span> <span class="s2">&quot;replace&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+
+    <span class="n">records</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_rec</span><span class="p">):</span>
+        <span class="n">row</span> <span class="o">=</span> <span class="n">raw</span><span class="p">[</span><span class="n">hdr_len</span> <span class="o">+</span> <span class="n">i</span> <span class="o">*</span> <span class="n">rec_len</span><span class="p">:</span> <span class="n">hdr_len</span> <span class="o">+</span> <span class="p">(</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="n">rec_len</span><span class="p">]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">row</span> <span class="ow">or</span> <span class="n">row</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="sa">b</span><span class="s2">&quot;*&quot;</span><span class="p">:</span>                      <span class="c1"># deletion flag</span>
+            <span class="k">continue</span>
+        <span class="n">pos</span><span class="p">,</span> <span class="n">rec</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">flen</span> <span class="ow">in</span> <span class="n">fields</span><span class="p">:</span>
+            <span class="n">rec</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">_decode</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">pos</span><span class="p">:</span><span class="n">pos</span> <span class="o">+</span> <span class="n">flen</span><span class="p">])</span>
+            <span class="n">pos</span> <span class="o">+=</span> <span class="n">flen</span>
+        <span class="n">records</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">rec</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">records</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-districts-parse_mpidr">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">parse_mpidr</span><span class="p">(</span><span class="n">dbf_path</span><span class="p">,</span> <span class="n">lands</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span><span class="o">=</span><span class="n">LAND_MAP</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Parse the <a class="cite" data-ref="mpidr_2012" href="#references" onclick="return bibGo(event)">MPIDR</a> .dbf into a court-district backbone for the Czech lands.</p>
+<p>One row per Gerichtsbezirk (LOCAL_ polygon). Columns:
+    <code>land</code> · <code>okres_code</code> (REGION-DISTRICT) · <code>court_id</code> (ID_1, unique) ·
+    <code>mpidr_oid</code> (OID_ → .shp geometry) · <code>gb_de</code> (German court-district name) ·
+    <code>gb_cs_mpidr</code> (<a class="cite" data-ref="mpidr_2012" href="#references" onclick="return bibGo(event)">MPIDR</a> de-accented Czech, post-slash) · <code>gb_de_norm</code> (match key).</p></div>
+<p class="calls"><b>Called by</b> <code>utils/reference_tools/places/build_curation.py</code></p>
+<details><summary>source · lines 137–159 (23 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">parse_mpidr</span><span class="p">(</span><span class="n">dbf_path</span><span class="p">,</span> <span class="n">lands</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">LAND_MAP</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Parse the MPIDR .dbf into a court-district backbone for the Czech lands.</span>
+
+<span class="sd">    One row per Gerichtsbezirk (LOCAL_ polygon). Columns:</span>
+<span class="sd">        ``land`` · ``okres_code`` (REGION-DISTRICT) · ``court_id`` (ID_1, unique) ·</span>
+<span class="sd">        ``mpidr_oid`` (OID_ → .shp geometry) · ``gb_de`` (German court-district name) ·</span>
+<span class="sd">        ``gb_cs_mpidr`` (MPIDR de-accented Czech, post-slash) · ``gb_de_norm`` (match key).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">read_dbf</span><span class="p">(</span><span class="n">dbf_path</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;LAND&quot;</span><span class="p">]</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">lands</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">de</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">cs</span> <span class="o">=</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;NAME&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">partition</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">)</span>
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
+            <span class="s2">&quot;land&quot;</span><span class="p">:</span>        <span class="n">lands</span><span class="p">[</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;LAND&quot;</span><span class="p">]],</span>
+            <span class="s2">&quot;okres_code&quot;</span><span class="p">:</span>  <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;REGION&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">-</span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;DISTRICT&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;court_id&quot;</span><span class="p">:</span>    <span class="n">r</span><span class="p">[</span><span class="s2">&quot;ID_1&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;mpidr_oid&quot;</span><span class="p">:</span>   <span class="n">r</span><span class="p">[</span><span class="s2">&quot;OID_&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;gb_de&quot;</span><span class="p">:</span>       <span class="n">de</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+            <span class="s2">&quot;gb_cs_mpidr&quot;</span><span class="p">:</span> <span class="n">cs</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="ow">or</span> <span class="kc">None</span><span class="p">,</span>
+            <span class="s2">&quot;gb_de_norm&quot;</span><span class="p">:</span>  <span class="n">_norm_de</span><span class="p">(</span><span class="n">de</span><span class="p">),</span>
+        <span class="p">})</span>
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-districts-attach_gazetteer_names">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">attach_gazetteer_names</span><span class="p">(</span><span class="n">backbone</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">gazetteer</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">threshold</span><span class="p">:</span> <span class="nb">int</span><span class="o">=</span><span class="n">_FUZZY_THRESHOLD</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Fuzzy-join gazetteer Czech names onto the <a class="cite" data-ref="mpidr_2012" href="#references" onclick="return bibGo(event)">MPIDR</a> backbone via the German name.</p>
+<p>Brings <code>gz_gb_cs</code> (court-district Czech), <code>gz_polit_de</code> / <code>gz_polit_cs</code>
+(political-okres German/Czech) from the gazetteer, matched on the normalised German
+Gerichtsbezirk name (exact first, then rapidfuzz ratio ≥ <em>threshold</em>). Rows are
+preferred that already carry an accented Czech court name.</p></div>
+<p class="calls warn">No call site found in the notebooks or <code>utils/</code> — possibly superseded or reserved for interactive use.</p>
+<details><summary>source · lines 162–193 (32 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">attach_gazetteer_names</span><span class="p">(</span><span class="n">backbone</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">gazetteer</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+                           <span class="n">threshold</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">_FUZZY_THRESHOLD</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Fuzzy-join gazetteer Czech names onto the MPIDR backbone via the German name.</span>
+
+<span class="sd">    Brings ``gz_gb_cs`` (court-district Czech), ``gz_polit_de`` / ``gz_polit_cs``</span>
+<span class="sd">    (political-okres German/Czech) from the gazetteer, matched on the normalised German</span>
+<span class="sd">    Gerichtsbezirk name (exact first, then rapidfuzz ratio ≥ *threshold*). Rows are</span>
+<span class="sd">    preferred that already carry an accented Czech court name.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">rapidfuzz</span><span class="w"> </span><span class="kn">import</span> <span class="n">process</span><span class="p">,</span> <span class="n">fuzz</span>
+
+    <span class="n">gb</span> <span class="o">=</span> <span class="n">gazetteer</span><span class="p">[[</span><span class="s2">&quot;gerichtsbezirk_de&quot;</span><span class="p">,</span> <span class="s2">&quot;gerichtsbezirk_cs&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;polit_bezirk_de&quot;</span><span class="p">,</span> <span class="s2">&quot;polit_bezirk_cs&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">dropna</span><span class="p">(</span><span class="n">subset</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_de&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">gb</span><span class="p">[</span><span class="s2">&quot;k&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">gb</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_de&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_norm_de</span><span class="p">)</span>
+    <span class="n">gb</span><span class="p">[</span><span class="s2">&quot;_cs_ok&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">gb</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_cs&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_is_accented_cs</span><span class="p">)</span>
+    <span class="n">gb</span> <span class="o">=</span> <span class="n">gb</span><span class="o">.</span><span class="n">sort_values</span><span class="p">(</span><span class="s2">&quot;_cs_ok&quot;</span><span class="p">,</span> <span class="n">ascending</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;k&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;k&quot;</span><span class="p">)</span>
+    <span class="n">choices</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">gb</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_match</span><span class="p">(</span><span class="n">k</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">k</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">gb</span><span class="o">.</span><span class="n">index</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">k</span>
+        <span class="n">m</span> <span class="o">=</span> <span class="n">process</span><span class="o">.</span><span class="n">extractOne</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">choices</span><span class="p">,</span> <span class="n">scorer</span><span class="o">=</span><span class="n">fuzz</span><span class="o">.</span><span class="n">ratio</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">m</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">if</span> <span class="n">m</span> <span class="ow">and</span> <span class="n">m</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">threshold</span> <span class="k">else</span> <span class="kc">None</span>
+
+    <span class="n">out</span> <span class="o">=</span> <span class="n">backbone</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;_mk&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;gb_de_norm&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_match</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;gz_gb_cs&quot;</span><span class="p">]</span>    <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;_mk&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">k</span><span class="p">:</span> <span class="n">gb</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">k</span><span class="p">,</span> <span class="s2">&quot;gerichtsbezirk_cs&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">gb</span><span class="o">.</span><span class="n">index</span> <span class="k">else</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;gz_polit_de&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;_mk&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">k</span><span class="p">:</span> <span class="n">gb</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">k</span><span class="p">,</span> <span class="s2">&quot;polit_bezirk_de&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">gb</span><span class="o">.</span><span class="n">index</span> <span class="k">else</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;gz_polit_cs&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;_mk&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">k</span><span class="p">:</span> <span class="n">gb</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">k</span><span class="p">,</span> <span class="s2">&quot;polit_bezirk_cs&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">gb</span><span class="o">.</span><span class="n">index</span> <span class="k">else</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="s2">&quot;_mk&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-districts-build_district_backbone">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">build_district_backbone</span><span class="p">(</span><span class="n">dbf_path</span><span class="p">,</span> <span class="n">curation_csv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Assemble the district backbone: <a class="cite" data-ref="mpidr_2012" href="#references" onclick="return bibGo(event)">MPIDR</a> spine + curated Czech names.</p>
+<p>One row per court district (Gerichtsbezirk). Czech names come from the curation file
+(authoritative), falling back to <a class="cite" data-ref="mpidr_2012" href="#references" onclick="return bibGo(event)">MPIDR</a>'s de-accented Czech (flagged <code>needs_review</code>)
+when a unit is not yet curated. The political-okres Czech name is taken from the
+curation <code>okres</code> map; the okres seat (court whose Czech name equals the okres name)
+is flagged <code>is_okres_seat</code>.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code></p>
+<details><summary>source · lines 263–312 (50 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">build_district_backbone</span><span class="p">(</span><span class="n">dbf_path</span><span class="p">,</span> <span class="n">curation_csv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Assemble the district backbone: MPIDR spine + curated Czech names.</span>
+
+<span class="sd">    One row per court district (Gerichtsbezirk). Czech names come from the curation file</span>
+<span class="sd">    (authoritative), falling back to MPIDR&#39;s de-accented Czech (flagged ``needs_review``)</span>
+<span class="sd">    when a unit is not yet curated. The political-okres Czech name is taken from the</span>
+<span class="sd">    curation ``okres`` map; the okres seat (court whose Czech name equals the okres name)</span>
+<span class="sd">    is flagged ``is_okres_seat``.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">parse_mpidr</span><span class="p">(</span><span class="n">dbf_path</span><span class="p">)</span>
+    <span class="n">court_cs</span><span class="p">,</span> <span class="n">okres_cs</span><span class="p">,</span> <span class="n">court_modern</span><span class="p">,</span> <span class="n">okres_modern</span> <span class="o">=</span> <span class="n">_load_curation</span><span class="p">(</span><span class="n">curation_csv</span><span class="p">)</span>
+
+    <span class="n">res</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="k">lambda</span> <span class="n">r</span><span class="p">:</span> <span class="n">_resolve_cs</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;gb_cs_mpidr&quot;</span><span class="p">],</span> <span class="n">court_cs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;gb_de&quot;</span><span class="p">])),</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_de&quot;</span><span class="p">]</span>         <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;gb_de&quot;</span><span class="p">]</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_cs&quot;</span><span class="p">]</span>         <span class="o">=</span> <span class="p">[</span><span class="n">x</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">res</span><span class="p">]</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_cs_modern&quot;</span><span class="p">]</span>  <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;gb_de&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">court_modern</span><span class="p">)</span>   <span class="c1"># today&#39;s name if renamed</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;court_cs_source&quot;</span><span class="p">]</span>           <span class="o">=</span> <span class="p">[</span><span class="n">x</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">res</span><span class="p">]</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;court_needs_review&quot;</span><span class="p">]</span>        <span class="o">=</span> <span class="p">[</span><span class="n">x</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">res</span><span class="p">]</span>
+
+    <span class="c1"># okres Czech: curated by code; fallback = de-accented seat court (any court sharing</span>
+    <span class="c1"># the curated okres name), else the first court&#39;s de-accented name.</span>
+    <span class="n">okres_res</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">code</span><span class="p">,</span> <span class="n">sub</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;okres_code&quot;</span><span class="p">):</span>
+        <span class="n">curated</span> <span class="o">=</span> <span class="n">okres_cs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">code</span><span class="p">)</span>
+        <span class="n">fallback</span> <span class="o">=</span> <span class="n">sub</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;gb_cs_mpidr&quot;</span><span class="p">]</span>
+        <span class="n">okres_res</span><span class="p">[</span><span class="n">code</span><span class="p">]</span> <span class="o">=</span> <span class="n">_resolve_cs</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="n">fallback</span><span class="p">,</span> <span class="n">curated</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_cs&quot;</span><span class="p">]</span>           <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">c</span><span class="p">:</span> <span class="n">okres_res</span><span class="p">[</span><span class="n">c</span><span class="p">][</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_cs_modern&quot;</span><span class="p">]</span>    <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">okres_modern</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_cs_source&quot;</span><span class="p">]</span>    <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">c</span><span class="p">:</span> <span class="n">okres_res</span><span class="p">[</span><span class="n">c</span><span class="p">][</span><span class="mi">1</span><span class="p">])</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_needs_review&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">c</span><span class="p">:</span> <span class="n">okres_res</span><span class="p">[</span><span class="n">c</span><span class="p">][</span><span class="mi">2</span><span class="p">])</span>
+
+    <span class="c1"># seat = court whose Czech name equals the okres name (ignoring the &quot;(město)&quot; marker</span>
+    <span class="c1"># that distinguishes the statutory-city okres from its rural twin)</span>
+    <span class="n">okres_base</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_cs&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\s*\(město\)\s*$&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">regex</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;is_okres_seat&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_cs&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">eq</span><span class="p">(</span><span class="n">okres_base</span><span class="p">)</span> <span class="o">&amp;</span> <span class="n">okres_base</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span>
+    <span class="n">seat_de</span> <span class="o">=</span> <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;is_okres_seat&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;okres_code&quot;</span><span class="p">)</span>
+                 <span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;okres_code&quot;</span><span class="p">)[</span><span class="s2">&quot;gerichtsbezirk_de&quot;</span><span class="p">])</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_de&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">seat_de</span><span class="p">)</span>
+    <span class="c1"># fill okresy whose seat is not a court district in the spine (e.g. 302-2 Bärn)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_de&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_de&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">OKRES_DE_OVERRIDE</span><span class="p">))</span>
+    <span class="c1"># repair the MPIDR transliterations of German names (Sziszkow = Žižkow)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_de&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_de&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="n">GERMAN_NAME_FIX</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_de&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_de&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="n">GERMAN_NAME_FIX</span><span class="p">)</span>
+
+    <span class="n">cols</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;land&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_code&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_de&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_cs_modern&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;okres_cs_source&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_needs_review&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;court_id&quot;</span><span class="p">,</span> <span class="s2">&quot;mpidr_oid&quot;</span><span class="p">,</span> <span class="s2">&quot;gerichtsbezirk_de&quot;</span><span class="p">,</span> <span class="s2">&quot;gerichtsbezirk_cs&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;gerichtsbezirk_cs_modern&quot;</span><span class="p">,</span> <span class="s2">&quot;court_cs_source&quot;</span><span class="p">,</span> <span class="s2">&quot;court_needs_review&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;is_okres_seat&quot;</span><span class="p">,</span> <span class="s2">&quot;gb_cs_mpidr&quot;</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">df</span><span class="p">[</span><span class="n">cols</span><span class="p">]</span><span class="o">.</span><span class="n">sort_values</span><span class="p">([</span><span class="s2">&quot;land&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_code&quot;</span><span class="p">,</span> <span class="s2">&quot;court_id&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-districts-write_curation_template">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">write_curation_template</span><span class="p">(</span><span class="n">dbf_path</span><span class="p">,</span> <span class="n">path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Write the blank Czech-name curation skeleton (schema consumed by <code>_load_curation</code>).</p>
+<p>One <code>court</code> row per court district (key = German name) and one <code>okres</code> row per
+<code>okres_code</code>, each with the <a class="cite" data-ref="mpidr_2012" href="#references" onclick="return bibGo(event)">MPIDR</a> de-accented Czech as an edit seed and an empty
+<code>cs</code> to fill. Columns beyond <code>level/key/cs</code> (<code>land</code>, <code>de</code>,
+<code>mpidr_cs_deaccented</code>) are human aids and ignored by the loader.</p></div>
+<p class="calls warn">No call site found in the notebooks or <code>utils/</code> — possibly superseded or reserved for interactive use.</p>
+<details><summary>source · lines 315–337 (23 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span>
+<span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span>
+<span class="normal">337</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">write_curation_template</span><span class="p">(</span><span class="n">dbf_path</span><span class="p">,</span> <span class="n">path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Write the blank Czech-name curation skeleton (schema consumed by :func:`_load_curation`).</span>
+
+<span class="sd">    One ``court`` row per court district (key = German name) and one ``okres`` row per</span>
+<span class="sd">    ``okres_code``, each with the MPIDR de-accented Czech as an edit seed and an empty</span>
+<span class="sd">    ``cs`` to fill. Columns beyond ``level/key/cs`` (``land``, ``de``,</span>
+<span class="sd">    ``mpidr_cs_deaccented``) are human aids and ignored by the loader.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">mp</span> <span class="o">=</span> <span class="n">parse_mpidr</span><span class="p">(</span><span class="n">dbf_path</span><span class="p">)</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">gb_de</span><span class="p">,</span> <span class="n">sub</span> <span class="ow">in</span> <span class="n">mp</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;gb_de&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;gb_de&quot;</span><span class="p">,</span> <span class="n">sort</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="n">sub</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;level&quot;</span><span class="p">:</span> <span class="s2">&quot;court&quot;</span><span class="p">,</span> <span class="s2">&quot;key&quot;</span><span class="p">:</span> <span class="n">gb_de</span><span class="p">,</span> <span class="s2">&quot;land&quot;</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;land&quot;</span><span class="p">],</span>
+                     <span class="s2">&quot;de&quot;</span><span class="p">:</span> <span class="n">gb_de</span><span class="p">,</span> <span class="s2">&quot;mpidr_cs_deaccented&quot;</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;gb_cs_mpidr&quot;</span><span class="p">],</span> <span class="s2">&quot;cs&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">})</span>
+    <span class="k">for</span> <span class="n">code</span><span class="p">,</span> <span class="n">sub</span> <span class="ow">in</span> <span class="n">mp</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;okres_code&quot;</span><span class="p">):</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="n">sub</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;level&quot;</span><span class="p">:</span> <span class="s2">&quot;okres&quot;</span><span class="p">,</span> <span class="s2">&quot;key&quot;</span><span class="p">:</span> <span class="n">code</span><span class="p">,</span> <span class="s2">&quot;land&quot;</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;land&quot;</span><span class="p">],</span>
+                     <span class="s2">&quot;de&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;mpidr_cs_deaccented&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;cs&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">})</span>
+    <span class="n">tmpl</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;level&quot;</span><span class="p">,</span> <span class="s2">&quot;key&quot;</span><span class="p">,</span> <span class="s2">&quot;land&quot;</span><span class="p">,</span> <span class="s2">&quot;de&quot;</span><span class="p">,</span> <span class="s2">&quot;mpidr_cs_deaccented&quot;</span><span class="p">,</span> <span class="s2">&quot;cs&quot;</span><span class="p">])</span>
+    <span class="n">p</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="n">p</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">tmpl</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">tmpl</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-districts-districts_report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">districts_report</span><span class="p">(</span><span class="n">backbone</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span></pre>
+<div class="fndoc"><p>Print coverage of the district backbone (units, Czech-name provenance, review load).</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code></p>
+<details><summary>source · lines 340–355 (16 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">340</span>
+<span class="normal">341</span>
+<span class="normal">342</span>
+<span class="normal">343</span>
+<span class="normal">344</span>
+<span class="normal">345</span>
+<span class="normal">346</span>
+<span class="normal">347</span>
+<span class="normal">348</span>
+<span class="normal">349</span>
+<span class="normal">350</span>
+<span class="normal">351</span>
+<span class="normal">352</span>
+<span class="normal">353</span>
+<span class="normal">354</span>
+<span class="normal">355</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">districts_report</span><span class="p">(</span><span class="n">backbone</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Print coverage of the district backbone (units, Czech-name provenance, review load).&quot;&quot;&quot;</span>
+    <span class="n">n_court</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">backbone</span><span class="p">)</span>
+    <span class="n">n_okres</span> <span class="o">=</span> <span class="n">backbone</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">nunique</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;District backbone  (court districts = </span><span class="si">{</span><span class="n">n_court</span><span class="si">}</span><span class="s2">, political okresy = </span><span class="si">{</span><span class="n">n_okres</span><span class="si">}</span><span class="s2">)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">land</span><span class="p">,</span> <span class="n">sub</span> <span class="ow">in</span> <span class="n">backbone</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;land&quot;</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">land</span><span class="si">:</span><span class="s2">&lt;10</span><span class="si">}</span><span class="s2"> court=</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">sub</span><span class="p">)</span><span class="si">:</span><span class="s2">&gt;4</span><span class="si">}</span><span class="s2">  okres=</span><span class="si">{</span><span class="n">sub</span><span class="p">[</span><span class="s1">&#39;okres_code&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">nunique</span><span class="p">()</span><span class="si">:</span><span class="s2">&gt;3</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  court-district Czech name source:&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">src</span><span class="p">,</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">backbone</span><span class="p">[</span><span class="s2">&quot;court_cs_source&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;      </span><span class="si">{</span><span class="n">src</span><span class="si">:</span><span class="s2">&lt;18</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">n</span><span class="si">:</span><span class="s2">&gt;4</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">okres</span> <span class="o">=</span> <span class="n">backbone</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;okres_code&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  political-okres Czech name source:&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">src</span><span class="p">,</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">okres</span><span class="p">[</span><span class="s2">&quot;okres_cs_source&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;      </span><span class="si">{</span><span class="n">src</span><span class="si">:</span><span class="s2">&lt;18</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">n</span><span class="si">:</span><span class="s2">&gt;4</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  needs review: </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">backbone</span><span class="p">[</span><span class="s1">&#39;court_needs_review&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">}</span><span class="s2"> court / &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">okres</span><span class="p">[</span><span class="s1">&#39;okres_needs_review&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">}</span><span class="s2"> okres&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-districts-validate_against_code">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">validate_against_code</span><span class="p">(</span><span class="n">backbone</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">code_path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]</span></pre>
+<div class="fndoc"><p>Audit the backbone's German names against the census CODE-file (<a class="cite" data-ref="rumpler_seger_2010" href="#references" onclick="return bibGo(event)">Rumpler-Seger</a> codebook).</p>
+<p>The census codebook (<code>CODE file… Coding IDs</code> sheet) is the same project as the <a class="cite" data-ref="mpidr_2012" href="#references" onclick="return bibGo(event)">MPIDR</a> spine,
+so <code>IDCourtdistr</code> equals <code>court_id</code> exactly — an independent authority for the German unit
+names. Joins on that key and compares (accent/spelling-normalised) the court name
+<code>gerichtsbezirk_de</code> ↔ <code>NameCourtdistr</code> and the okres name <code>okres_de</code> ↔ <code>NamePoldistrict</code>.
+Prints a report and returns <code>{"court": …, "okres": …}</code> frames of the genuine mismatches.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code></p>
+<details><summary>source · lines 369–410 (42 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">369</span>
+<span class="normal">370</span>
+<span class="normal">371</span>
+<span class="normal">372</span>
+<span class="normal">373</span>
+<span class="normal">374</span>
+<span class="normal">375</span>
+<span class="normal">376</span>
+<span class="normal">377</span>
+<span class="normal">378</span>
+<span class="normal">379</span>
+<span class="normal">380</span>
+<span class="normal">381</span>
+<span class="normal">382</span>
+<span class="normal">383</span>
+<span class="normal">384</span>
+<span class="normal">385</span>
+<span class="normal">386</span>
+<span class="normal">387</span>
+<span class="normal">388</span>
+<span class="normal">389</span>
+<span class="normal">390</span>
+<span class="normal">391</span>
+<span class="normal">392</span>
+<span class="normal">393</span>
+<span class="normal">394</span>
+<span class="normal">395</span>
+<span class="normal">396</span>
+<span class="normal">397</span>
+<span class="normal">398</span>
+<span class="normal">399</span>
+<span class="normal">400</span>
+<span class="normal">401</span>
+<span class="normal">402</span>
+<span class="normal">403</span>
+<span class="normal">404</span>
+<span class="normal">405</span>
+<span class="normal">406</span>
+<span class="normal">407</span>
+<span class="normal">408</span>
+<span class="normal">409</span>
+<span class="normal">410</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">validate_against_code</span><span class="p">(</span><span class="n">backbone</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">code_path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Audit the backbone&#39;s German names against the census CODE-file (Rumpler-Seger codebook).</span>
+
+<span class="sd">    The census codebook (``CODE file… Coding IDs`` sheet) is the same project as the MPIDR spine,</span>
+<span class="sd">    so ``IDCourtdistr`` equals ``court_id`` exactly — an independent authority for the German unit</span>
+<span class="sd">    names. Joins on that key and compares (accent/spelling-normalised) the court name</span>
+<span class="sd">    ``gerichtsbezirk_de`` ↔ ``NameCourtdistr`` and the okres name ``okres_de`` ↔ ``NamePoldistrict``.</span>
+<span class="sd">    Prints a report and returns ``{&quot;court&quot;: …, &quot;okres&quot;: …}`` frames of the genuine mismatches.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">code</span> <span class="o">=</span> <span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">read_excel</span><span class="p">(</span><span class="n">code_path</span><span class="p">,</span> <span class="n">sheet_name</span><span class="o">=</span><span class="s2">&quot;Coding IDs&quot;</span><span class="p">)</span>
+              <span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;IDCourtdistr&quot;</span><span class="p">)</span>
+            <span class="p">[[</span><span class="s2">&quot;IDCourtdistr&quot;</span><span class="p">,</span> <span class="s2">&quot;NameCourtdistr&quot;</span><span class="p">,</span> <span class="s2">&quot;IDPoldistrict&quot;</span><span class="p">,</span> <span class="s2">&quot;NamePoldistrict&quot;</span><span class="p">]])</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="c1"># court_id comes off the .dbf reader as a string but IDCourtdistr reads as int64 —</span>
+    <span class="c1"># normalise both to a canonical string id so the exact-code merge doesn&#39;t dtype-clash.</span>
+    <span class="n">code</span><span class="p">[</span><span class="s2">&quot;IDCourtdistr&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">code</span><span class="p">[</span><span class="s2">&quot;IDCourtdistr&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">str</span><span class="p">)</span>
+    <span class="n">bb</span> <span class="o">=</span> <span class="n">backbone</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">bb</span><span class="p">[</span><span class="s2">&quot;court_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">bb</span><span class="p">[</span><span class="s2">&quot;court_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">str</span><span class="p">)</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">bb</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span><span class="n">code</span><span class="p">,</span> <span class="n">left_on</span><span class="o">=</span><span class="s2">&quot;court_id&quot;</span><span class="p">,</span> <span class="n">right_on</span><span class="o">=</span><span class="s2">&quot;IDCourtdistr&quot;</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;left&quot;</span><span class="p">)</span>
+
+    <span class="c1"># the codebook names are bilingual &quot;German/Czech&quot; (e.g. &quot;Asch/As&quot;, &quot;Trautenau/Trutnov&quot;);</span>
+    <span class="c1"># compare only the German part (before the slash) against our German-only names.</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_de</span><span class="p">(</span><span class="n">s</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="n">s</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">else</span> <span class="n">s</span>
+
+    <span class="n">m</span><span class="p">[</span><span class="s2">&quot;_gb_ok&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">_gnorm_de</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="o">==</span> <span class="n">_gnorm_de</span><span class="p">(</span><span class="n">_de</span><span class="p">(</span><span class="n">b</span><span class="p">))</span>
+                   <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_de&quot;</span><span class="p">],</span> <span class="n">m</span><span class="p">[</span><span class="s2">&quot;NameCourtdistr&quot;</span><span class="p">])]</span>
+    <span class="n">court_mis</span> <span class="o">=</span> <span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="o">~</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;_gb_ok&quot;</span><span class="p">],</span> <span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">,</span> <span class="s2">&quot;court_id&quot;</span><span class="p">,</span> <span class="s2">&quot;gerichtsbezirk_de&quot;</span><span class="p">,</span> <span class="s2">&quot;NameCourtdistr&quot;</span><span class="p">]]</span>
+                 <span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span>
+    <span class="n">ok</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;okres_code&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">ok</span><span class="p">[</span><span class="s2">&quot;_ok&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">_gnorm_de</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="o">==</span> <span class="n">_gnorm_de</span><span class="p">(</span><span class="n">_de</span><span class="p">(</span><span class="n">b</span><span class="p">))</span> <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">ok</span><span class="p">[</span><span class="s2">&quot;okres_de&quot;</span><span class="p">],</span> <span class="n">ok</span><span class="p">[</span><span class="s2">&quot;NamePoldistrict&quot;</span><span class="p">])]</span>
+    <span class="n">okres_mis</span> <span class="o">=</span> <span class="p">(</span><span class="n">ok</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="o">~</span><span class="n">ok</span><span class="p">[</span><span class="s2">&quot;_ok&quot;</span><span class="p">],</span> <span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_de&quot;</span><span class="p">,</span> <span class="s2">&quot;NamePoldistrict&quot;</span><span class="p">]]</span>
+                 <span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span>
+
+    <span class="n">joined</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;IDCourtdistr&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;CODE-file audit: </span><span class="si">{</span><span class="n">joined</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">m</span><span class="p">)</span><span class="si">}</span><span class="s2"> courts joined on court_id == IDCourtdistr&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  court German-name mismatches: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">court_mis</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">court_mis</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">court_mis</span><span class="o">.</span><span class="n">to_string</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  okres German-name mismatches:  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">okres_mis</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">okres_mis</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">okres_mis</span><span class="o">.</span><span class="n">to_string</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;court&quot;</span><span class="p">:</span> <span class="n">court_mis</span><span class="p">,</span> <span class="s2">&quot;okres&quot;</span><span class="p">:</span> <span class="n">okres_mis</span><span class="p">}</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-parsing-districts-LAND_MAP"><pre class="sig">LAND_MAP<span class="kind">dict · 3 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;BOEHMEN&#39;</span><span class="p">:</span> <span class="s1">&#39;Böhmen&#39;</span><span class="p">,</span> <span class="s1">&#39;MAEHREN&#39;</span><span class="p">:</span> <span class="s1">&#39;Mähren&#39;</span><span class="p">,</span> <span class="s1">&#39;SCHLESIEN&#39;</span><span class="p">:</span> <span class="s1">&#39;Schlesien&#39;</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-parsing-districts-OKRES_DE_OVERRIDE"><pre class="sig">OKRES_DE_OVERRIDE<span class="kind">dict · 1 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;302-2&#39;</span><span class="p">:</span> <span class="s1">&#39;Bärn&#39;</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-parsing-districts-GERMAN_NAME_FIX"><pre class="sig">GERMAN_NAME_FIX<span class="kind">dict · 6 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;Sziszkow&#39;</span><span class="p">:</span> <span class="s1">&#39;Žižkow&#39;</span><span class="p">,</span> <span class="s1">&#39;Neubydszow&#39;</span><span class="p">:</span> <span class="s1">&#39;Neubydžow&#39;</span><span class="p">,</span> <span class="s1">&#39;Rosznau am Radhost&#39;</span><span class="p">:</span> <span class="s1">&#39;Rosenau am Radhost&#39;</span><span class="p">,</span> <span class="s1">&#39;Reichenau an der Kneszna&#39;</span><span class="p">:</span> <span class="s1">&#39;Reichenau an der Kněžna&#39;</span><span class="p">,</span> <span class="s1">&#39;Lomnitz an der Lusznitz&#39;</span><span class="p">:</span> <span class="s1">&#39;Lomnitz an der Lužnitz&#39;</span><span class="p">,</span> <span class="s1">&#39;Weseli an der Lusznitz&#39;</span><span class="p">:</span> <span class="s1">&#39;Weseli an der Lužnitz&#39;</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<h2>Used by</h2><p><code>02_data_cleaning.ipynb</code> <code>utils/docs/build_docs.py</code> <code>utils/parsing/districts_hu.py</code> <code>utils/parsing/spatial.py</code> <code>utils/reference_tools/places/build_curation.py</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/parsing/districts.py · 410 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span>
+<span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span>
+<span class="normal">337</span>
+<span class="normal">338</span>
+<span class="normal">339</span>
+<span class="normal">340</span>
+<span class="normal">341</span>
+<span class="normal">342</span>
+<span class="normal">343</span>
+<span class="normal">344</span>
+<span class="normal">345</span>
+<span class="normal">346</span>
+<span class="normal">347</span>
+<span class="normal">348</span>
+<span class="normal">349</span>
+<span class="normal">350</span>
+<span class="normal">351</span>
+<span class="normal">352</span>
+<span class="normal">353</span>
+<span class="normal">354</span>
+<span class="normal">355</span>
+<span class="normal">356</span>
+<span class="normal">357</span>
+<span class="normal">358</span>
+<span class="normal">359</span>
+<span class="normal">360</span>
+<span class="normal">361</span>
+<span class="normal">362</span>
+<span class="normal">363</span>
+<span class="normal">364</span>
+<span class="normal">365</span>
+<span class="normal">366</span>
+<span class="normal">367</span>
+<span class="normal">368</span>
+<span class="normal">369</span>
+<span class="normal">370</span>
+<span class="normal">371</span>
+<span class="normal">372</span>
+<span class="normal">373</span>
+<span class="normal">374</span>
+<span class="normal">375</span>
+<span class="normal">376</span>
+<span class="normal">377</span>
+<span class="normal">378</span>
+<span class="normal">379</span>
+<span class="normal">380</span>
+<span class="normal">381</span>
+<span class="normal">382</span>
+<span class="normal">383</span>
+<span class="normal">384</span>
+<span class="normal">385</span>
+<span class="normal">386</span>
+<span class="normal">387</span>
+<span class="normal">388</span>
+<span class="normal">389</span>
+<span class="normal">390</span>
+<span class="normal">391</span>
+<span class="normal">392</span>
+<span class="normal">393</span>
+<span class="normal">394</span>
+<span class="normal">395</span>
+<span class="normal">396</span>
+<span class="normal">397</span>
+<span class="normal">398</span>
+<span class="normal">399</span>
+<span class="normal">400</span>
+<span class="normal">401</span>
+<span class="normal">402</span>
+<span class="normal">403</span>
+<span class="normal">404</span>
+<span class="normal">405</span>
+<span class="normal">406</span>
+<span class="normal">407</span>
+<span class="normal">408</span>
+<span class="normal">409</span>
+<span class="normal">410</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">districts.py — 1910 administrative-district backbone (okres + soudní okres), in Czech</span>
+<span class="sd">=====================================================================================</span>
+<span class="sd">Builds the **authoritative** 1910 district crosswalk for the Czech crown lands from the</span>
+<span class="sd">**MPIDR / Rumpler-Seger** GIS boundary file (``reference/places/mpidr/``) — the spine — with</span>
+<span class="sd">curated Czech names from ``reference/places/district_cs_curation.csv``.</span>
+
+<span class="sd">Why MPIDR is the spine</span>
+<span class="sd">----------------------</span>
+<span class="sd">The MPIDR shapefile (MPIDR &amp; CGG 2012, after Rumpler &amp; Seger 2010) is a clean, complete</span>
+<span class="sd">polygon layer of the 1910 census administrative units with a stable 3-level hierarchy</span>
+<span class="sd">encoded in ``ID_1 = REGION·10^6 + DISTRICT·10^3 + LOCAL_``:</span>
+
+<span class="sd">    LAND (crown land)  →  DISTRICT (political okres)  →  LOCAL_ (Gerichtsbezirk / soudní okres)</span>
+
+<span class="sd">so it authoritatively fixes **which court districts belong to which political okres**,</span>
+<span class="sd">carries **stable geo-IDs + polygons** (the census-merge key and the spatial backbone), and</span>
+<span class="sd">its German names are clean apart from six transliterations repaired by</span>
+<span class="sd">:data:`GERMAN_NAME_FIX` (``Sziszkow`` = Žižkow).</span>
+
+<span class="sd">Czech names — provenance</span>
+<span class="sd">------------------------</span>
+<span class="sd">Each district&#39;s canonical Czech name (``*_cs``) is resolved, best-first:</span>
+
+<span class="sd">  1. **curated** (``district_cs_curation.csv``) — the accented canonical form; all 330</span>
+<span class="sd">     court and 158 okres names are curated, so this is the only tier in use;</span>
+<span class="sd">  2. **MPIDR de-accented** Czech (the ``NAME`` field&#39;s post-slash part) — a fallback that</span>
+<span class="sd">     is the right name minus diacritics, flagged ``needs_review``.</span>
+
+<span class="sd">The OCR *Ortsverzeichnis* gazetteer once supplied a third tier; its Czech district names</span>
+<span class="sd">proved unusable (&quot;Bude jo vice&quot;) and it is archived (``_archive/gazetteer.py``).</span>
+<span class="sd">:func:`attach_gazetteer_names` is kept only for that history.</span>
+
+<span class="sd">Note on the city/rural twins: both members of a pair carry the same ``okres_de`` (the</span>
+<span class="sd">seat court&#39;s German name, e.g. ``Olmuetz``); ``okres_cs`` is what tells them apart</span>
+<span class="sd">(``Olomouc`` / ``Olomouc (město)``).</span>
+
+<span class="sd">Usage</span>
+<span class="sd">-----</span>
+<span class="sd">    from utils.parsing import districts as dz</span>
+<span class="sd">    backbone = dz.build_district_backbone(DBF_PATH, curation_csv=CURATION)   # 339 court districts</span>
+<span class="sd">    dz.districts_report(backbone)</span>
+<span class="sd">    dz.write_curation_template(backbone, &quot;reference/places/district_cs_curation.csv&quot;)</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">struct</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">unicodedata</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.2.0&quot;</span>   <span class="c1"># MPIDR German-name repairs; docstring (audit 2026-09-22)</span>
+
+<span class="c1"># German crown-land code → Czech-lands label (the three we keep; empire-wide DBF is filtered).</span>
+<span class="n">LAND_MAP</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;BOEHMEN&quot;</span><span class="p">:</span> <span class="s2">&quot;Böhmen&quot;</span><span class="p">,</span> <span class="s2">&quot;MAEHREN&quot;</span><span class="p">:</span> <span class="s2">&quot;Mähren&quot;</span><span class="p">,</span> <span class="s2">&quot;SCHLESIEN&quot;</span><span class="p">:</span> <span class="s2">&quot;Schlesien&quot;</span><span class="p">}</span>
+
+<span class="n">_FUZZY_THRESHOLD</span> <span class="o">=</span> <span class="mi">82</span>  <span class="c1"># rapidfuzz ratio on normalised German names for the gazetteer join</span>
+
+
+<span class="c1"># ═══════════════════════════════════════════════════════════════════════════</span>
+<span class="c1"># Minimal dBASE III/IV reader (stdlib only — avoids a geopandas/pyshp dependency;</span>
+<span class="c1"># geometry is not needed here, the MPIDR IDs link back to the .shp)</span>
+<span class="c1"># ═══════════════════════════════════════════════════════════════════════════</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">read_dbf</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">encodings</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;cp1250&quot;</span><span class="p">,</span> <span class="s2">&quot;latin-1&quot;</span><span class="p">,</span> <span class="s2">&quot;utf-8&quot;</span><span class="p">))</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Read a .dbf attribute table into a list of ``{field: value}`` dicts.&quot;&quot;&quot;</span>
+    <span class="n">raw</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span><span class="o">.</span><span class="n">read_bytes</span><span class="p">()</span>
+    <span class="n">n_rec</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="s2">&quot;&lt;I&quot;</span><span class="p">,</span> <span class="n">raw</span><span class="p">[</span><span class="mi">4</span><span class="p">:</span><span class="mi">8</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">hdr_len</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="s2">&quot;&lt;H&quot;</span><span class="p">,</span> <span class="n">raw</span><span class="p">[</span><span class="mi">8</span><span class="p">:</span><span class="mi">10</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">rec_len</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="s2">&quot;&lt;H&quot;</span><span class="p">,</span> <span class="n">raw</span><span class="p">[</span><span class="mi">10</span><span class="p">:</span><span class="mi">12</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
+
+    <span class="n">fields</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">off</span> <span class="o">=</span> <span class="mi">32</span>
+    <span class="k">while</span> <span class="n">raw</span><span class="p">[</span><span class="n">off</span><span class="p">]</span> <span class="o">!=</span> <span class="mh">0x0D</span><span class="p">:</span>                                   <span class="c1"># 0x0D terminates the descriptor array</span>
+        <span class="n">desc</span> <span class="o">=</span> <span class="n">raw</span><span class="p">[</span><span class="n">off</span><span class="p">:</span><span class="n">off</span> <span class="o">+</span> <span class="mi">32</span><span class="p">]</span>
+        <span class="n">name</span> <span class="o">=</span> <span class="n">desc</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="mi">11</span><span class="p">]</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="sa">b</span><span class="s2">&quot;</span><span class="se">\x00</span><span class="s2">&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s2">&quot;latin-1&quot;</span><span class="p">)</span>
+        <span class="n">fields</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">name</span><span class="p">,</span> <span class="n">desc</span><span class="p">[</span><span class="mi">16</span><span class="p">]))</span>                      <span class="c1"># byte 16 = field length</span>
+        <span class="n">off</span> <span class="o">+=</span> <span class="mi">32</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_decode</span><span class="p">(</span><span class="n">b</span><span class="p">:</span> <span class="nb">bytes</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">enc</span> <span class="ow">in</span> <span class="n">encodings</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">b</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="n">enc</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+            <span class="k">except</span> <span class="ne">UnicodeDecodeError</span><span class="p">:</span>
+                <span class="k">continue</span>
+        <span class="k">return</span> <span class="n">b</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s2">&quot;latin-1&quot;</span><span class="p">,</span> <span class="s2">&quot;replace&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+
+    <span class="n">records</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_rec</span><span class="p">):</span>
+        <span class="n">row</span> <span class="o">=</span> <span class="n">raw</span><span class="p">[</span><span class="n">hdr_len</span> <span class="o">+</span> <span class="n">i</span> <span class="o">*</span> <span class="n">rec_len</span><span class="p">:</span> <span class="n">hdr_len</span> <span class="o">+</span> <span class="p">(</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="n">rec_len</span><span class="p">]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">row</span> <span class="ow">or</span> <span class="n">row</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="sa">b</span><span class="s2">&quot;*&quot;</span><span class="p">:</span>                      <span class="c1"># deletion flag</span>
+            <span class="k">continue</span>
+        <span class="n">pos</span><span class="p">,</span> <span class="n">rec</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">flen</span> <span class="ow">in</span> <span class="n">fields</span><span class="p">:</span>
+            <span class="n">rec</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">_decode</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">pos</span><span class="p">:</span><span class="n">pos</span> <span class="o">+</span> <span class="n">flen</span><span class="p">])</span>
+            <span class="n">pos</span> <span class="o">+=</span> <span class="n">flen</span>
+        <span class="n">records</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">rec</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">records</span>
+
+
+<span class="c1"># ═══════════════════════════════════════════════════════════════════════════</span>
+<span class="c1"># Name normalisation</span>
+<span class="c1"># ═══════════════════════════════════════════════════════════════════════════</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_norm_de</span><span class="p">(</span><span class="n">s</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Match key for a German place name (umlauts + oe/ae/ue digraphs → base, alnum only).&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">s</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;ö&quot;</span><span class="p">,</span> <span class="s2">&quot;o&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;ä&quot;</span><span class="p">,</span> <span class="s2">&quot;a&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;ü&quot;</span><span class="p">,</span> <span class="s2">&quot;u&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;ß&quot;</span><span class="p">,</span> <span class="s2">&quot;ss&quot;</span><span class="p">)</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;oe&quot;</span><span class="p">,</span> <span class="s2">&quot;o&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;ae&quot;</span><span class="p">,</span> <span class="s2">&quot;a&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;ue&quot;</span><span class="p">,</span> <span class="s2">&quot;u&quot;</span><span class="p">)</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">unicodedata</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="s2">&quot;NFKD&quot;</span><span class="p">,</span> <span class="n">s</span><span class="p">)</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">unicodedata</span><span class="o">.</span><span class="n">combining</span><span class="p">(</span><span class="n">c</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;[^a-z0-9]&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">s</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_is_accented_cs</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;True if *s* looks like a real accented/mixed-case Czech name (not de-accented junk).&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">s</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">c</span> <span class="ow">in</span> <span class="n">s</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="s2">&quot;áčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ&quot;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="k">return</span> <span class="n">s</span><span class="p">[:</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">isupper</span><span class="p">()</span> <span class="ow">and</span> <span class="n">s</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="o">!=</span> <span class="n">s</span>  <span class="c1"># mixed-case multi-word (e.g. &quot;Karlovy Vary&quot;)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_strip_stadt</span><span class="p">(</span><span class="n">cs</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Drop trailing &#39;St.&#39;/&#39;Stadt&#39;/&#39;Land&#39;/&#39;Umgebung&#39; role markers from a truncated CS name.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">cs</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">cs</span>
+    <span class="k">return</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\s+(st\.?|stadt|land|okoli|umgebung|mesto|mest.?)\s*$&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">cs</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+                  <span class="n">flags</span><span class="o">=</span><span class="n">re</span><span class="o">.</span><span class="n">IGNORECASE</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="ow">or</span> <span class="kc">None</span>
+
+
+<span class="c1"># ═══════════════════════════════════════════════════════════════════════════</span>
+<span class="c1"># MPIDR backbone</span>
+<span class="c1"># ═══════════════════════════════════════════════════════════════════════════</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">parse_mpidr</span><span class="p">(</span><span class="n">dbf_path</span><span class="p">,</span> <span class="n">lands</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">LAND_MAP</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Parse the MPIDR .dbf into a court-district backbone for the Czech lands.</span>
+
+<span class="sd">    One row per Gerichtsbezirk (LOCAL_ polygon). Columns:</span>
+<span class="sd">        ``land`` · ``okres_code`` (REGION-DISTRICT) · ``court_id`` (ID_1, unique) ·</span>
+<span class="sd">        ``mpidr_oid`` (OID_ → .shp geometry) · ``gb_de`` (German court-district name) ·</span>
+<span class="sd">        ``gb_cs_mpidr`` (MPIDR de-accented Czech, post-slash) · ``gb_de_norm`` (match key).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">read_dbf</span><span class="p">(</span><span class="n">dbf_path</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;LAND&quot;</span><span class="p">]</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">lands</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">de</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">cs</span> <span class="o">=</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;NAME&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">partition</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">)</span>
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
+            <span class="s2">&quot;land&quot;</span><span class="p">:</span>        <span class="n">lands</span><span class="p">[</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;LAND&quot;</span><span class="p">]],</span>
+            <span class="s2">&quot;okres_code&quot;</span><span class="p">:</span>  <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;REGION&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">-</span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;DISTRICT&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;court_id&quot;</span><span class="p">:</span>    <span class="n">r</span><span class="p">[</span><span class="s2">&quot;ID_1&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;mpidr_oid&quot;</span><span class="p">:</span>   <span class="n">r</span><span class="p">[</span><span class="s2">&quot;OID_&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;gb_de&quot;</span><span class="p">:</span>       <span class="n">de</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+            <span class="s2">&quot;gb_cs_mpidr&quot;</span><span class="p">:</span> <span class="n">cs</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="ow">or</span> <span class="kc">None</span><span class="p">,</span>
+            <span class="s2">&quot;gb_de_norm&quot;</span><span class="p">:</span>  <span class="n">_norm_de</span><span class="p">(</span><span class="n">de</span><span class="p">),</span>
+        <span class="p">})</span>
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">attach_gazetteer_names</span><span class="p">(</span><span class="n">backbone</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">gazetteer</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+                           <span class="n">threshold</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">_FUZZY_THRESHOLD</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Fuzzy-join gazetteer Czech names onto the MPIDR backbone via the German name.</span>
+
+<span class="sd">    Brings ``gz_gb_cs`` (court-district Czech), ``gz_polit_de`` / ``gz_polit_cs``</span>
+<span class="sd">    (political-okres German/Czech) from the gazetteer, matched on the normalised German</span>
+<span class="sd">    Gerichtsbezirk name (exact first, then rapidfuzz ratio ≥ *threshold*). Rows are</span>
+<span class="sd">    preferred that already carry an accented Czech court name.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">rapidfuzz</span><span class="w"> </span><span class="kn">import</span> <span class="n">process</span><span class="p">,</span> <span class="n">fuzz</span>
+
+    <span class="n">gb</span> <span class="o">=</span> <span class="n">gazetteer</span><span class="p">[[</span><span class="s2">&quot;gerichtsbezirk_de&quot;</span><span class="p">,</span> <span class="s2">&quot;gerichtsbezirk_cs&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;polit_bezirk_de&quot;</span><span class="p">,</span> <span class="s2">&quot;polit_bezirk_cs&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">dropna</span><span class="p">(</span><span class="n">subset</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_de&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">gb</span><span class="p">[</span><span class="s2">&quot;k&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">gb</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_de&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_norm_de</span><span class="p">)</span>
+    <span class="n">gb</span><span class="p">[</span><span class="s2">&quot;_cs_ok&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">gb</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_cs&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_is_accented_cs</span><span class="p">)</span>
+    <span class="n">gb</span> <span class="o">=</span> <span class="n">gb</span><span class="o">.</span><span class="n">sort_values</span><span class="p">(</span><span class="s2">&quot;_cs_ok&quot;</span><span class="p">,</span> <span class="n">ascending</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;k&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;k&quot;</span><span class="p">)</span>
+    <span class="n">choices</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">gb</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_match</span><span class="p">(</span><span class="n">k</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">k</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">gb</span><span class="o">.</span><span class="n">index</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">k</span>
+        <span class="n">m</span> <span class="o">=</span> <span class="n">process</span><span class="o">.</span><span class="n">extractOne</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">choices</span><span class="p">,</span> <span class="n">scorer</span><span class="o">=</span><span class="n">fuzz</span><span class="o">.</span><span class="n">ratio</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">m</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">if</span> <span class="n">m</span> <span class="ow">and</span> <span class="n">m</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">threshold</span> <span class="k">else</span> <span class="kc">None</span>
+
+    <span class="n">out</span> <span class="o">=</span> <span class="n">backbone</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;_mk&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;gb_de_norm&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_match</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;gz_gb_cs&quot;</span><span class="p">]</span>    <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;_mk&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">k</span><span class="p">:</span> <span class="n">gb</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">k</span><span class="p">,</span> <span class="s2">&quot;gerichtsbezirk_cs&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">gb</span><span class="o">.</span><span class="n">index</span> <span class="k">else</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;gz_polit_de&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;_mk&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">k</span><span class="p">:</span> <span class="n">gb</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">k</span><span class="p">,</span> <span class="s2">&quot;polit_bezirk_de&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">gb</span><span class="o">.</span><span class="n">index</span> <span class="k">else</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;gz_polit_cs&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;_mk&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">k</span><span class="p">:</span> <span class="n">gb</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">k</span><span class="p">,</span> <span class="s2">&quot;polit_bezirk_cs&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">gb</span><span class="o">.</span><span class="n">index</span> <span class="k">else</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="s2">&quot;_mk&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_resolve_cs</span><span class="p">(</span><span class="n">row_gz_cs</span><span class="p">,</span> <span class="n">row_mpidr_cs</span><span class="p">,</span> <span class="n">curated</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">bool</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Best-first Czech name → (name, source, needs_review).</span>
+
+<span class="sd">    Ordering reflects a hard lesson from the data: the OCR gazetteer&#39;s *accented* Czech</span>
+<span class="sd">    district names are badly mangled (&quot;Bude jo vice&quot; = Budějovice, &quot;Suchy Did&quot;), so they</span>
+<span class="sd">    are **not** trusted over MPIDR. MPIDR&#39;s de-accented Czech has the right letters (just</span>
+<span class="sd">    no diacritics) and is the reliable base; the curated override is authoritative.</span>
+<span class="sd">        1. curated  → final (accents verified)</span>
+<span class="sd">        2. MPIDR de-accented → base, but needs_review (diacritics unverified)</span>
+<span class="sd">        3. gazetteer accented → last resort when MPIDR has no Czech at all</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">curated</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">and</span> <span class="n">curated</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+        <span class="k">return</span> <span class="n">curated</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span> <span class="s2">&quot;curated&quot;</span><span class="p">,</span> <span class="kc">False</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">row_mpidr_cs</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">and</span> <span class="n">row_mpidr_cs</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+        <span class="k">return</span> <span class="n">_strip_stadt</span><span class="p">(</span><span class="n">row_mpidr_cs</span><span class="p">),</span> <span class="s2">&quot;mpidr_deaccented&quot;</span><span class="p">,</span> <span class="kc">True</span>
+    <span class="k">if</span> <span class="n">_is_accented_cs</span><span class="p">(</span><span class="n">row_gz_cs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">_strip_stadt</span><span class="p">(</span><span class="n">row_gz_cs</span><span class="p">),</span> <span class="s2">&quot;gazetteer&quot;</span><span class="p">,</span> <span class="kc">True</span>
+    <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;none&quot;</span><span class="p">,</span> <span class="kc">True</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_load_curation</span><span class="p">(</span><span class="n">curation_csv</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">dict</span><span class="p">,</span> <span class="nb">dict</span><span class="p">,</span> <span class="nb">dict</span><span class="p">,</span> <span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Read the curated names → (court_cs, okres_cs, court_modern, okres_modern).</span>
+
+<span class="sd">    The gazetteer proved unusable for district names, so curation is the *only* accented</span>
+<span class="sd">    source. Columns: ``level`` (&quot;court&quot;/&quot;okres&quot;), ``key`` (German court name / ``okres_code``),</span>
+<span class="sd">    ``cs`` (canonical 1910 Czech), optional ``cs_modern`` (today&#39;s name if renamed).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">court</span><span class="p">,</span> <span class="n">okres</span><span class="p">,</span> <span class="n">court_m</span><span class="p">,</span> <span class="n">okres_m</span> <span class="o">=</span> <span class="p">{},</span> <span class="p">{},</span> <span class="p">{},</span> <span class="p">{}</span>
+    <span class="k">if</span> <span class="n">curation_csv</span> <span class="ow">and</span> <span class="n">Path</span><span class="p">(</span><span class="n">curation_csv</span><span class="p">)</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="n">cur</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">curation_csv</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+        <span class="n">has_modern</span> <span class="o">=</span> <span class="s2">&quot;cs_modern&quot;</span> <span class="ow">in</span> <span class="n">cur</span><span class="o">.</span><span class="n">columns</span>
+        <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">cur</span><span class="o">.</span><span class="n">iterrows</span><span class="p">():</span>
+            <span class="n">key</span><span class="p">,</span> <span class="n">cs</span> <span class="o">=</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;key&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;cs&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+            <span class="n">modern</span> <span class="o">=</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;cs_modern&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="k">if</span> <span class="n">has_modern</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">cs</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;level&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;court&quot;</span><span class="p">:</span>
+                <span class="n">court</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">cs</span>
+                <span class="k">if</span> <span class="n">modern</span><span class="p">:</span>
+                    <span class="n">court_m</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">modern</span>
+            <span class="k">elif</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;level&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;okres&quot;</span><span class="p">:</span>
+                <span class="n">okres</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">cs</span>
+                <span class="k">if</span> <span class="n">modern</span><span class="p">:</span>
+                    <span class="n">okres_m</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">modern</span>
+    <span class="k">return</span> <span class="n">court</span><span class="p">,</span> <span class="n">okres</span><span class="p">,</span> <span class="n">court_m</span><span class="p">,</span> <span class="n">okres_m</span>
+
+
+<span class="c1"># Political-okres German seat name where it cannot be derived from a court district (the okres</span>
+<span class="c1"># seat is not itself a Gerichtsbezirk in the MPIDR spine). 302-2 Moravský Beroun = Bärn, whose</span>
+<span class="c1"># court sits elsewhere; confirmed against the census CODE-file NamePoldistrict.</span>
+<span class="n">OKRES_DE_OVERRIDE</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;302-2&quot;</span><span class="p">:</span> <span class="s2">&quot;Bärn&quot;</span><span class="p">}</span>
+
+<span class="c1"># German names the MPIDR ``NAME`` field transliterates with ``sz`` for ``ž`` or otherwise</span>
+<span class="c1"># mangles; corrected against the census CODE-file (``NameCourtdistr`` / ``NamePoldistrict``,</span>
+<span class="c1"># the same Rumpler-Seger project), which :func:`validate_against_code` lists as mismatches.</span>
+<span class="c1"># Applied to the delivered ``gerichtsbezirk_de`` / ``okres_de`` only — the Czech-name</span>
+<span class="c1"># curation stays keyed on the raw MPIDR spelling (audit 2026-09-22 §B25).</span>
+<span class="n">GERMAN_NAME_FIX</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;Sziszkow&quot;</span><span class="p">:</span> <span class="s2">&quot;Žižkow&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Neubydszow&quot;</span><span class="p">:</span> <span class="s2">&quot;Neubydžow&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Rosznau am Radhost&quot;</span><span class="p">:</span> <span class="s2">&quot;Rosenau am Radhost&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Reichenau an der Kneszna&quot;</span><span class="p">:</span> <span class="s2">&quot;Reichenau an der Kněžna&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Lomnitz an der Lusznitz&quot;</span><span class="p">:</span> <span class="s2">&quot;Lomnitz an der Lužnitz&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Weseli an der Lusznitz&quot;</span><span class="p">:</span> <span class="s2">&quot;Weseli an der Lužnitz&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">build_district_backbone</span><span class="p">(</span><span class="n">dbf_path</span><span class="p">,</span> <span class="n">curation_csv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Assemble the district backbone: MPIDR spine + curated Czech names.</span>
+
+<span class="sd">    One row per court district (Gerichtsbezirk). Czech names come from the curation file</span>
+<span class="sd">    (authoritative), falling back to MPIDR&#39;s de-accented Czech (flagged ``needs_review``)</span>
+<span class="sd">    when a unit is not yet curated. The political-okres Czech name is taken from the</span>
+<span class="sd">    curation ``okres`` map; the okres seat (court whose Czech name equals the okres name)</span>
+<span class="sd">    is flagged ``is_okres_seat``.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">parse_mpidr</span><span class="p">(</span><span class="n">dbf_path</span><span class="p">)</span>
+    <span class="n">court_cs</span><span class="p">,</span> <span class="n">okres_cs</span><span class="p">,</span> <span class="n">court_modern</span><span class="p">,</span> <span class="n">okres_modern</span> <span class="o">=</span> <span class="n">_load_curation</span><span class="p">(</span><span class="n">curation_csv</span><span class="p">)</span>
+
+    <span class="n">res</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="k">lambda</span> <span class="n">r</span><span class="p">:</span> <span class="n">_resolve_cs</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;gb_cs_mpidr&quot;</span><span class="p">],</span> <span class="n">court_cs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;gb_de&quot;</span><span class="p">])),</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_de&quot;</span><span class="p">]</span>         <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;gb_de&quot;</span><span class="p">]</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_cs&quot;</span><span class="p">]</span>         <span class="o">=</span> <span class="p">[</span><span class="n">x</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">res</span><span class="p">]</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_cs_modern&quot;</span><span class="p">]</span>  <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;gb_de&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">court_modern</span><span class="p">)</span>   <span class="c1"># today&#39;s name if renamed</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;court_cs_source&quot;</span><span class="p">]</span>           <span class="o">=</span> <span class="p">[</span><span class="n">x</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">res</span><span class="p">]</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;court_needs_review&quot;</span><span class="p">]</span>        <span class="o">=</span> <span class="p">[</span><span class="n">x</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">res</span><span class="p">]</span>
+
+    <span class="c1"># okres Czech: curated by code; fallback = de-accented seat court (any court sharing</span>
+    <span class="c1"># the curated okres name), else the first court&#39;s de-accented name.</span>
+    <span class="n">okres_res</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">code</span><span class="p">,</span> <span class="n">sub</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;okres_code&quot;</span><span class="p">):</span>
+        <span class="n">curated</span> <span class="o">=</span> <span class="n">okres_cs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">code</span><span class="p">)</span>
+        <span class="n">fallback</span> <span class="o">=</span> <span class="n">sub</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;gb_cs_mpidr&quot;</span><span class="p">]</span>
+        <span class="n">okres_res</span><span class="p">[</span><span class="n">code</span><span class="p">]</span> <span class="o">=</span> <span class="n">_resolve_cs</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="n">fallback</span><span class="p">,</span> <span class="n">curated</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_cs&quot;</span><span class="p">]</span>           <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">c</span><span class="p">:</span> <span class="n">okres_res</span><span class="p">[</span><span class="n">c</span><span class="p">][</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_cs_modern&quot;</span><span class="p">]</span>    <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">okres_modern</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_cs_source&quot;</span><span class="p">]</span>    <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">c</span><span class="p">:</span> <span class="n">okres_res</span><span class="p">[</span><span class="n">c</span><span class="p">][</span><span class="mi">1</span><span class="p">])</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_needs_review&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">c</span><span class="p">:</span> <span class="n">okres_res</span><span class="p">[</span><span class="n">c</span><span class="p">][</span><span class="mi">2</span><span class="p">])</span>
+
+    <span class="c1"># seat = court whose Czech name equals the okres name (ignoring the &quot;(město)&quot; marker</span>
+    <span class="c1"># that distinguishes the statutory-city okres from its rural twin)</span>
+    <span class="n">okres_base</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_cs&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\s*\(město\)\s*$&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">regex</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;is_okres_seat&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_cs&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">eq</span><span class="p">(</span><span class="n">okres_base</span><span class="p">)</span> <span class="o">&amp;</span> <span class="n">okres_base</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span>
+    <span class="n">seat_de</span> <span class="o">=</span> <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;is_okres_seat&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;okres_code&quot;</span><span class="p">)</span>
+                 <span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;okres_code&quot;</span><span class="p">)[</span><span class="s2">&quot;gerichtsbezirk_de&quot;</span><span class="p">])</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_de&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">seat_de</span><span class="p">)</span>
+    <span class="c1"># fill okresy whose seat is not a court district in the spine (e.g. 302-2 Bärn)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_de&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_de&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">OKRES_DE_OVERRIDE</span><span class="p">))</span>
+    <span class="c1"># repair the MPIDR transliterations of German names (Sziszkow = Žižkow)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_de&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_de&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="n">GERMAN_NAME_FIX</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_de&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;okres_de&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="n">GERMAN_NAME_FIX</span><span class="p">)</span>
+
+    <span class="n">cols</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;land&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_code&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_de&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_cs_modern&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;okres_cs_source&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_needs_review&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;court_id&quot;</span><span class="p">,</span> <span class="s2">&quot;mpidr_oid&quot;</span><span class="p">,</span> <span class="s2">&quot;gerichtsbezirk_de&quot;</span><span class="p">,</span> <span class="s2">&quot;gerichtsbezirk_cs&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;gerichtsbezirk_cs_modern&quot;</span><span class="p">,</span> <span class="s2">&quot;court_cs_source&quot;</span><span class="p">,</span> <span class="s2">&quot;court_needs_review&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;is_okres_seat&quot;</span><span class="p">,</span> <span class="s2">&quot;gb_cs_mpidr&quot;</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">df</span><span class="p">[</span><span class="n">cols</span><span class="p">]</span><span class="o">.</span><span class="n">sort_values</span><span class="p">([</span><span class="s2">&quot;land&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_code&quot;</span><span class="p">,</span> <span class="s2">&quot;court_id&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">write_curation_template</span><span class="p">(</span><span class="n">dbf_path</span><span class="p">,</span> <span class="n">path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Write the blank Czech-name curation skeleton (schema consumed by :func:`_load_curation`).</span>
+
+<span class="sd">    One ``court`` row per court district (key = German name) and one ``okres`` row per</span>
+<span class="sd">    ``okres_code``, each with the MPIDR de-accented Czech as an edit seed and an empty</span>
+<span class="sd">    ``cs`` to fill. Columns beyond ``level/key/cs`` (``land``, ``de``,</span>
+<span class="sd">    ``mpidr_cs_deaccented``) are human aids and ignored by the loader.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">mp</span> <span class="o">=</span> <span class="n">parse_mpidr</span><span class="p">(</span><span class="n">dbf_path</span><span class="p">)</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">gb_de</span><span class="p">,</span> <span class="n">sub</span> <span class="ow">in</span> <span class="n">mp</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;gb_de&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;gb_de&quot;</span><span class="p">,</span> <span class="n">sort</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="n">sub</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;level&quot;</span><span class="p">:</span> <span class="s2">&quot;court&quot;</span><span class="p">,</span> <span class="s2">&quot;key&quot;</span><span class="p">:</span> <span class="n">gb_de</span><span class="p">,</span> <span class="s2">&quot;land&quot;</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;land&quot;</span><span class="p">],</span>
+                     <span class="s2">&quot;de&quot;</span><span class="p">:</span> <span class="n">gb_de</span><span class="p">,</span> <span class="s2">&quot;mpidr_cs_deaccented&quot;</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;gb_cs_mpidr&quot;</span><span class="p">],</span> <span class="s2">&quot;cs&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">})</span>
+    <span class="k">for</span> <span class="n">code</span><span class="p">,</span> <span class="n">sub</span> <span class="ow">in</span> <span class="n">mp</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;okres_code&quot;</span><span class="p">):</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="n">sub</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;level&quot;</span><span class="p">:</span> <span class="s2">&quot;okres&quot;</span><span class="p">,</span> <span class="s2">&quot;key&quot;</span><span class="p">:</span> <span class="n">code</span><span class="p">,</span> <span class="s2">&quot;land&quot;</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;land&quot;</span><span class="p">],</span>
+                     <span class="s2">&quot;de&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;mpidr_cs_deaccented&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;cs&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">})</span>
+    <span class="n">tmpl</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;level&quot;</span><span class="p">,</span> <span class="s2">&quot;key&quot;</span><span class="p">,</span> <span class="s2">&quot;land&quot;</span><span class="p">,</span> <span class="s2">&quot;de&quot;</span><span class="p">,</span> <span class="s2">&quot;mpidr_cs_deaccented&quot;</span><span class="p">,</span> <span class="s2">&quot;cs&quot;</span><span class="p">])</span>
+    <span class="n">p</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="n">p</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">tmpl</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">tmpl</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">districts_report</span><span class="p">(</span><span class="n">backbone</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Print coverage of the district backbone (units, Czech-name provenance, review load).&quot;&quot;&quot;</span>
+    <span class="n">n_court</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">backbone</span><span class="p">)</span>
+    <span class="n">n_okres</span> <span class="o">=</span> <span class="n">backbone</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">nunique</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;District backbone  (court districts = </span><span class="si">{</span><span class="n">n_court</span><span class="si">}</span><span class="s2">, political okresy = </span><span class="si">{</span><span class="n">n_okres</span><span class="si">}</span><span class="s2">)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">land</span><span class="p">,</span> <span class="n">sub</span> <span class="ow">in</span> <span class="n">backbone</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;land&quot;</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">land</span><span class="si">:</span><span class="s2">&lt;10</span><span class="si">}</span><span class="s2"> court=</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">sub</span><span class="p">)</span><span class="si">:</span><span class="s2">&gt;4</span><span class="si">}</span><span class="s2">  okres=</span><span class="si">{</span><span class="n">sub</span><span class="p">[</span><span class="s1">&#39;okres_code&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">nunique</span><span class="p">()</span><span class="si">:</span><span class="s2">&gt;3</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  court-district Czech name source:&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">src</span><span class="p">,</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">backbone</span><span class="p">[</span><span class="s2">&quot;court_cs_source&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;      </span><span class="si">{</span><span class="n">src</span><span class="si">:</span><span class="s2">&lt;18</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">n</span><span class="si">:</span><span class="s2">&gt;4</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">okres</span> <span class="o">=</span> <span class="n">backbone</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;okres_code&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  political-okres Czech name source:&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">src</span><span class="p">,</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">okres</span><span class="p">[</span><span class="s2">&quot;okres_cs_source&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;      </span><span class="si">{</span><span class="n">src</span><span class="si">:</span><span class="s2">&lt;18</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">n</span><span class="si">:</span><span class="s2">&gt;4</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  needs review: </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">backbone</span><span class="p">[</span><span class="s1">&#39;court_needs_review&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">}</span><span class="s2"> court / &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">okres</span><span class="p">[</span><span class="s1">&#39;okres_needs_review&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">}</span><span class="s2"> okres&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_gnorm_de</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;German name → comparison key (ä/ö/ü/ß → ae/oe/ue/ss, drop accents/punct/case).&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">unicodedata</span>
+    <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">s</span><span class="p">):</span>
+        <span class="k">return</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">s</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+         <span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;ä&quot;</span><span class="p">,</span> <span class="s2">&quot;ae&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;ö&quot;</span><span class="p">,</span> <span class="s2">&quot;oe&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;ü&quot;</span><span class="p">,</span> <span class="s2">&quot;ue&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;ß&quot;</span><span class="p">,</span> <span class="s2">&quot;ss&quot;</span><span class="p">))</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">unicodedata</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="s2">&quot;NFKD&quot;</span><span class="p">,</span> <span class="n">s</span><span class="p">)</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">unicodedata</span><span class="o">.</span><span class="n">combining</span><span class="p">(</span><span class="n">c</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;[^a-z0-9]&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">s</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">validate_against_code</span><span class="p">(</span><span class="n">backbone</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">code_path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Audit the backbone&#39;s German names against the census CODE-file (Rumpler-Seger codebook).</span>
+
+<span class="sd">    The census codebook (``CODE file… Coding IDs`` sheet) is the same project as the MPIDR spine,</span>
+<span class="sd">    so ``IDCourtdistr`` equals ``court_id`` exactly — an independent authority for the German unit</span>
+<span class="sd">    names. Joins on that key and compares (accent/spelling-normalised) the court name</span>
+<span class="sd">    ``gerichtsbezirk_de`` ↔ ``NameCourtdistr`` and the okres name ``okres_de`` ↔ ``NamePoldistrict``.</span>
+<span class="sd">    Prints a report and returns ``{&quot;court&quot;: …, &quot;okres&quot;: …}`` frames of the genuine mismatches.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">code</span> <span class="o">=</span> <span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">read_excel</span><span class="p">(</span><span class="n">code_path</span><span class="p">,</span> <span class="n">sheet_name</span><span class="o">=</span><span class="s2">&quot;Coding IDs&quot;</span><span class="p">)</span>
+              <span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;IDCourtdistr&quot;</span><span class="p">)</span>
+            <span class="p">[[</span><span class="s2">&quot;IDCourtdistr&quot;</span><span class="p">,</span> <span class="s2">&quot;NameCourtdistr&quot;</span><span class="p">,</span> <span class="s2">&quot;IDPoldistrict&quot;</span><span class="p">,</span> <span class="s2">&quot;NamePoldistrict&quot;</span><span class="p">]])</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="c1"># court_id comes off the .dbf reader as a string but IDCourtdistr reads as int64 —</span>
+    <span class="c1"># normalise both to a canonical string id so the exact-code merge doesn&#39;t dtype-clash.</span>
+    <span class="n">code</span><span class="p">[</span><span class="s2">&quot;IDCourtdistr&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">code</span><span class="p">[</span><span class="s2">&quot;IDCourtdistr&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">str</span><span class="p">)</span>
+    <span class="n">bb</span> <span class="o">=</span> <span class="n">backbone</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">bb</span><span class="p">[</span><span class="s2">&quot;court_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">bb</span><span class="p">[</span><span class="s2">&quot;court_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">str</span><span class="p">)</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">bb</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span><span class="n">code</span><span class="p">,</span> <span class="n">left_on</span><span class="o">=</span><span class="s2">&quot;court_id&quot;</span><span class="p">,</span> <span class="n">right_on</span><span class="o">=</span><span class="s2">&quot;IDCourtdistr&quot;</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;left&quot;</span><span class="p">)</span>
+
+    <span class="c1"># the codebook names are bilingual &quot;German/Czech&quot; (e.g. &quot;Asch/As&quot;, &quot;Trautenau/Trutnov&quot;);</span>
+    <span class="c1"># compare only the German part (before the slash) against our German-only names.</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_de</span><span class="p">(</span><span class="n">s</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="n">s</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="k">else</span> <span class="n">s</span>
+
+    <span class="n">m</span><span class="p">[</span><span class="s2">&quot;_gb_ok&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">_gnorm_de</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="o">==</span> <span class="n">_gnorm_de</span><span class="p">(</span><span class="n">_de</span><span class="p">(</span><span class="n">b</span><span class="p">))</span>
+                   <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_de&quot;</span><span class="p">],</span> <span class="n">m</span><span class="p">[</span><span class="s2">&quot;NameCourtdistr&quot;</span><span class="p">])]</span>
+    <span class="n">court_mis</span> <span class="o">=</span> <span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="o">~</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;_gb_ok&quot;</span><span class="p">],</span> <span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">,</span> <span class="s2">&quot;court_id&quot;</span><span class="p">,</span> <span class="s2">&quot;gerichtsbezirk_de&quot;</span><span class="p">,</span> <span class="s2">&quot;NameCourtdistr&quot;</span><span class="p">]]</span>
+                 <span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span>
+    <span class="n">ok</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;okres_code&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">ok</span><span class="p">[</span><span class="s2">&quot;_ok&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">_gnorm_de</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="o">==</span> <span class="n">_gnorm_de</span><span class="p">(</span><span class="n">_de</span><span class="p">(</span><span class="n">b</span><span class="p">))</span> <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">ok</span><span class="p">[</span><span class="s2">&quot;okres_de&quot;</span><span class="p">],</span> <span class="n">ok</span><span class="p">[</span><span class="s2">&quot;NamePoldistrict&quot;</span><span class="p">])]</span>
+    <span class="n">okres_mis</span> <span class="o">=</span> <span class="p">(</span><span class="n">ok</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="o">~</span><span class="n">ok</span><span class="p">[</span><span class="s2">&quot;_ok&quot;</span><span class="p">],</span> <span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_de&quot;</span><span class="p">,</span> <span class="s2">&quot;NamePoldistrict&quot;</span><span class="p">]]</span>
+                 <span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span>
+
+    <span class="n">joined</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;IDCourtdistr&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;CODE-file audit: </span><span class="si">{</span><span class="n">joined</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">m</span><span class="p">)</span><span class="si">}</span><span class="s2"> courts joined on court_id == IDCourtdistr&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  court German-name mismatches: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">court_mis</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">court_mis</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">court_mis</span><span class="o">.</span><span class="n">to_string</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  okres German-name mismatches:  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">okres_mis</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">okres_mis</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">okres_mis</span><span class="o">.</span><span class="n">to_string</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;court&quot;</span><span class="p">:</span> <span class="n">court_mis</span><span class="p">,</span> <span class="s2">&quot;okres&quot;</span><span class="p">:</span> <span class="n">okres_mis</span><span class="p">}</span>
+</pre></div></td></tr></table></div>
+</details>

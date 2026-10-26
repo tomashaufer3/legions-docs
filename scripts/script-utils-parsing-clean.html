@@ -1,0 +1,792 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>First-pass normalisation of scraped archival records, applied <strong>before</strong> any
+field-specific parsing (dates, causes, units, …).  The <a class="cite" data-ref="vua_db" href="#references" onclick="return bibGo(event)">VÚA</a> and <a class="cite" data-ref="csol" href="#references" onclick="return bibGo(event)">csol.cz</a> dumps
+share the same surface noise:</p><p class="tldr-facts"><b>Person parsing</b> · v1.0.1 · 230 lines · 6 public functions · used by <code>01_data_collection.ipynb</code>, <code>02_data_cleaning.ipynb</code> · <code>utils/parsing/clean.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-parsing-clean-normalize_missing">normalize_missing</a><a class="chip" href="#fn-utils-parsing-clean-clean_names">clean_names</a><a class="chip" href="#fn-utils-parsing-clean-strip_place_markers">strip_place_markers</a><a class="chip" href="#fn-utils-parsing-clean-clean_places">clean_places</a><a class="chip" href="#fn-utils-parsing-clean-clean_dataframe">clean_dataframe</a><a class="chip" href="#fn-utils-parsing-clean-clean_report">clean_report</a></div>
+<h2>How it works</h2><ul>
+<li><code>?</code> / <code>-</code> / empty strings used as missing-value placeholders;</li>
+<li>surnames wrapped in parentheses or quotes — <code>(Abel)</code>, <code>("Adamek-ova")</code> —
+  sometimes with a trailing <code>?</code> flagging an uncertain reading (<code>(Adet?)</code>);</li>
+<li>place names carrying a trailing <code>+</code> verification marker
+  (<code>"Oloví, okres Falknov nad Ohří+"</code>).</li>
+</ul>
+<p>The module is deliberately dataset-agnostic so it can be reused on the
+legionnaire records as well as the <a class="cite" data-ref="vua_db" href="#references" onclick="return bibGo(event)">VÚA</a> fallen-soldier dump.</p>
+<h4>What is <strong>kept</strong> on purpose</h4>
+<p><code>okres …</code> district text and German exonym parentheticals inside place
+fields are preserved verbatim — they are the join key for the later 1910
+Cisleithanian census merge.  Only the trailing <code>+</code> marker and redundant
+whitespace are removed.</p>
+<h4>Public API</h4>
+<pre><code>from utils.parsing.clean import clean_dataframe, clean_report
+df = clean_dataframe(df)          # normalise missing + names + places
+clean_report(df)
+
+# or the individual passes
+df = normalize_missing(df)
+df = clean_names(df)
+df = clean_places(df)
+</code></pre>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-parsing-clean-normalize_missing">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">normalize_missing</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">cols</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Map placeholder strings (<code>?</code>, <code>-</code>, empty, …) to <code>pd.NA</code> and strip.</p>
+<h4>Parameters</h4>
+<dl>
+<dt><code>df</code></dt>
+<dd>Input DataFrame (not modified in place).</dd>
+<dt><code>cols</code></dt>
+<dd>Columns to normalise.  Defaults to every text (object/string) column.</dd>
+</dl>
+<h4>Returns</h4>
+<p>pd.DataFrame
+Copy of <em>df</em> with placeholders replaced by <code>pd.NA</code> and surviving
+string values whitespace-stripped.  Idempotent.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code></p>
+<details><summary>source · lines 59–87 (29 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">59</span>
+<span class="normal">60</span>
+<span class="normal">61</span>
+<span class="normal">62</span>
+<span class="normal">63</span>
+<span class="normal">64</span>
+<span class="normal">65</span>
+<span class="normal">66</span>
+<span class="normal">67</span>
+<span class="normal">68</span>
+<span class="normal">69</span>
+<span class="normal">70</span>
+<span class="normal">71</span>
+<span class="normal">72</span>
+<span class="normal">73</span>
+<span class="normal">74</span>
+<span class="normal">75</span>
+<span class="normal">76</span>
+<span class="normal">77</span>
+<span class="normal">78</span>
+<span class="normal">79</span>
+<span class="normal">80</span>
+<span class="normal">81</span>
+<span class="normal">82</span>
+<span class="normal">83</span>
+<span class="normal">84</span>
+<span class="normal">85</span>
+<span class="normal">86</span>
+<span class="normal">87</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">normalize_missing</span><span class="p">(</span>
+    <span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+    <span class="n">cols</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Map placeholder strings (``?``, ``-``, empty, …) to ``pd.NA`` and strip.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    df:</span>
+<span class="sd">        Input DataFrame (not modified in place).</span>
+<span class="sd">    cols:</span>
+<span class="sd">        Columns to normalise.  Defaults to every text (object/string) column.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    pd.DataFrame</span>
+<span class="sd">        Copy of *df* with placeholders replaced by ``pd.NA`` and surviving</span>
+<span class="sd">        string values whitespace-stripped.  Idempotent.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">cols</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">cols</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">select_dtypes</span><span class="p">(</span><span class="n">include</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;object&quot;</span><span class="p">,</span> <span class="s2">&quot;string&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">columns</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cols</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">c</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">v</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span> <span class="k">if</span> <span class="n">_is_missing</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">else</span> <span class="nb">str</span><span class="p">(</span><span class="n">v</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span>
+
+    <span class="k">return</span> <span class="n">df</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-clean-clean_names">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">clean_names</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">surname_col</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;Příjmení&#39;</span><span class="p">,</span> <span class="n">given_col</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;Jméno&#39;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Append cleaned <code>surname</code> / <code>given</code> columns and a <code>name_uncertain</code> flag.</p>
+<p>The original raw columns are left untouched.  <code>name_uncertain</code> is True
+when either the surname or given name carried a trailing <code>?</code>.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code></p>
+<details><summary>source · lines 123–147 (25 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">clean_names</span><span class="p">(</span>
+    <span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+    <span class="n">surname_col</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Příjmení&quot;</span><span class="p">,</span>
+    <span class="n">given_col</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Jméno&quot;</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Append cleaned ``surname`` / ``given`` columns and a ``name_uncertain`` flag.</span>
+
+<span class="sd">    The original raw columns are left untouched.  ``name_uncertain`` is True</span>
+<span class="sd">    when either the surname or given name carried a trailing ``?``.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">uncertain</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">(</span><span class="kc">False</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">surname_col</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">surname_col</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_clean_name_value</span><span class="p">)</span>
+        <span class="n">df</span><span class="p">[</span><span class="s2">&quot;surname&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">t</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="n">uncertain</span> <span class="o">=</span> <span class="n">uncertain</span> <span class="o">|</span> <span class="n">res</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">t</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+
+    <span class="k">if</span> <span class="n">given_col</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">given_col</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_clean_name_value</span><span class="p">)</span>
+        <span class="n">df</span><span class="p">[</span><span class="s2">&quot;given&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">t</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="n">uncertain</span> <span class="o">=</span> <span class="n">uncertain</span> <span class="o">|</span> <span class="n">res</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">t</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;name_uncertain&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">uncertain</span>
+    <span class="k">return</span> <span class="n">df</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-clean-strip_place_markers">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">strip_place_markers</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">object</span></pre>
+<div class="fndoc"><p>Drop <code>+</code> verification markers (ALL occurrences) and collapse whitespace.</p>
+<p>Keeps <code>okres …</code> text and German exonym parentheticals intact (needed for
+the census merge); returns <code>pd.NA</code> for empty results.</p></div>
+<p class="calls warn">No call site found in the notebooks or <code>utils/</code> — possibly superseded or reserved for interactive use.</p>
+<details><summary>source · lines 159–169 (11 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">strip_place_markers</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">object</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Drop ``+`` verification markers (ALL occurrences) and collapse whitespace.</span>
+
+<span class="sd">    Keeps ``okres …`` text and German exonym parentheticals intact (needed for</span>
+<span class="sd">    the census merge); returns ``pd.NA`` for empty results.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">v</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">v</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;+&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="p">)</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\s{2,}&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">s</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">s</span> <span class="k">if</span> <span class="n">s</span> <span class="k">else</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-clean-clean_places">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">clean_places</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">cols</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span><span class="o">=</span><span class="n">_PLACE_COLS_DEFAULT</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Clean place columns in <em>cols</em> (those present), returning a copy.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code></p>
+<details><summary>source · lines 172–181 (10 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">clean_places</span><span class="p">(</span>
+    <span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+    <span class="n">cols</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="n">_PLACE_COLS_DEFAULT</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Clean place columns in *cols* (those present), returning a copy.&quot;&quot;&quot;</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cols</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+            <span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">strip_place_markers</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">df</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-clean-clean_dataframe">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">clean_dataframe</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">names</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">places</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Run the full cleaning pipeline: missing → names → places.</p>
+<h4>Parameters</h4>
+<dl>
+<dt><code>df</code></dt>
+<dd>Raw input DataFrame (not modified in place).</dd>
+<dt><code>names</code></dt>
+<dd>Apply <code>clean_names</code> (adds <code>surname</code>/<code>given</code>/<code>name_uncertain</code>).</dd>
+<dt><code>places</code></dt>
+<dd>Apply <code>clean_places</code> to the default place columns.</dd>
+</dl>
+<h4>Returns</h4>
+<p>pd.DataFrame
+Cleaned copy, ready for field-specific parsing.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code></p>
+<details><summary>source · lines 186–213 (28 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">clean_dataframe</span><span class="p">(</span>
+    <span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">names</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="n">places</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Run the full cleaning pipeline: missing → names → places.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    df:</span>
+<span class="sd">        Raw input DataFrame (not modified in place).</span>
+<span class="sd">    names:</span>
+<span class="sd">        Apply :func:`clean_names` (adds ``surname``/``given``/``name_uncertain``).</span>
+<span class="sd">    places:</span>
+<span class="sd">        Apply :func:`clean_places` to the default place columns.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    pd.DataFrame</span>
+<span class="sd">        Cleaned copy, ready for field-specific parsing.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">normalize_missing</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">names</span><span class="p">:</span>
+        <span class="n">df</span> <span class="o">=</span> <span class="n">clean_names</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">places</span><span class="p">:</span>
+        <span class="n">df</span> <span class="o">=</span> <span class="n">clean_places</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">df</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-clean-clean_report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">clean_report</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span></pre>
+<div class="fndoc"><p>Print post-clean coverage for text columns and the uncertainty flag.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code></p>
+<details><summary>source · lines 216–230 (15 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">clean_report</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Print post-clean coverage for text columns and the uncertainty flag.&quot;&quot;&quot;</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Clean report  (N = </span><span class="si">{</span><span class="n">n</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="s2">&quot;name_uncertain&quot;</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="n">n_unc</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;name_uncertain&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  name_uncertain (trailing &#39;?&#39;): </span><span class="si">{</span><span class="n">n_unc</span><span class="si">:</span><span class="s2">&gt;7,</span><span class="si">}</span><span class="s2">  (</span><span class="si">{</span><span class="n">n_unc</span><span class="o">/</span><span class="n">n</span><span class="si">:</span><span class="s2">.1%</span><span class="si">}</span><span class="s2">)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">text_cols</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">select_dtypes</span><span class="p">(</span><span class="n">include</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;object&quot;</span><span class="p">,</span> <span class="s2">&quot;string&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">columns</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="s1">&#39;Column&#39;</span><span class="si">:</span><span class="s2">&lt;42</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="s1">&#39;non-null&#39;</span><span class="si">:</span><span class="s2">&gt;9</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="s1">&#39;%&#39;</span><span class="si">:</span><span class="s2">&gt;6</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  &quot;</span> <span class="o">+</span> <span class="s2">&quot;-&quot;</span> <span class="o">*</span> <span class="mi">62</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">text_cols</span><span class="p">:</span>
+        <span class="n">nn</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">c</span><span class="si">:</span><span class="s2">&lt;42</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">nn</span><span class="si">:</span><span class="s2">&gt;9,</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">nn</span><span class="o">/</span><span class="n">n</span><span class="si">:</span><span class="s2">&gt;5.1%</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Used by</h2><p><code>01_data_collection.ipynb</code> <code>02_data_cleaning.ipynb</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/parsing/clean.py · 230 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">clean.py — Generic raw-field cleaning</span>
+<span class="sd">=====================================</span>
+<span class="sd">First-pass normalisation of scraped archival records, applied **before** any</span>
+<span class="sd">field-specific parsing (dates, causes, units, …).  The VÚA and csol.cz dumps</span>
+<span class="sd">share the same surface noise:</span>
+
+<span class="sd">* ``?`` / ``-`` / empty strings used as missing-value placeholders;</span>
+<span class="sd">* surnames wrapped in parentheses or quotes — ``(Abel)``, ``(&quot;Adamek-ova&quot;)`` —</span>
+<span class="sd">  sometimes with a trailing ``?`` flagging an uncertain reading (``(Adet?)``);</span>
+<span class="sd">* place names carrying a trailing ``+`` verification marker</span>
+<span class="sd">  (``&quot;Oloví, okres Falknov nad Ohří+&quot;``).</span>
+
+<span class="sd">The module is deliberately dataset-agnostic so it can be reused on the</span>
+<span class="sd">legionnaire records as well as the VÚA fallen-soldier dump.</span>
+
+<span class="sd">What is **kept** on purpose</span>
+<span class="sd">---------------------------</span>
+<span class="sd">``okres …`` district text and German exonym parentheticals inside place</span>
+<span class="sd">fields are preserved verbatim — they are the join key for the later 1910</span>
+<span class="sd">Cisleithanian census merge.  Only the trailing ``+`` marker and redundant</span>
+<span class="sd">whitespace are removed.</span>
+
+<span class="sd">Public API</span>
+<span class="sd">----------</span>
+<span class="sd">    from utils.parsing.clean import clean_dataframe, clean_report</span>
+<span class="sd">    df = clean_dataframe(df)          # normalise missing + names + places</span>
+<span class="sd">    clean_report(df)</span>
+
+<span class="sd">    # or the individual passes</span>
+<span class="sd">    df = normalize_missing(df)</span>
+<span class="sd">    df = clean_names(df)</span>
+<span class="sd">    df = clean_places(df)</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.0.1&quot;</span>
+
+<span class="c1"># ── Missing-value detection ───────────────────────────────────────────────────</span>
+<span class="c1"># A cell is treated as missing when, after stripping, it is empty or consists</span>
+<span class="c1"># solely of punctuation / question marks (``?``, ``??``, ``(?)``, ``(?)+``,</span>
+<span class="c1"># ``-``, ``–``, ``.``, ``/`` …).  Any alphanumeric content keeps the value.</span>
+<span class="n">_NONINFO_RE</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;^[\s?\-–—.()+/,;:]*$&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_is_missing</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;True if *v* is NaN/None or a non-informative placeholder string.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">v</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">v</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">s</span> <span class="o">==</span> <span class="s2">&quot;&quot;</span> <span class="ow">or</span> <span class="nb">bool</span><span class="p">(</span><span class="n">_NONINFO_RE</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">s</span><span class="p">))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">normalize_missing</span><span class="p">(</span>
+    <span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+    <span class="n">cols</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Map placeholder strings (``?``, ``-``, empty, …) to ``pd.NA`` and strip.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    df:</span>
+<span class="sd">        Input DataFrame (not modified in place).</span>
+<span class="sd">    cols:</span>
+<span class="sd">        Columns to normalise.  Defaults to every text (object/string) column.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    pd.DataFrame</span>
+<span class="sd">        Copy of *df* with placeholders replaced by ``pd.NA`` and surviving</span>
+<span class="sd">        string values whitespace-stripped.  Idempotent.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">cols</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">cols</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">select_dtypes</span><span class="p">(</span><span class="n">include</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;object&quot;</span><span class="p">,</span> <span class="s2">&quot;string&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">columns</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cols</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">c</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">v</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span> <span class="k">if</span> <span class="n">_is_missing</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">else</span> <span class="nb">str</span><span class="p">(</span><span class="n">v</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span>
+
+    <span class="k">return</span> <span class="n">df</span>
+
+
+<span class="c1"># ── Name cleaning ─────────────────────────────────────────────────────────────</span>
+<span class="n">_WRAP_QUOTES</span> <span class="o">=</span> <span class="s2">&quot;</span><span class="se">\&quot;</span><span class="s2">&#39;„“”‚‘’&quot;</span>
+<span class="n">_TRAILING_Q_RE</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\?+\s*$&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_clean_name_value</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">object</span><span class="p">,</span> <span class="nb">bool</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return ``(clean_name, uncertain)`` for a single raw name cell.</span>
+
+<span class="sd">    Repeatedly peels wrapping parentheses and quotes (``(&quot;Adamek-ova&quot;)`` →</span>
+<span class="sd">    ``Adamek-ova``); a trailing ``?`` (``(Adet?)`` → ``Adet``) sets the</span>
+<span class="sd">    uncertainty flag.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">v</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">,</span> <span class="kc">False</span>
+
+    <span class="n">s</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">v</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="n">uncertain</span> <span class="o">=</span> <span class="nb">bool</span><span class="p">(</span><span class="n">_TRAILING_Q_RE</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">s</span><span class="p">))</span>
+
+    <span class="n">prev</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="k">while</span> <span class="n">prev</span> <span class="o">!=</span> <span class="n">s</span> <span class="ow">and</span> <span class="n">s</span><span class="p">:</span>
+        <span class="n">prev</span> <span class="o">=</span> <span class="n">s</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">2</span> <span class="ow">and</span> <span class="n">s</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">in</span> <span class="s2">&quot;(&quot;</span> <span class="ow">and</span> <span class="n">s</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="ow">in</span> <span class="s2">&quot;)&quot;</span><span class="p">:</span>
+            <span class="n">s</span> <span class="o">=</span> <span class="n">s</span><span class="p">[</span><span class="mi">1</span><span class="p">:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">2</span> <span class="ow">and</span> <span class="n">s</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">in</span> <span class="n">_WRAP_QUOTES</span> <span class="ow">and</span> <span class="n">s</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="ow">in</span> <span class="n">_WRAP_QUOTES</span><span class="p">:</span>
+            <span class="n">s</span> <span class="o">=</span> <span class="n">s</span><span class="p">[</span><span class="mi">1</span><span class="p">:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">_TRAILING_Q_RE</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">s</span><span class="p">):</span>
+            <span class="n">uncertain</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="n">s</span> <span class="o">=</span> <span class="n">_TRAILING_Q_RE</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">s</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+
+    <span class="n">s</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="n">_WRAP_QUOTES</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">s</span> <span class="k">if</span> <span class="n">s</span> <span class="k">else</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">),</span> <span class="n">uncertain</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">clean_names</span><span class="p">(</span>
+    <span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+    <span class="n">surname_col</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Příjmení&quot;</span><span class="p">,</span>
+    <span class="n">given_col</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Jméno&quot;</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Append cleaned ``surname`` / ``given`` columns and a ``name_uncertain`` flag.</span>
+
+<span class="sd">    The original raw columns are left untouched.  ``name_uncertain`` is True</span>
+<span class="sd">    when either the surname or given name carried a trailing ``?``.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">uncertain</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">(</span><span class="kc">False</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">surname_col</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">surname_col</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_clean_name_value</span><span class="p">)</span>
+        <span class="n">df</span><span class="p">[</span><span class="s2">&quot;surname&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">t</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="n">uncertain</span> <span class="o">=</span> <span class="n">uncertain</span> <span class="o">|</span> <span class="n">res</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">t</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+
+    <span class="k">if</span> <span class="n">given_col</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">given_col</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_clean_name_value</span><span class="p">)</span>
+        <span class="n">df</span><span class="p">[</span><span class="s2">&quot;given&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">t</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="n">uncertain</span> <span class="o">=</span> <span class="n">uncertain</span> <span class="o">|</span> <span class="n">res</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">t</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;name_uncertain&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">uncertain</span>
+    <span class="k">return</span> <span class="n">df</span>
+
+
+<span class="c1"># ── Place cleaning ────────────────────────────────────────────────────────────</span>
+<span class="n">_PLACE_COLS_DEFAULT</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="s2">&quot;Místo narození&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Domovem&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Místo úmrtí&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Místo pohřbení&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">strip_place_markers</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">object</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Drop ``+`` verification markers (ALL occurrences) and collapse whitespace.</span>
+
+<span class="sd">    Keeps ``okres …`` text and German exonym parentheticals intact (needed for</span>
+<span class="sd">    the census merge); returns ``pd.NA`` for empty results.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">v</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">v</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;+&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="p">)</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\s{2,}&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">s</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">s</span> <span class="k">if</span> <span class="n">s</span> <span class="k">else</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">clean_places</span><span class="p">(</span>
+    <span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+    <span class="n">cols</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="n">_PLACE_COLS_DEFAULT</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Clean place columns in *cols* (those present), returning a copy.&quot;&quot;&quot;</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cols</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+            <span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">strip_place_markers</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">df</span>
+
+
+<span class="c1"># ── Umbrella + report ─────────────────────────────────────────────────────────</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">clean_dataframe</span><span class="p">(</span>
+    <span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">names</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="n">places</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Run the full cleaning pipeline: missing → names → places.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    df:</span>
+<span class="sd">        Raw input DataFrame (not modified in place).</span>
+<span class="sd">    names:</span>
+<span class="sd">        Apply :func:`clean_names` (adds ``surname``/``given``/``name_uncertain``).</span>
+<span class="sd">    places:</span>
+<span class="sd">        Apply :func:`clean_places` to the default place columns.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    pd.DataFrame</span>
+<span class="sd">        Cleaned copy, ready for field-specific parsing.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">normalize_missing</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">names</span><span class="p">:</span>
+        <span class="n">df</span> <span class="o">=</span> <span class="n">clean_names</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">places</span><span class="p">:</span>
+        <span class="n">df</span> <span class="o">=</span> <span class="n">clean_places</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">df</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">clean_report</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Print post-clean coverage for text columns and the uncertainty flag.&quot;&quot;&quot;</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Clean report  (N = </span><span class="si">{</span><span class="n">n</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="s2">&quot;name_uncertain&quot;</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="n">n_unc</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;name_uncertain&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  name_uncertain (trailing &#39;?&#39;): </span><span class="si">{</span><span class="n">n_unc</span><span class="si">:</span><span class="s2">&gt;7,</span><span class="si">}</span><span class="s2">  (</span><span class="si">{</span><span class="n">n_unc</span><span class="o">/</span><span class="n">n</span><span class="si">:</span><span class="s2">.1%</span><span class="si">}</span><span class="s2">)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">text_cols</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">select_dtypes</span><span class="p">(</span><span class="n">include</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;object&quot;</span><span class="p">,</span> <span class="s2">&quot;string&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">columns</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="s1">&#39;Column&#39;</span><span class="si">:</span><span class="s2">&lt;42</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="s1">&#39;non-null&#39;</span><span class="si">:</span><span class="s2">&gt;9</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="s1">&#39;%&#39;</span><span class="si">:</span><span class="s2">&gt;6</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  &quot;</span> <span class="o">+</span> <span class="s2">&quot;-&quot;</span> <span class="o">*</span> <span class="mi">62</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">text_cols</span><span class="p">:</span>
+        <span class="n">nn</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">c</span><span class="si">:</span><span class="s2">&lt;42</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">nn</span><span class="si">:</span><span class="s2">&gt;9,</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">nn</span><span class="o">/</span><span class="n">n</span><span class="si">:</span><span class="s2">&gt;5.1%</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>

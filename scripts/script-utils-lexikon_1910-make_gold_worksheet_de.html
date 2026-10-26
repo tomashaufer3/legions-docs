@@ -1,0 +1,893 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Build the gold worksheets for the German edition (Spezialortsrepertorium Böhmen).</p><p class="tldr-facts"><b>1910 register</b> · v1.1.0 · 271 lines · 5 public functions · 15 constants · used by nothing else · <code>utils/lexikon_1910/make_gold_worksheet_de.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-lexikon_1910-make_gold_worksheet_de-load_manifest">load_manifest</a><a class="chip" href="#fn-utils-lexikon_1910-make_gold_worksheet_de-render">render</a><a class="chip" href="#fn-utils-lexikon_1910-make_gold_worksheet_de-sheet_text">sheet_text</a><a class="chip" href="#fn-utils-lexikon_1910-make_gold_worksheet_de-build">build</a><a class="chip" href="#fn-utils-lexikon_1910-make_gold_worksheet_de-main">main</a><a class="chip const" href="#c-utils-lexikon_1910-make_gold_worksheet_de-ROOT">ROOT</a><a class="chip const" href="#c-utils-lexikon_1910-make_gold_worksheet_de-DE_PDF">DE_PDF</a><a class="chip const" href="#c-utils-lexikon_1910-make_gold_worksheet_de-MANIFEST">MANIFEST</a><a class="chip const" href="#c-utils-lexikon_1910-make_gold_worksheet_de-OUT_ROOT">OUT_ROOT</a><a class="chip const" href="#c-utils-lexikon_1910-make_gold_worksheet_de-RESOLUTION">RESOLUTION</a><a class="chip const" href="#c-utils-lexikon_1910-make_gold_worksheet_de-ENLARGE">ENLARGE</a><a class="chip const" href="#c-utils-lexikon_1910-make_gold_worksheet_de-UPPER_BAND">UPPER_BAND</a><a class="chip const" href="#c-utils-lexikon_1910-make_gold_worksheet_de-LOWER_BAND">LOWER_BAND</a><a class="chip const" href="#c-utils-lexikon_1910-make_gold_worksheet_de-LEDGER_LINES">LEDGER_LINES</a><a class="chip const" href="#c-utils-lexikon_1910-make_gold_worksheet_de-BLANK_KEY">BLANK_KEY</a><a class="chip const" href="#c-utils-lexikon_1910-make_gold_worksheet_de-MD_HEADER">MD_HEADER</a><a class="chip const" href="#c-utils-lexikon_1910-make_gold_worksheet_de-SCOPE_COURT">SCOPE_COURT</a><a class="chip const" href="#c-utils-lexikon_1910-make_gold_worksheet_de-VOLUMES">VOLUMES</a><a class="chip const" href="#c-utils-lexikon_1910-make_gold_worksheet_de-VOLUME_ROWS">VOLUME_ROWS</a><a class="chip const" href="#c-utils-lexikon_1910-make_gold_worksheet_de-TWIN">TWIN</a></div>
+<h2>How it works</h2><p>Companion to <code>make_gold_worksheet</code>, which builds the Czech sheets and is left
+alone. The German sheet has the same four sections and the same block grammar —
+pipe rows for the table, <code>ledger</code> fences for the two-column part, a <code>legend</code>
+and a <code>notes</code> fence — so <code>read_transcription_md</code> can cut it into the same
+blocks. Three things differ, and each follows from the source:</p>
+<ul>
+<li><strong>Nothing is pre-filled, the ledger keys included.</strong> The Czech sheet takes its
+  municipality names and row counts from the ALTO text layer. The UBW scan has no
+  ALTO and its embedded text is too damaged to print beside a blank cell
+  (<code>NiederalteDbuch</code>, <code>Altniynitz</code>), so the transcriber types the key and the
+  names as printed. An unfilled ledger line keeps the Czech sheets' <code>__,+</code>
+  template key, which the reader counts as blank and never as an entry.</li>
+<li><strong>The images are the page, not its sections.</strong> Without coordinates there is no
+  section to cut, so each scan is rendered whole, plus an upper and a lower band
+  that overlap, enlarged like the Czech crops.</li>
+<li><strong>The pages come from a manifest, not from a draw.</strong> A German page is not the
+  twin of a Czech page: each edition orders a district's municipalities
+  alphabetically in its own language. <code>gold_sample_pages_de.csv</code> names each
+  German scan, the Czech scans it shares municipalities with, and whether the
+  whole page is read or only one court's part of it.</li>
+</ul>
+<p>The district in every heading is the <strong>Czech</strong> court name (<code>soudní okres
+Trutnov</code>), because that is the half of the join key the Czech gold already
+carries. The municipality number is <em>not</em> shared between the editions, so the two
+golds join on names, never on <code>muni_seq</code>.</p>
+<p>A sheet that exists is never overwritten: it may hold an hour of reading.</p>
+<pre><code>python utils/lexikon_1910/make_gold_worksheet_de.py --role purposive
+python utils/lexikon_1910/make_gold_worksheet_de.py --role purposive --images
+python utils/lexikon_1910/make_gold_worksheet_de.py --volume maehren_de --role certification
+</code></pre>
+<p><code>--volume</code> (1.1.0, D-133) cuts the sheets of Moravia's or Silesia's own drawn sample
+(<code>gold_sample_pages_&amp;lt;slug&amp;gt;.csv</code>, from <code>draw_gold_sample.py --volume</code>) into
+<code>transcription_gold/de-moravia/</code> or <code>de-silesia/</code>. Those pages have no Czech twin and
+no court is pre-filled: the court and every name are typed from the print.</p>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-lexikon_1910-make_gold_worksheet_de-load_manifest">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">load_manifest</span><span class="p">(</span><span class="n">role</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">volume</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 129–139 (11 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">load_manifest</span><span class="p">(</span><span class="n">role</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">volume</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+    <span class="k">if</span> <span class="n">volume</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">with</span> <span class="n">MANIFEST</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">[</span><span class="n">row</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictReader</span><span class="p">(</span><span class="n">fh</span><span class="p">)</span> <span class="k">if</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;role&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">role</span><span class="p">]</span>
+    <span class="n">draw</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;places&quot;</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;gold_sample_pages_</span><span class="si">{</span><span class="n">volume</span><span class="si">}</span><span class="s2">.csv&quot;</span>
+    <span class="k">with</span> <span class="n">draw</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[{</span><span class="s2">&quot;de_scan&quot;</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;scan&quot;</span><span class="p">],</span> <span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;role&quot;</span><span class="p">],</span> <span class="s2">&quot;court_de&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;court_cs&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+                 <span class="s2">&quot;cz_scans&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;read&quot;</span><span class="p">:</span> <span class="s2">&quot;whole&quot;</span><span class="p">,</span> <span class="s2">&quot;rows&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">VOLUME_ROWS</span><span class="p">),</span>
+                 <span class="s2">&quot;note&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;drawn </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;role&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> page </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;draw_order&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> of the volume&#39;s &quot;</span>
+                         <span class="s2">&quot;systematic sample (D-133); type the court as printed&quot;</span><span class="p">}</span>
+                <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictReader</span><span class="p">(</span><span class="n">fh</span><span class="p">)</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;role&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">role</span><span class="p">]</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-make_gold_worksheet_de-render">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">render</span><span class="p">(</span><span class="n">pdf</span><span class="p">,</span> <span class="n">scan</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">out_dir</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">force</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span></pre>
+<div class="fndoc"><p>Write the page and its two bands; return <code>{kind: filename}</code>.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/docs/build_docs.py</code> <code>utils/lexikon_1910/build_contrast_sheet.py</code> <code>utils/lexikon_1910/lexikon_1910_pages.py</code></p>
+<details><summary>source · lines 142–154 (13 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">render</span><span class="p">(</span><span class="n">pdf</span><span class="p">,</span> <span class="n">scan</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">out_dir</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">force</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Write the page and its two bands; return ``{kind: filename}``.&quot;&quot;&quot;</span>
+    <span class="n">names</span> <span class="o">=</span> <span class="p">{</span><span class="n">kind</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">scan</span><span class="si">:</span><span class="s2">04d</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">kind</span><span class="si">}</span><span class="s2">.png&quot;</span> <span class="k">for</span> <span class="n">kind</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;page&quot;</span><span class="p">,</span> <span class="s2">&quot;upper&quot;</span><span class="p">,</span> <span class="s2">&quot;lower&quot;</span><span class="p">)}</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">force</span> <span class="ow">and</span> <span class="nb">all</span><span class="p">((</span><span class="n">out_dir</span> <span class="o">/</span> <span class="n">name</span><span class="p">)</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">names</span><span class="o">.</span><span class="n">values</span><span class="p">()):</span>
+        <span class="k">return</span> <span class="n">names</span>
+    <span class="n">image</span> <span class="o">=</span> <span class="n">pdf</span><span class="o">.</span><span class="n">pages</span><span class="p">[</span><span class="n">scan</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">to_image</span><span class="p">(</span><span class="n">resolution</span><span class="o">=</span><span class="n">RESOLUTION</span><span class="p">)</span><span class="o">.</span><span class="n">original</span>
+    <span class="n">image</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">out_dir</span> <span class="o">/</span> <span class="n">names</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">])</span>
+    <span class="k">for</span> <span class="n">kind</span><span class="p">,</span> <span class="p">(</span><span class="n">top</span><span class="p">,</span> <span class="n">bottom</span><span class="p">)</span> <span class="ow">in</span> <span class="p">((</span><span class="s2">&quot;upper&quot;</span><span class="p">,</span> <span class="n">UPPER_BAND</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;lower&quot;</span><span class="p">,</span> <span class="n">LOWER_BAND</span><span class="p">)):</span>
+        <span class="n">band</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">crop</span><span class="p">((</span><span class="mi">0</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">top</span> <span class="o">*</span> <span class="n">image</span><span class="o">.</span><span class="n">height</span><span class="p">),</span>
+                           <span class="n">image</span><span class="o">.</span><span class="n">width</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">bottom</span> <span class="o">*</span> <span class="n">image</span><span class="o">.</span><span class="n">height</span><span class="p">)))</span>
+        <span class="n">band</span> <span class="o">=</span> <span class="n">band</span><span class="o">.</span><span class="n">resize</span><span class="p">((</span><span class="n">band</span><span class="o">.</span><span class="n">width</span> <span class="o">*</span> <span class="n">ENLARGE</span><span class="p">,</span> <span class="n">band</span><span class="o">.</span><span class="n">height</span> <span class="o">*</span> <span class="n">ENLARGE</span><span class="p">))</span>
+        <span class="n">band</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">out_dir</span> <span class="o">/</span> <span class="n">names</span><span class="p">[</span><span class="n">kind</span><span class="p">])</span>
+    <span class="k">return</span> <span class="n">names</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-make_gold_worksheet_de-sheet_text">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">sheet_text</span><span class="p">(</span><span class="n">row</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">images</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">],</span> <span class="n">volume</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;1910 Spezialortsrepertorium, Böhmen&#39;</span><span class="p">,</span> <span class="n">columns</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<div class="fndoc"><p>The whole sheet for one manifest row.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 169–219 (51 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">sheet_text</span><span class="p">(</span><span class="n">row</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">images</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">],</span>
+               <span class="n">volume</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;1910 Spezialortsrepertorium, Böhmen&quot;</span><span class="p">,</span>
+               <span class="n">columns</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The whole sheet for one manifest row.&quot;&quot;&quot;</span>
+    <span class="n">scan</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;de_scan&#39;</span><span class="p">])</span><span class="si">:</span><span class="s2">04d</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="n">court_de</span><span class="p">,</span> <span class="n">court_cs</span> <span class="o">=</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;court_de&quot;</span><span class="p">]</span> <span class="ow">or</span> <span class="s2">&quot;________&quot;</span><span class="p">,</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;court_cs&quot;</span><span class="p">]</span> <span class="ow">or</span> <span class="s2">&quot;________&quot;</span>
+    <span class="n">where</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;Gerichtsbezirk </span><span class="si">{</span><span class="n">court_de</span><span class="si">}</span><span class="s2"> · soudní okres </span><span class="si">{</span><span class="n">court_cs</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="n">scope</span> <span class="o">=</span> <span class="p">(</span><span class="n">SCOPE_COURT</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">courts_de</span><span class="o">=</span><span class="n">court_de</span><span class="p">)</span>
+             <span class="k">if</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;read&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;court&quot;</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">header</span> <span class="o">=</span> <span class="n">MD_HEADER</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+        <span class="n">scan</span><span class="o">=</span><span class="n">scan</span><span class="p">,</span> <span class="n">role</span><span class="o">=</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;role&quot;</span><span class="p">],</span> <span class="n">courts_cs</span><span class="o">=</span><span class="n">court_cs</span><span class="p">,</span> <span class="n">courts_de</span><span class="o">=</span><span class="n">court_de</span><span class="p">,</span>
+        <span class="n">read</span><span class="o">=</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;read&quot;</span><span class="p">],</span> <span class="n">cz_scans</span><span class="o">=</span><span class="s2">&quot;, &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;cz_scans&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">split</span><span class="p">()),</span>
+        <span class="n">note</span><span class="o">=</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;note&quot;</span><span class="p">],</span> <span class="n">scope</span><span class="o">=</span><span class="n">scope</span><span class="p">,</span> <span class="n">volume</span><span class="o">=</span><span class="n">volume</span><span class="p">,</span> <span class="n">twin</span><span class="o">=</span><span class="n">TWIN</span> <span class="k">if</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;cz_scans&quot;</span><span class="p">]</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">images</span><span class="p">)</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="n">header</span><span class="p">,</span>
+        <span class="s2">&quot;# 1 — Tabelární část&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;image: `</span><span class="si">{</span><span class="n">images</span><span class="p">[</span><span class="s1">&#39;upper&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">`  (whole page: `</span><span class="si">{</span><span class="n">images</span><span class="p">[</span><span class="s1">&#39;page&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">`)&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;One row per printed line, in printed order. The bold summary row of the&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;court and the lines under it are rows too. Delete the rows left over;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;add rows where the print has more.&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;## 1 — </span><span class="si">{</span><span class="n">where</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="o">*</span><span class="n">_table</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;rows&quot;</span><span class="p">]),</span> <span class="n">columns</span><span class="p">),</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;# 2 — Dvousloupcová část&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;image: `</span><span class="si">{</span><span class="n">images</span><span class="p">[</span><span class="s1">&#39;lower&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">`  (whole page: `</span><span class="si">{</span><span class="n">images</span><span class="p">[</span><span class="s1">&#39;page&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">`)&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;One line per printed key. Replace `__,+` with the key as printed —&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;municipality number, then the part number, `0` for a dash — then&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;`municipality › part` and, after `&gt;`, what the key prints:&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;```&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;   6,0     Hazlov               › (obec as a whole)        &gt; Hammermühle [mill] 6-29, Hazlov, Haslau [ves] 217-2266.&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;```&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;A part that opens its own line is printed as a bare `2)` under the `1)`,&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;with no dash. It is part 2 of the same municipality and gets its own line.&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;## 2a — Ortsbestandteile · </span><span class="si">{</span><span class="n">where</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="o">*</span><span class="n">_ledger</span><span class="p">(),</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;## 2b — Ämter, Anstalten usw. · </span><span class="si">{</span><span class="n">where</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;Symbols as atlas tokens, words verbatim. The school&#39;s class numeral and&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;its language note, and the cooperative letters with their language&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;suffix, are written exactly as printed.&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="o">*</span><span class="n">_ledger</span><span class="p">(),</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;# 3 — Jednosloupcová část pod čarou&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;The postal districts and stations the last two table columns point at:&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;`key) place`, in printed order. The numbering runs across the whole&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;court, not down the page.&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;## 3 — [post] und [rail-station] · s. o. </span><span class="si">{</span><span class="n">court_cs</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;```legend&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;```&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;# 4 — Poznámky pod čarou&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;The `*)` and `**)` notes, verbatim, one per line, with the marker.&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;```notes&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;```&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+    <span class="p">]</span>
+    <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-make_gold_worksheet_de-build">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">build</span><span class="p">(</span><span class="n">role</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">images_only</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">force_images</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">volume</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 222–254 (33 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">build</span><span class="p">(</span><span class="n">role</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">images_only</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">force_images</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+          <span class="n">volume</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">pdfplumber</span>
+
+    <span class="n">rows</span> <span class="o">=</span> <span class="n">load_manifest</span><span class="p">(</span><span class="n">role</span><span class="p">,</span> <span class="n">volume</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">rows</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;no </span><span class="si">{</span><span class="n">role</span><span class="si">}</span><span class="s2"> rows for </span><span class="si">{</span><span class="n">volume</span><span class="w"> </span><span class="ow">or</span><span class="w"> </span><span class="n">MANIFEST</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="mi">1</span>
+    <span class="n">title</span><span class="p">,</span> <span class="n">source</span><span class="p">,</span> <span class="n">columns</span> <span class="o">=</span> <span class="s2">&quot;1910 Spezialortsrepertorium, Böhmen&quot;</span><span class="p">,</span> <span class="n">DE_PDF</span><span class="p">,</span> <span class="kc">None</span>
+    <span class="n">out_dir</span> <span class="o">=</span> <span class="n">OUT_ROOT</span> <span class="o">/</span> <span class="n">role</span>
+    <span class="k">if</span> <span class="n">volume</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_volume</span> <span class="k">as</span> <span class="n">lxvol</span>
+
+        <span class="n">profile</span> <span class="o">=</span> <span class="n">lxvol</span><span class="o">.</span><span class="n">load_profile</span><span class="p">(</span><span class="n">volume</span><span class="p">)</span>
+        <span class="c1"># the volume&#39;s own columns: Silesia prints a Polish language column</span>
+        <span class="n">title</span><span class="p">,</span> <span class="n">source</span><span class="p">,</span> <span class="n">columns</span> <span class="o">=</span> <span class="n">profile</span><span class="o">.</span><span class="n">title</span><span class="p">,</span> <span class="n">profile</span><span class="o">.</span><span class="n">source_pdf</span><span class="p">,</span> <span class="p">[</span><span class="n">c</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">profile</span><span class="o">.</span><span class="n">columns</span><span class="p">]</span>
+        <span class="n">out_dir</span> <span class="o">=</span> <span class="n">OUT_ROOT</span><span class="o">.</span><span class="n">parent</span> <span class="o">/</span> <span class="n">VOLUMES</span><span class="p">[</span><span class="n">volume</span><span class="p">]</span> <span class="o">/</span> <span class="n">role</span>
+    <span class="n">out_dir</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">with</span> <span class="n">pdfplumber</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">source</span><span class="p">)</span> <span class="k">as</span> <span class="n">pdf</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+            <span class="n">scan</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;de_scan&quot;</span><span class="p">])</span>
+            <span class="n">images</span> <span class="o">=</span> <span class="n">render</span><span class="p">(</span><span class="n">pdf</span><span class="p">,</span> <span class="n">scan</span><span class="p">,</span> <span class="n">out_dir</span><span class="p">,</span> <span class="n">force</span><span class="o">=</span><span class="n">force_images</span><span class="p">)</span>
+            <span class="n">path</span> <span class="o">=</span> <span class="n">out_dir</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">scan</span><span class="si">:</span><span class="s2">04d</span><span class="si">}</span><span class="s2">.md&quot;</span>
+            <span class="k">if</span> <span class="n">images_only</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">path</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">: images written&quot;</span><span class="p">)</span>
+                <span class="k">continue</span>
+            <span class="k">if</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">path</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">: exists — left alone&quot;</span><span class="p">)</span>
+                <span class="k">continue</span>
+            <span class="n">path</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">sheet_text</span><span class="p">(</span><span class="n">row</span><span class="p">,</span> <span class="n">images</span><span class="p">,</span> <span class="n">title</span><span class="p">,</span> <span class="n">columns</span><span class="p">),</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">path</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">: written (</span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;read&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;rows&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> blank rows&quot;</span>
+                  <span class="o">+</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot;, twin of cz </span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;cz_scans&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">)&quot;</span> <span class="k">if</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;cz_scans&quot;</span><span class="p">]</span> <span class="k">else</span> <span class="s2">&quot;)&quot;</span><span class="p">))</span>
+    <span class="k">return</span> <span class="mi">0</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-make_gold_worksheet_de-main">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 257–267 (11 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--role&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;purposive&quot;</span><span class="p">,</span>
+                    <span class="n">choices</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;calibration&quot;</span><span class="p">,</span> <span class="s2">&quot;certification&quot;</span><span class="p">,</span> <span class="s2">&quot;purposive&quot;</span><span class="p">))</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--images&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;re-render the page images only; touch no sheet&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--volume&quot;</span><span class="p">,</span> <span class="n">choices</span><span class="o">=</span><span class="nb">sorted</span><span class="p">(</span><span class="n">VOLUMES</span><span class="p">),</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Moravia&#39;s or Silesia&#39;s own drawn sample (D-133)&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">build</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">role</span><span class="p">,</span> <span class="n">images_only</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">images</span><span class="p">,</span> <span class="n">force_images</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">images</span><span class="p">,</span>
+                 <span class="n">volume</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">volume</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-lexikon_1910-make_gold_worksheet_de-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-make_gold_worksheet_de-DE_PDF"><pre class="sig">DE_PDF<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;library&#39;</span> <span class="o">/</span> <span class="s1">&#39;lexicons&#39;</span> <span class="o">/</span> <span class="s1">&#39;UBW_Spezialortsrepertorium-Boehmen-1910_de.pdf&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-make_gold_worksheet_de-MANIFEST"><pre class="sig">MANIFEST<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;reference&#39;</span> <span class="o">/</span> <span class="s1">&#39;places&#39;</span> <span class="o">/</span> <span class="s1">&#39;gold_sample_pages_de.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-make_gold_worksheet_de-OUT_ROOT"><pre class="sig">OUT_ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;reference&#39;</span> <span class="o">/</span> <span class="s1">&#39;places&#39;</span> <span class="o">/</span> <span class="s1">&#39;transcription_gold&#39;</span> <span class="o">/</span> <span class="s1">&#39;de&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-make_gold_worksheet_de-RESOLUTION"><pre class="sig">RESOLUTION<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">300</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-make_gold_worksheet_de-ENLARGE"><pre class="sig">ENLARGE<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">2</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-make_gold_worksheet_de-UPPER_BAND"><pre class="sig">UPPER_BAND<span class="kind">tuple · 2 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="mf">0.7</span><span class="p">)</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-make_gold_worksheet_de-LOWER_BAND"><pre class="sig">LOWER_BAND<span class="kind">tuple · 2 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">(</span><span class="mf">0.5</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-make_gold_worksheet_de-LEDGER_LINES"><pre class="sig">LEDGER_LINES<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">30</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-make_gold_worksheet_de-BLANK_KEY"><pre class="sig">BLANK_KEY<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;   __,+    ____________________ › ______________________________   &gt;&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-make_gold_worksheet_de-MD_HEADER"><pre class="sig">MD_HEADER<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;---</span><span class="se">\n</span><span class="s1">scan: &quot;</span><span class="si">{scan}</span><span class="s1">&quot;</span><span class="se">\n</span><span class="s1">edition: de</span><span class="se">\n</span><span class="s1">printed_page: &quot;&quot;         # as printed at the head of the page</span><span class="se">\n</span><span class="s1">role: </span><span class="si">{role}</span><span class="se">\n</span><span class="s1">districts: [</span><span class="si">{courts_cs}</span><span class="s1">]</span><span class="se">\n</span><span class="s1">courts_de: [</span><span class="si">{courts_de}</span><span class="s1">]</span><span class="se">\n</span><span class="s1">read: </span><span class="si">{read}</span><span class="s1">            # whole = everything on the page | court = only the court above</span><span class="se">\n</span><span class="s1">matched_cz: [</span><span class="si">{cz_scans}</span><span class="s1">]</span><span class="se">\n</span><span class="s1">status: draft            # draft | complete | double-coded</span><span class="se">\n</span><span class="s1">minutes: {{table: , parts: , offices: , legend: , footnotes: }}</span><span class="se">\n</span><span class="s1">images:</span><span class="se">\n</span><span class="s1">  page: </span><span class="si">{page}</span><span class="se">\n</span><span class="s1">  upper: </span><span class="si">{upper}</span><span class="se">\n</span><span class="s1">  lower: </span><span class="si">{lower}</span><span class="se">\n</span><span class="s1">---</span><span class="se">\n\n</span><span class="s1">&lt;!--</span><span class="se">\n</span><span class="s1">GOLD TRANSCRIPTION — </span><span class="si">{volume}</span><span class="s1"> (German edition).</span><span class="se">\n</span><span class="s1">Scan </span><span class="si">{scan}</span><span class="s1">.  </span><span class="si">{note}</span><span class="se">\n\n</span><span class="s1">Same rules as the Czech sheets. Names as printed here, German form first.</span><span class="si">{twin}</span><span class="se">\n\n</span><span class="s1">NOTHING IS PRE-FILLED. Type the sequence number, the names and the ledger keys</span><span class="se">\n</span><span class="s1">exactly as THIS edition prints them. The German edition numbers a district</span><span class="se">\&#39;</span><span class="s1">s</span><span class="se">\n</span><span class="s1">municipalities in its own alphabetical order, so a number here is not the number</span><span class="se">\n</span><span class="s1">of the same place in the Czech volume.</span><span class="se">\n\n</span><span class="s1">Fill from the IMAGE. A printed dash is a ZERO, a blank is a blank, and anything</span><span class="se">\n</span><span class="s1">printed but unreadable is `[?]`; never guess a digit.</span><span class="se">\n</span><span class="si">{scope}</span><span class="s1">--&gt;</span><span class="se">\n</span><span class="s1">&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-make_gold_worksheet_de-SCOPE_COURT"><pre class="sig">SCOPE_COURT<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">READ ONLY GERICHTSBEZIRK </span><span class="si">{courts_de}</span><span class="s1">. Everything on this scan that belongs to</span><span class="se">\n</span><span class="s1">another court is left out of every section.</span><span class="se">\n</span><span class="s1">&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-make_gold_worksheet_de-VOLUMES"><pre class="sig">VOLUMES<span class="kind">dict · 2 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;maehren_de&#39;</span><span class="p">:</span> <span class="s1">&#39;de-moravia&#39;</span><span class="p">,</span> <span class="s1">&#39;schlesien_de&#39;</span><span class="p">:</span> <span class="s1">&#39;de-silesia&#39;</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-make_gold_worksheet_de-VOLUME_ROWS"><pre class="sig">VOLUME_ROWS<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">50</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-make_gold_worksheet_de-TWIN"><pre class="sig">TWIN<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">Do not open the Czech sheet for the same municipalities while reading this one.&#39;</span>
+</pre></div>
+</details></div>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/lexikon_1910/make_gold_worksheet_de.py · 271 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;Build the gold worksheets for the German edition (Spezialortsrepertorium Böhmen).</span>
+
+<span class="sd">Companion to :mod:`make_gold_worksheet`, which builds the Czech sheets and is left</span>
+<span class="sd">alone. The German sheet has the same four sections and the same block grammar —</span>
+<span class="sd">pipe rows for the table, ``ledger`` fences for the two-column part, a ``legend``</span>
+<span class="sd">and a ``notes`` fence — so :mod:`read_transcription_md` can cut it into the same</span>
+<span class="sd">blocks. Three things differ, and each follows from the source:</span>
+
+<span class="sd">* **Nothing is pre-filled, the ledger keys included.** The Czech sheet takes its</span>
+<span class="sd">  municipality names and row counts from the ALTO text layer. The UBW scan has no</span>
+<span class="sd">  ALTO and its embedded text is too damaged to print beside a blank cell</span>
+<span class="sd">  (``NiederalteDbuch``, ``Altniynitz``), so the transcriber types the key and the</span>
+<span class="sd">  names as printed. An unfilled ledger line keeps the Czech sheets&#39; ``__,+``</span>
+<span class="sd">  template key, which the reader counts as blank and never as an entry.</span>
+<span class="sd">* **The images are the page, not its sections.** Without coordinates there is no</span>
+<span class="sd">  section to cut, so each scan is rendered whole, plus an upper and a lower band</span>
+<span class="sd">  that overlap, enlarged like the Czech crops.</span>
+<span class="sd">* **The pages come from a manifest, not from a draw.** A German page is not the</span>
+<span class="sd">  twin of a Czech page: each edition orders a district&#39;s municipalities</span>
+<span class="sd">  alphabetically in its own language. ``gold_sample_pages_de.csv`` names each</span>
+<span class="sd">  German scan, the Czech scans it shares municipalities with, and whether the</span>
+<span class="sd">  whole page is read or only one court&#39;s part of it.</span>
+
+<span class="sd">The district in every heading is the **Czech** court name (``soudní okres</span>
+<span class="sd">Trutnov``), because that is the half of the join key the Czech gold already</span>
+<span class="sd">carries. The municipality number is *not* shared between the editions, so the two</span>
+<span class="sd">golds join on names, never on ``muni_seq``.</span>
+
+<span class="sd">A sheet that exists is never overwritten: it may hold an hour of reading.</span>
+
+<span class="sd">    python utils/lexikon_1910/make_gold_worksheet_de.py --role purposive</span>
+<span class="sd">    python utils/lexikon_1910/make_gold_worksheet_de.py --role purposive --images</span>
+<span class="sd">    python utils/lexikon_1910/make_gold_worksheet_de.py --volume maehren_de --role certification</span>
+
+<span class="sd">``--volume`` (1.1.0, D-133) cuts the sheets of Moravia&#39;s or Silesia&#39;s own drawn sample</span>
+<span class="sd">(``gold_sample_pages_&lt;slug&gt;.csv``, from ``draw_gold_sample.py --volume``) into</span>
+<span class="sd">``transcription_gold/de-moravia/`` or ``de-silesia/``. Those pages have no Czech twin and</span>
+<span class="sd">no court is pre-filled: the court and every name are typed from the print.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.1.0&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">csv</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">))</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910</span> <span class="k">as</span> <span class="n">lx</span>                   <span class="c1"># noqa: E402</span>
+
+<span class="n">DE_PDF</span> <span class="o">=</span> <span class="p">(</span><span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;library&quot;</span> <span class="o">/</span> <span class="s2">&quot;lexicons&quot;</span>
+          <span class="o">/</span> <span class="s2">&quot;UBW_Spezialortsrepertorium-Boehmen-1910_de.pdf&quot;</span><span class="p">)</span>
+<span class="n">MANIFEST</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;places&quot;</span> <span class="o">/</span> <span class="s2">&quot;gold_sample_pages_de.csv&quot;</span>
+<span class="n">OUT_ROOT</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;places&quot;</span> <span class="o">/</span> <span class="s2">&quot;transcription_gold&quot;</span> <span class="o">/</span> <span class="s2">&quot;de&quot;</span>
+
+<span class="c1">#: The UBW scan&#39;s own resolution: its page images are ~2,106 px across a ~505 pt</span>
+<span class="c1">#: page (``page.images[0][&quot;srcsize&quot;]`` on scans 477-481), which is 300 dpi.</span>
+<span class="c1">#: Rendering finer than the scan adds pixels and no ink.</span>
+<span class="n">RESOLUTION</span> <span class="o">=</span> <span class="mi">300</span>
+
+<span class="c1">#: The bands are enlarged by the same factor as the Czech section crops</span>
+<span class="c1">#: (``make_gold_worksheet.ENLARGE``), so both editions are read at one size.</span>
+<span class="n">ENLARGE</span> <span class="o">=</span> <span class="mi">2</span>
+
+<span class="c1">#: The table ends between about 55 % and 70 % of the way down the pages looked</span>
+<span class="c1">#: at (scan 478: ~63 %). The two bands overlap across that whole range, so no</span>
+<span class="c1">#: line is cut in both.</span>
+<span class="n">UPPER_BAND</span> <span class="o">=</span> <span class="p">(</span><span class="mf">0.00</span><span class="p">,</span> <span class="mf">0.70</span><span class="p">)</span>
+<span class="n">LOWER_BAND</span> <span class="o">=</span> <span class="p">(</span><span class="mf">0.50</span><span class="p">,</span> <span class="mf">1.00</span><span class="p">)</span>
+
+<span class="c1">#: Blank ledger lines printed per section. A line is copied where more are needed.</span>
+<span class="n">LEDGER_LINES</span> <span class="o">=</span> <span class="mi">30</span>
+
+<span class="n">BLANK_KEY</span> <span class="o">=</span> <span class="s2">&quot;   __,+    ____________________ › ______________________________   &gt;&quot;</span>
+
+<span class="n">MD_HEADER</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;---</span>
+<span class="s2">scan: &quot;</span><span class="si">{scan}</span><span class="s2">&quot;</span>
+<span class="s2">edition: de</span>
+<span class="s2">printed_page: &quot;&quot;         # as printed at the head of the page</span>
+<span class="s2">role: </span><span class="si">{role}</span>
+<span class="s2">districts: [</span><span class="si">{courts_cs}</span><span class="s2">]</span>
+<span class="s2">courts_de: [</span><span class="si">{courts_de}</span><span class="s2">]</span>
+<span class="s2">read: </span><span class="si">{read}</span><span class="s2">            # whole = everything on the page | court = only the court above</span>
+<span class="s2">matched_cz: [</span><span class="si">{cz_scans}</span><span class="s2">]</span>
+<span class="s2">status: draft            # draft | complete | double-coded</span>
+<span class="s2">minutes: {{table: , parts: , offices: , legend: , footnotes: }}</span>
+<span class="s2">images:</span>
+<span class="s2">  page: </span><span class="si">{page}</span>
+<span class="s2">  upper: </span><span class="si">{upper}</span>
+<span class="s2">  lower: </span><span class="si">{lower}</span>
+<span class="s2">---</span>
+
+<span class="s2">&lt;!--</span>
+<span class="s2">GOLD TRANSCRIPTION — </span><span class="si">{volume}</span><span class="s2"> (German edition).</span>
+<span class="s2">Scan </span><span class="si">{scan}</span><span class="s2">.  </span><span class="si">{note}</span>
+
+<span class="s2">Same rules as the Czech sheets. Names as printed here, German form first.</span><span class="si">{twin}</span>
+
+<span class="s2">NOTHING IS PRE-FILLED. Type the sequence number, the names and the ledger keys</span>
+<span class="s2">exactly as THIS edition prints them. The German edition numbers a district&#39;s</span>
+<span class="s2">municipalities in its own alphabetical order, so a number here is not the number</span>
+<span class="s2">of the same place in the Czech volume.</span>
+
+<span class="s2">Fill from the IMAGE. A printed dash is a ZERO, a blank is a blank, and anything</span>
+<span class="s2">printed but unreadable is `[?]`; never guess a digit.</span>
+<span class="si">{scope}</span><span class="s2">--&gt;</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+<span class="n">SCOPE_COURT</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">READ ONLY GERICHTSBEZIRK </span><span class="si">{courts_de}</span><span class="s2">. Everything on this scan that belongs to</span>
+<span class="s2">another court is left out of every section.</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+
+<span class="c1">#: The other German volumes: their own draw, folder and run edition (D-133).</span>
+<span class="n">VOLUMES</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;maehren_de&quot;</span><span class="p">:</span> <span class="s2">&quot;de-moravia&quot;</span><span class="p">,</span> <span class="s2">&quot;schlesien_de&quot;</span><span class="p">:</span> <span class="s2">&quot;de-silesia&quot;</span><span class="p">}</span>
+
+<span class="c1">#: Blank table rows on a sheet of Moravia or Silesia, where no count is known beforehand.</span>
+<span class="n">VOLUME_ROWS</span> <span class="o">=</span> <span class="mi">50</span>
+
+<span class="n">TWIN</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">Do not open the Czech sheet for the same municipalities while reading this one.&quot;&quot;&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">load_manifest</span><span class="p">(</span><span class="n">role</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">volume</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+    <span class="k">if</span> <span class="n">volume</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">with</span> <span class="n">MANIFEST</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">[</span><span class="n">row</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictReader</span><span class="p">(</span><span class="n">fh</span><span class="p">)</span> <span class="k">if</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;role&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">role</span><span class="p">]</span>
+    <span class="n">draw</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;places&quot;</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;gold_sample_pages_</span><span class="si">{</span><span class="n">volume</span><span class="si">}</span><span class="s2">.csv&quot;</span>
+    <span class="k">with</span> <span class="n">draw</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[{</span><span class="s2">&quot;de_scan&quot;</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;scan&quot;</span><span class="p">],</span> <span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;role&quot;</span><span class="p">],</span> <span class="s2">&quot;court_de&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;court_cs&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+                 <span class="s2">&quot;cz_scans&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;read&quot;</span><span class="p">:</span> <span class="s2">&quot;whole&quot;</span><span class="p">,</span> <span class="s2">&quot;rows&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">VOLUME_ROWS</span><span class="p">),</span>
+                 <span class="s2">&quot;note&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;drawn </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;role&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> page </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;draw_order&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> of the volume&#39;s &quot;</span>
+                         <span class="s2">&quot;systematic sample (D-133); type the court as printed&quot;</span><span class="p">}</span>
+                <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictReader</span><span class="p">(</span><span class="n">fh</span><span class="p">)</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;role&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">role</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">render</span><span class="p">(</span><span class="n">pdf</span><span class="p">,</span> <span class="n">scan</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">out_dir</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">force</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Write the page and its two bands; return ``{kind: filename}``.&quot;&quot;&quot;</span>
+    <span class="n">names</span> <span class="o">=</span> <span class="p">{</span><span class="n">kind</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">scan</span><span class="si">:</span><span class="s2">04d</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">kind</span><span class="si">}</span><span class="s2">.png&quot;</span> <span class="k">for</span> <span class="n">kind</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;page&quot;</span><span class="p">,</span> <span class="s2">&quot;upper&quot;</span><span class="p">,</span> <span class="s2">&quot;lower&quot;</span><span class="p">)}</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">force</span> <span class="ow">and</span> <span class="nb">all</span><span class="p">((</span><span class="n">out_dir</span> <span class="o">/</span> <span class="n">name</span><span class="p">)</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">names</span><span class="o">.</span><span class="n">values</span><span class="p">()):</span>
+        <span class="k">return</span> <span class="n">names</span>
+    <span class="n">image</span> <span class="o">=</span> <span class="n">pdf</span><span class="o">.</span><span class="n">pages</span><span class="p">[</span><span class="n">scan</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">to_image</span><span class="p">(</span><span class="n">resolution</span><span class="o">=</span><span class="n">RESOLUTION</span><span class="p">)</span><span class="o">.</span><span class="n">original</span>
+    <span class="n">image</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">out_dir</span> <span class="o">/</span> <span class="n">names</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">])</span>
+    <span class="k">for</span> <span class="n">kind</span><span class="p">,</span> <span class="p">(</span><span class="n">top</span><span class="p">,</span> <span class="n">bottom</span><span class="p">)</span> <span class="ow">in</span> <span class="p">((</span><span class="s2">&quot;upper&quot;</span><span class="p">,</span> <span class="n">UPPER_BAND</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;lower&quot;</span><span class="p">,</span> <span class="n">LOWER_BAND</span><span class="p">)):</span>
+        <span class="n">band</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">crop</span><span class="p">((</span><span class="mi">0</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">top</span> <span class="o">*</span> <span class="n">image</span><span class="o">.</span><span class="n">height</span><span class="p">),</span>
+                           <span class="n">image</span><span class="o">.</span><span class="n">width</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">bottom</span> <span class="o">*</span> <span class="n">image</span><span class="o">.</span><span class="n">height</span><span class="p">)))</span>
+        <span class="n">band</span> <span class="o">=</span> <span class="n">band</span><span class="o">.</span><span class="n">resize</span><span class="p">((</span><span class="n">band</span><span class="o">.</span><span class="n">width</span> <span class="o">*</span> <span class="n">ENLARGE</span><span class="p">,</span> <span class="n">band</span><span class="o">.</span><span class="n">height</span> <span class="o">*</span> <span class="n">ENLARGE</span><span class="p">))</span>
+        <span class="n">band</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">out_dir</span> <span class="o">/</span> <span class="n">names</span><span class="p">[</span><span class="n">kind</span><span class="p">])</span>
+    <span class="k">return</span> <span class="n">names</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_table</span><span class="p">(</span><span class="n">rows</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">names</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+    <span class="n">columns</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;r&quot;</span><span class="p">,</span> <span class="o">*</span><span class="p">(</span><span class="n">names</span> <span class="ow">or</span> <span class="n">lx</span><span class="o">.</span><span class="n">COL_NAMES</span><span class="p">)]</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;| &quot;</span> <span class="o">+</span> <span class="s2">&quot; | &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">columns</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot; |&quot;</span><span class="p">,</span>
+             <span class="s2">&quot;|&quot;</span> <span class="o">+</span> <span class="s2">&quot;---|&quot;</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">columns</span><span class="p">)]</span>
+    <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;| r</span><span class="si">{</span><span class="n">k</span><span class="si">}</span><span class="s2"> |&quot;</span> <span class="o">+</span> <span class="s2">&quot; |&quot;</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">lx</span><span class="o">.</span><span class="n">COL_NAMES</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">rows</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)]</span>
+    <span class="k">return</span> <span class="n">lines</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_ledger</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+    <span class="k">return</span> <span class="p">[</span><span class="s2">&quot;```ledger&quot;</span><span class="p">,</span> <span class="o">*</span><span class="p">[</span><span class="n">BLANK_KEY</span><span class="p">]</span> <span class="o">*</span> <span class="n">LEDGER_LINES</span><span class="p">,</span> <span class="s2">&quot;```&quot;</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">sheet_text</span><span class="p">(</span><span class="n">row</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">images</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">],</span>
+               <span class="n">volume</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;1910 Spezialortsrepertorium, Böhmen&quot;</span><span class="p">,</span>
+               <span class="n">columns</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The whole sheet for one manifest row.&quot;&quot;&quot;</span>
+    <span class="n">scan</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;de_scan&#39;</span><span class="p">])</span><span class="si">:</span><span class="s2">04d</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="n">court_de</span><span class="p">,</span> <span class="n">court_cs</span> <span class="o">=</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;court_de&quot;</span><span class="p">]</span> <span class="ow">or</span> <span class="s2">&quot;________&quot;</span><span class="p">,</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;court_cs&quot;</span><span class="p">]</span> <span class="ow">or</span> <span class="s2">&quot;________&quot;</span>
+    <span class="n">where</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;Gerichtsbezirk </span><span class="si">{</span><span class="n">court_de</span><span class="si">}</span><span class="s2"> · soudní okres </span><span class="si">{</span><span class="n">court_cs</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="n">scope</span> <span class="o">=</span> <span class="p">(</span><span class="n">SCOPE_COURT</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">courts_de</span><span class="o">=</span><span class="n">court_de</span><span class="p">)</span>
+             <span class="k">if</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;read&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;court&quot;</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">header</span> <span class="o">=</span> <span class="n">MD_HEADER</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+        <span class="n">scan</span><span class="o">=</span><span class="n">scan</span><span class="p">,</span> <span class="n">role</span><span class="o">=</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;role&quot;</span><span class="p">],</span> <span class="n">courts_cs</span><span class="o">=</span><span class="n">court_cs</span><span class="p">,</span> <span class="n">courts_de</span><span class="o">=</span><span class="n">court_de</span><span class="p">,</span>
+        <span class="n">read</span><span class="o">=</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;read&quot;</span><span class="p">],</span> <span class="n">cz_scans</span><span class="o">=</span><span class="s2">&quot;, &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;cz_scans&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">split</span><span class="p">()),</span>
+        <span class="n">note</span><span class="o">=</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;note&quot;</span><span class="p">],</span> <span class="n">scope</span><span class="o">=</span><span class="n">scope</span><span class="p">,</span> <span class="n">volume</span><span class="o">=</span><span class="n">volume</span><span class="p">,</span> <span class="n">twin</span><span class="o">=</span><span class="n">TWIN</span> <span class="k">if</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;cz_scans&quot;</span><span class="p">]</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">images</span><span class="p">)</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="n">header</span><span class="p">,</span>
+        <span class="s2">&quot;# 1 — Tabelární část&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;image: `</span><span class="si">{</span><span class="n">images</span><span class="p">[</span><span class="s1">&#39;upper&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">`  (whole page: `</span><span class="si">{</span><span class="n">images</span><span class="p">[</span><span class="s1">&#39;page&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">`)&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;One row per printed line, in printed order. The bold summary row of the&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;court and the lines under it are rows too. Delete the rows left over;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;add rows where the print has more.&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;## 1 — </span><span class="si">{</span><span class="n">where</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="o">*</span><span class="n">_table</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;rows&quot;</span><span class="p">]),</span> <span class="n">columns</span><span class="p">),</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;# 2 — Dvousloupcová část&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;image: `</span><span class="si">{</span><span class="n">images</span><span class="p">[</span><span class="s1">&#39;lower&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">`  (whole page: `</span><span class="si">{</span><span class="n">images</span><span class="p">[</span><span class="s1">&#39;page&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">`)&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;One line per printed key. Replace `__,+` with the key as printed —&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;municipality number, then the part number, `0` for a dash — then&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;`municipality › part` and, after `&gt;`, what the key prints:&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;```&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;   6,0     Hazlov               › (obec as a whole)        &gt; Hammermühle [mill] 6-29, Hazlov, Haslau [ves] 217-2266.&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;```&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;A part that opens its own line is printed as a bare `2)` under the `1)`,&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;with no dash. It is part 2 of the same municipality and gets its own line.&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;## 2a — Ortsbestandteile · </span><span class="si">{</span><span class="n">where</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="o">*</span><span class="n">_ledger</span><span class="p">(),</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;## 2b — Ämter, Anstalten usw. · </span><span class="si">{</span><span class="n">where</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;Symbols as atlas tokens, words verbatim. The school&#39;s class numeral and&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;its language note, and the cooperative letters with their language&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;suffix, are written exactly as printed.&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="o">*</span><span class="n">_ledger</span><span class="p">(),</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;# 3 — Jednosloupcová část pod čarou&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;The postal districts and stations the last two table columns point at:&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;`key) place`, in printed order. The numbering runs across the whole&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;court, not down the page.&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="sa">f</span><span class="s2">&quot;## 3 — [post] und [rail-station] · s. o. </span><span class="si">{</span><span class="n">court_cs</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;```legend&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;```&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;# 4 — Poznámky pod čarou&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;The `*)` and `**)` notes, verbatim, one per line, with the marker.&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;```notes&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;```&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+    <span class="p">]</span>
+    <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">build</span><span class="p">(</span><span class="n">role</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">images_only</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">force_images</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+          <span class="n">volume</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">pdfplumber</span>
+
+    <span class="n">rows</span> <span class="o">=</span> <span class="n">load_manifest</span><span class="p">(</span><span class="n">role</span><span class="p">,</span> <span class="n">volume</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">rows</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;no </span><span class="si">{</span><span class="n">role</span><span class="si">}</span><span class="s2"> rows for </span><span class="si">{</span><span class="n">volume</span><span class="w"> </span><span class="ow">or</span><span class="w"> </span><span class="n">MANIFEST</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="mi">1</span>
+    <span class="n">title</span><span class="p">,</span> <span class="n">source</span><span class="p">,</span> <span class="n">columns</span> <span class="o">=</span> <span class="s2">&quot;1910 Spezialortsrepertorium, Böhmen&quot;</span><span class="p">,</span> <span class="n">DE_PDF</span><span class="p">,</span> <span class="kc">None</span>
+    <span class="n">out_dir</span> <span class="o">=</span> <span class="n">OUT_ROOT</span> <span class="o">/</span> <span class="n">role</span>
+    <span class="k">if</span> <span class="n">volume</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_volume</span> <span class="k">as</span> <span class="n">lxvol</span>
+
+        <span class="n">profile</span> <span class="o">=</span> <span class="n">lxvol</span><span class="o">.</span><span class="n">load_profile</span><span class="p">(</span><span class="n">volume</span><span class="p">)</span>
+        <span class="c1"># the volume&#39;s own columns: Silesia prints a Polish language column</span>
+        <span class="n">title</span><span class="p">,</span> <span class="n">source</span><span class="p">,</span> <span class="n">columns</span> <span class="o">=</span> <span class="n">profile</span><span class="o">.</span><span class="n">title</span><span class="p">,</span> <span class="n">profile</span><span class="o">.</span><span class="n">source_pdf</span><span class="p">,</span> <span class="p">[</span><span class="n">c</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">profile</span><span class="o">.</span><span class="n">columns</span><span class="p">]</span>
+        <span class="n">out_dir</span> <span class="o">=</span> <span class="n">OUT_ROOT</span><span class="o">.</span><span class="n">parent</span> <span class="o">/</span> <span class="n">VOLUMES</span><span class="p">[</span><span class="n">volume</span><span class="p">]</span> <span class="o">/</span> <span class="n">role</span>
+    <span class="n">out_dir</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">with</span> <span class="n">pdfplumber</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">source</span><span class="p">)</span> <span class="k">as</span> <span class="n">pdf</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+            <span class="n">scan</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;de_scan&quot;</span><span class="p">])</span>
+            <span class="n">images</span> <span class="o">=</span> <span class="n">render</span><span class="p">(</span><span class="n">pdf</span><span class="p">,</span> <span class="n">scan</span><span class="p">,</span> <span class="n">out_dir</span><span class="p">,</span> <span class="n">force</span><span class="o">=</span><span class="n">force_images</span><span class="p">)</span>
+            <span class="n">path</span> <span class="o">=</span> <span class="n">out_dir</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">scan</span><span class="si">:</span><span class="s2">04d</span><span class="si">}</span><span class="s2">.md&quot;</span>
+            <span class="k">if</span> <span class="n">images_only</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">path</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">: images written&quot;</span><span class="p">)</span>
+                <span class="k">continue</span>
+            <span class="k">if</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">path</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">: exists — left alone&quot;</span><span class="p">)</span>
+                <span class="k">continue</span>
+            <span class="n">path</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">sheet_text</span><span class="p">(</span><span class="n">row</span><span class="p">,</span> <span class="n">images</span><span class="p">,</span> <span class="n">title</span><span class="p">,</span> <span class="n">columns</span><span class="p">),</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">path</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">: written (</span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;read&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;rows&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> blank rows&quot;</span>
+                  <span class="o">+</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot;, twin of cz </span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;cz_scans&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">)&quot;</span> <span class="k">if</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;cz_scans&quot;</span><span class="p">]</span> <span class="k">else</span> <span class="s2">&quot;)&quot;</span><span class="p">))</span>
+    <span class="k">return</span> <span class="mi">0</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--role&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;purposive&quot;</span><span class="p">,</span>
+                    <span class="n">choices</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;calibration&quot;</span><span class="p">,</span> <span class="s2">&quot;certification&quot;</span><span class="p">,</span> <span class="s2">&quot;purposive&quot;</span><span class="p">))</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--images&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;re-render the page images only; touch no sheet&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--volume&quot;</span><span class="p">,</span> <span class="n">choices</span><span class="o">=</span><span class="nb">sorted</span><span class="p">(</span><span class="n">VOLUMES</span><span class="p">),</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Moravia&#39;s or Silesia&#39;s own drawn sample (D-133)&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">build</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">role</span><span class="p">,</span> <span class="n">images_only</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">images</span><span class="p">,</span> <span class="n">force_images</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">images</span><span class="p">,</span>
+                 <span class="n">volume</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">volume</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>

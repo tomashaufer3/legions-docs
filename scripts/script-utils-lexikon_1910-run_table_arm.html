@@ -1,0 +1,554 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>The table arm of <code>r5</code> — the seventeen printed columns read by a model, not the text layer.</p><p class="tldr-facts"><b>1910 register</b> · v— · 153 lines · 7 public functions · 6 constants · used by <code>utils/lexikon_1910/run_frozen.py</code> · <code>utils/lexikon_1910/run_table_arm.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-lexikon_1910-run_table_arm-label">label</a><a class="chip" href="#fn-utils-lexikon_1910-run_table_arm-rows_file">rows_file</a><a class="chip" href="#fn-utils-lexikon_1910-run_table_arm-read_by_model">read_by_model</a><a class="chip" href="#fn-utils-lexikon_1910-run_table_arm-plan">plan</a><a class="chip" href="#fn-utils-lexikon_1910-run_table_arm-flags">flags</a><a class="chip" href="#fn-utils-lexikon_1910-run_table_arm-run">run</a><a class="chip" href="#fn-utils-lexikon_1910-run_table_arm-main">main</a><a class="chip const" href="#c-utils-lexikon_1910-run_table_arm-HERE">HERE</a><a class="chip const" href="#c-utils-lexikon_1910-run_table_arm-REPEATS">REPEATS</a><a class="chip const" href="#c-utils-lexikon_1910-run_table_arm-WORKERS">WORKERS</a><a class="chip const" href="#c-utils-lexikon_1910-run_table_arm-KIND">KIND</a><a class="chip const" href="#c-utils-lexikon_1910-run_table_arm-VARIANT">VARIANT</a><a class="chip const" href="#c-utils-lexikon_1910-run_table_arm-READERS">READERS</a></div>
+<h2>How it works</h2><p>Everything the pipeline reads from the table today comes from the NDK ALTO text
+layer (channel B). On the 13 gold table pages (403 rows) that layer gets 91.4 %
+of the number cells right but only 60.6 % of the names word for word, and 15 % of
+rows whole (<code>score_table_passes.py</code> on a channel-B-only run, 2026-10-19). This
+arm asks the same question of the two readers of the notes bake-off:</p>
+<pre><code>gemini38   Gemini 3.8 Flash, thinking off       3 repeats
+haiku55    Claude Haiku 5.5, thinking at high   3 repeats
+</code></pre>
+<p>Each pass is channel A of <code>run_lexikon_1910_pilot.py</code> on the gold pages: one
+call per municipality block, the crop cut where channel B found the block, so
+the two channels are compared on the <strong>same crop</strong> and differ only in who reads
+it. The crop's edges come from the page geometry; nothing the text layer <em>read</em>
+reaches the model. A gold row no crop holds is missed by both, and the scorer
+reports it as recall.</p>
+<p>Repeats, because Gemini is not deterministic (<code>run_e1_gemini_version.py</code>).
+Channel A has no response cache, so a repeat is a fresh, billed reading.</p>
+<p>Run it on Heavyhorse6 (D-68):</p>
+<pre><code>python utils/lexikon_1910/run_table_arm.py --dry-run    # the plan and the pilot's estimate
+python utils/lexikon_1910/run_table_arm.py              # run what is missing, then score
+python utils/lexikon_1910/run_table_arm.py --score      # score only; spend nothing
+</code></pre>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-lexikon_1910-run_table_arm-label">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">label</span><span class="p">(</span><span class="n">model_label</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">repeat</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<div class="fndoc"><p><code>gemini38_r5baset2</code>: the bake-off's own label for a table pass, plus the repeat.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code> <code>utils/docs/build_docs.py</code> <code>utils/lexikon_1910/build_glyph_bank.py</code> <code>utils/lexikon_1910/lexikon_1910_notes.py</code> <code>utils/lexikon_1910/locate_glyphs.py</code> <code>utils/lexikon_1910/run_e1_gemini_version.py</code> <code>utils/lexikon_1910/run_e1b_second_reader.py</code> <code>utils/lexikon_1910/run_r5_german_notes.py</code> <code>utils/parsing/schema.py</code> <code>utils/validation/data_checks.py</code></p>
+<details><summary>source · lines 57–59 (3 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">57</span>
+<span class="normal">58</span>
+<span class="normal">59</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">label</span><span class="p">(</span><span class="n">model_label</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">repeat</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``gemini38_r5baset2``: the bake-off&#39;s own label for a table pass, plus the repeat.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">bo</span><span class="o">.</span><span class="n">label_for</span><span class="p">(</span><span class="n">model_label</span><span class="p">,</span> <span class="n">VARIANT</span><span class="p">,</span> <span class="n">KIND</span><span class="p">)</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">repeat</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-run_table_arm-rows_file">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">rows_file</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 62–63 (2 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">62</span>
+<span class="normal">63</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">rows_file</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">bo</span><span class="o">.</span><span class="n">PASS_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;table_rows_</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">.csv&quot;</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-run_table_arm-read_by_model">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">read_by_model</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span></pre>
+<div class="fndoc"><p>A pass is done when its rows file holds channel A rows, not the text layer alone.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 66–72 (7 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">66</span>
+<span class="normal">67</span>
+<span class="normal">68</span>
+<span class="normal">69</span>
+<span class="normal">70</span>
+<span class="normal">71</span>
+<span class="normal">72</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">read_by_model</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A pass is done when its rows file holds channel A rows, not the text layer alone.&quot;&quot;&quot;</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">rows_file</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">with</span> <span class="n">path</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">any</span><span class="p">(</span><span class="n">line</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;A,&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">fh</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-run_table_arm-plan">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">plan</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span></pre>
+<div class="fndoc"><p>Interleaved by repeat, so a run cut short leaves both readers comparable.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_e1b_candidates.py</code> <code>tests/test_r5_german_notes.py</code> <code>utils/lexikon_1910/bakeoff.py</code> <code>utils/lexikon_1910/run_e1_gemini_version.py</code> <code>utils/lexikon_1910/run_e1b_second_reader.py</code> <code>utils/lexikon_1910/run_r5_german_notes.py</code></p>
+<details><summary>source · lines 75–79 (5 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">75</span>
+<span class="normal">76</span>
+<span class="normal">77</span>
+<span class="normal">78</span>
+<span class="normal">79</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">plan</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Interleaved by repeat, so a run cut short leaves both readers comparable.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="p">[{</span><span class="s2">&quot;model_label&quot;</span><span class="p">:</span> <span class="n">m</span><span class="p">,</span> <span class="s2">&quot;repeat&quot;</span><span class="p">:</span> <span class="n">r</span><span class="p">,</span> <span class="s2">&quot;label&quot;</span><span class="p">:</span> <span class="n">label</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">r</span><span class="p">),</span>
+             <span class="s2">&quot;done&quot;</span><span class="p">:</span> <span class="n">read_by_model</span><span class="p">(</span><span class="n">label</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">r</span><span class="p">))}</span>
+            <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">REPEATS</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="n">READERS</span><span class="p">]</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-run_table_arm-flags">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">flags</span><span class="p">(</span><span class="n">job</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">dry_run</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span></pre>
+<div class="fndoc"><p><code>bakeoff.flags_for</code> for the table kind, with the hosted reader swapped in.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_e1b_candidates.py</code> <code>tests/test_vua_courts.py</code> <code>utils/lexikon_1910/run_e1_gemini_version.py</code> <code>utils/lexikon_1910/run_e1b_second_reader.py</code> <code>utils/lexikon_1910/run_frozen.py</code></p>
+<details><summary>source · lines 82–101 (20 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">flags</span><span class="p">(</span><span class="n">job</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">dry_run</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``bakeoff.flags_for`` for the table kind, with the hosted reader swapped in.&quot;&quot;&quot;</span>
+    <span class="n">argv</span> <span class="o">=</span> <span class="n">bo</span><span class="o">.</span><span class="n">flags_for</span><span class="p">(</span><span class="n">job</span><span class="p">[</span><span class="s2">&quot;model_label&quot;</span><span class="p">],</span> <span class="n">job</span><span class="p">[</span><span class="s2">&quot;label&quot;</span><span class="p">],</span> <span class="n">bo</span><span class="o">.</span><span class="n">gold_pages</span><span class="p">(),</span>
+                        <span class="n">bo</span><span class="o">.</span><span class="n">VARIANT</span><span class="p">[</span><span class="n">VARIANT</span><span class="p">],</span> <span class="p">{},</span> <span class="n">kind</span><span class="o">=</span><span class="n">KIND</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">,</span> <span class="n">skip</span> <span class="o">=</span> <span class="p">[],</span> <span class="kc">False</span>
+    <span class="k">for</span> <span class="n">arg</span> <span class="ow">in</span> <span class="n">argv</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">skip</span><span class="p">:</span>
+            <span class="n">skip</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="k">continue</span>
+        <span class="k">if</span> <span class="n">arg</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;--reader&quot;</span><span class="p">,</span> <span class="s2">&quot;--reader-model&quot;</span><span class="p">,</span> <span class="s2">&quot;--workers&quot;</span><span class="p">):</span>
+            <span class="n">skip</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="k">continue</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">arg</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">+=</span> <span class="p">[</span><span class="s2">&quot;--workers&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">WORKERS</span><span class="p">),</span> <span class="o">*</span><span class="n">READERS</span><span class="p">[</span><span class="n">job</span><span class="p">[</span><span class="s2">&quot;model_label&quot;</span><span class="p">]]]</span>
+    <span class="k">if</span> <span class="n">dry_run</span><span class="p">:</span>
+        <span class="c1"># Away from the pass directory: a dry run still writes the text layer&#39;s</span>
+        <span class="c1"># rows, and the scorer&#39;s default sweep must not find them.</span>
+        <span class="n">out</span><span class="p">[</span><span class="n">out</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="s2">&quot;--out&quot;</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">bo</span><span class="o">.</span><span class="n">PASS_DIR</span> <span class="o">/</span> <span class="s2">&quot;dry_run&quot;</span><span class="p">)</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;--dry-run&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-run_table_arm-run">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="n">force</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">dry_run</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 104–119 (16 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="n">force</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">dry_run</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+    <span class="n">jobs</span> <span class="o">=</span> <span class="n">plan</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;table arm </span><span class="si">{</span><span class="n">bo</span><span class="o">.</span><span class="n">RUN_TAG</span><span class="si">}</span><span class="s2">: pages </span><span class="si">{</span><span class="n">bo</span><span class="o">.</span><span class="n">gold_pages</span><span class="p">()</span><span class="si">}</span><span class="s2">  (</span><span class="si">{</span><span class="n">bo</span><span class="o">.</span><span class="n">HOST</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">job</span> <span class="ow">in</span> <span class="n">jobs</span><span class="p">:</span>
+        <span class="n">state</span> <span class="o">=</span> <span class="s2">&quot;on disk&quot;</span> <span class="k">if</span> <span class="n">job</span><span class="p">[</span><span class="s2">&quot;done&quot;</span><span class="p">]</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">force</span> <span class="k">else</span> <span class="s2">&quot;to run&quot;</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">job</span><span class="p">[</span><span class="s1">&#39;label&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">24s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">state</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">ok</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="k">for</span> <span class="n">job</span> <span class="ow">in</span> <span class="n">jobs</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">job</span><span class="p">[</span><span class="s2">&quot;done&quot;</span><span class="p">]</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">force</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">dry_run</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">rc</span><span class="p">,</span> <span class="n">seconds</span> <span class="o">=</span> <span class="n">bo</span><span class="o">.</span><span class="n">run_pilot</span><span class="p">(</span><span class="n">flags</span><span class="p">(</span><span class="n">job</span><span class="p">,</span> <span class="n">dry_run</span><span class="p">),</span> <span class="n">job</span><span class="p">[</span><span class="s2">&quot;label&quot;</span><span class="p">])</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">job</span><span class="p">[</span><span class="s1">&#39;label&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">: rc=</span><span class="si">{</span><span class="n">rc</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">seconds</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2">s&quot;</span><span class="p">)</span>
+        <span class="n">ok</span> <span class="o">&amp;=</span> <span class="n">rc</span> <span class="o">==</span> <span class="mi">0</span>
+        <span class="k">if</span> <span class="n">dry_run</span><span class="p">:</span>
+            <span class="k">break</span>                   <span class="c1"># one estimate prices them all</span>
+    <span class="k">return</span> <span class="n">ok</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-run_table_arm-main">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 122–149 (28 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="k">for</span> <span class="n">stream</span> <span class="ow">in</span> <span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">stdout</span><span class="p">,</span> <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">stream</span><span class="o">.</span><span class="n">reconfigure</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;replace&quot;</span><span class="p">)</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">AttributeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">):</span>
+            <span class="k">pass</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="p">,</span>
+                                 <span class="n">formatter_class</span><span class="o">=</span><span class="n">argparse</span><span class="o">.</span><span class="n">RawDescriptionHelpFormatter</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--score&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;score only; spend nothing&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--dry-run&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;print the plan and the pilot&#39;s cost estimate; spend nothing&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--force&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;re-run passes on disk&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">args</span><span class="o">.</span><span class="n">score</span><span class="p">:</span>
+        <span class="n">ok</span> <span class="o">=</span> <span class="n">run</span><span class="p">(</span><span class="n">force</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">force</span><span class="p">,</span> <span class="n">dry_run</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">dry_run</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">dry_run</span><span class="p">:</span>
+            <span class="k">return</span> <span class="mi">0</span> <span class="k">if</span> <span class="n">ok</span> <span class="k">else</span> <span class="mi">1</span>
+    <span class="c1"># Scored from every machine&#39;s folder, as the other r5 scorers are: the</span>
+    <span class="c1"># passes are read on Heavyhorse6 and scored wherever Dropbox brings them.</span>
+    <span class="n">files</span> <span class="o">=</span> <span class="p">[</span><span class="n">path</span> <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="n">plan</span><span class="p">()</span>
+             <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;*/table_rows_</span><span class="si">{</span><span class="n">j</span><span class="p">[</span><span class="s1">&#39;label&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">.csv&quot;</span><span class="p">))</span>
+             <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">line</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;A,&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">path</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">))]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">files</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;no table passes on disk yet&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="mi">1</span>
+    <span class="n">tag</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">bo</span><span class="o">.</span><span class="n">RUN_TAG</span> <span class="o">==</span> <span class="s2">&quot;r5&quot;</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">&quot;_</span><span class="si">{</span><span class="n">bo</span><span class="o">.</span><span class="n">RUN_TAG</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="k">return</span> <span class="n">stp</span><span class="o">.</span><span class="n">main</span><span class="p">([</span><span class="s2">&quot;--rows&quot;</span><span class="p">,</span> <span class="o">*</span><span class="nb">map</span><span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">files</span><span class="p">),</span>
+                     <span class="s2">&quot;--out&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;table_arm</span><span class="si">{</span><span class="n">tag</span><span class="si">}</span><span class="s2">.csv&quot;</span><span class="p">)])</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-lexikon_1910-run_table_arm-HERE"><pre class="sig">HERE<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-run_table_arm-REPEATS"><pre class="sig">REPEATS<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">3</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-run_table_arm-WORKERS"><pre class="sig">WORKERS<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">4</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-run_table_arm-KIND"><pre class="sig">KIND<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;table&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-run_table_arm-VARIANT"><pre class="sig">VARIANT<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;base&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-run_table_arm-READERS"><pre class="sig">READERS<span class="kind">dict · 2 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;gemini38&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;--reader&#39;</span><span class="p">,</span> <span class="s1">&#39;gemini&#39;</span><span class="p">,</span> <span class="s1">&#39;--reader-model&#39;</span><span class="p">,</span> <span class="s1">&#39;gemini-3.8-flash&#39;</span><span class="p">,</span> <span class="s1">&#39;--reader-reasoning-effort&#39;</span><span class="p">,</span> <span class="s1">&#39;none&#39;</span><span class="p">,</span> <span class="s1">&#39;--reader-price&#39;</span><span class="p">,</span> <span class="s1">&#39;0.75,3.75&#39;</span><span class="p">],</span> <span class="s1">&#39;haiku55&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;--reader&#39;</span><span class="p">,</span> <span class="s1">&#39;claude&#39;</span><span class="p">,</span> <span class="s1">&#39;--model&#39;</span><span class="p">,</span> <span class="s1">&#39;claude-haiku-5-5&#39;</span><span class="p">,</span> <span class="s1">&#39;--thinking&#39;</span><span class="p">,</span> <span class="s1">&#39;adaptive&#39;</span><span class="p">,</span> <span class="s1">&#39;--effort&#39;</span><span class="p">,</span> <span class="s1">&#39;high&#39;</span><span class="p">]}</span>
+</pre></div>
+</details></div>
+<h2>Used by</h2><p><code>utils/lexikon_1910/run_frozen.py</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/lexikon_1910/run_table_arm.py · 153 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;The table arm of ``r5`` — the seventeen printed columns read by a model, not the text layer.</span>
+
+<span class="sd">Everything the pipeline reads from the table today comes from the NDK ALTO text</span>
+<span class="sd">layer (channel B). On the 13 gold table pages (403 rows) that layer gets 91.4 %</span>
+<span class="sd">of the number cells right but only 60.6 % of the names word for word, and 15 % of</span>
+<span class="sd">rows whole (``score_table_passes.py`` on a channel-B-only run, 2026-10-19). This</span>
+<span class="sd">arm asks the same question of the two readers of the notes bake-off:</span>
+
+<span class="sd">    gemini38   Gemini 3.8 Flash, thinking off       3 repeats</span>
+<span class="sd">    haiku55    Claude Haiku 5.5, thinking at high   3 repeats</span>
+
+<span class="sd">Each pass is channel A of ``run_lexikon_1910_pilot.py`` on the gold pages: one</span>
+<span class="sd">call per municipality block, the crop cut where channel B found the block, so</span>
+<span class="sd">the two channels are compared on the **same crop** and differ only in who reads</span>
+<span class="sd">it. The crop&#39;s edges come from the page geometry; nothing the text layer *read*</span>
+<span class="sd">reaches the model. A gold row no crop holds is missed by both, and the scorer</span>
+<span class="sd">reports it as recall.</span>
+
+<span class="sd">Repeats, because Gemini is not deterministic (``run_e1_gemini_version.py``).</span>
+<span class="sd">Channel A has no response cache, so a repeat is a fresh, billed reading.</span>
+
+<span class="sd">Run it on Heavyhorse6 (D-68):</span>
+
+<span class="sd">    python utils/lexikon_1910/run_table_arm.py --dry-run    # the plan and the pilot&#39;s estimate</span>
+<span class="sd">    python utils/lexikon_1910/run_table_arm.py              # run what is missing, then score</span>
+<span class="sd">    python utils/lexikon_1910/run_table_arm.py --score      # score only; spend nothing</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="n">HERE</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">HERE</span><span class="p">))</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">bakeoff</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">bo</span>                                            <span class="c1"># noqa: E402</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">score_table_passes</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">stp</span>                                <span class="c1"># noqa: E402</span>
+
+<span class="n">REPEATS</span> <span class="o">=</span> <span class="mi">3</span>
+<span class="n">WORKERS</span> <span class="o">=</span> <span class="mi">4</span>                 <span class="c1"># a hosted endpoint</span>
+<span class="n">KIND</span> <span class="o">=</span> <span class="s2">&quot;table&quot;</span>
+<span class="n">VARIANT</span> <span class="o">=</span> <span class="s2">&quot;base&quot;</span>            <span class="c1"># the table has no pictograms, so no atlas (bakeoff.TABLE_VARIANTS)</span>
+
+<span class="c1">#: label -&gt; the pilot flags that pick and price the reader. Prices are USD per</span>
+<span class="c1">#: million tokens: Gemini&#39;s is the introductory rate in ``lexikon_1910_pages``</span>
+<span class="c1">#: (doubles 2027-01-01); Haiku&#39;s is the pilot&#39;s own ``PRICING`` entry.</span>
+<span class="n">READERS</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;gemini38&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;--reader&quot;</span><span class="p">,</span> <span class="s2">&quot;gemini&quot;</span><span class="p">,</span> <span class="s2">&quot;--reader-model&quot;</span><span class="p">,</span> <span class="s2">&quot;gemini-3.8-flash&quot;</span><span class="p">,</span>
+                 <span class="s2">&quot;--reader-reasoning-effort&quot;</span><span class="p">,</span> <span class="s2">&quot;none&quot;</span><span class="p">,</span> <span class="s2">&quot;--reader-price&quot;</span><span class="p">,</span> <span class="s2">&quot;0.75,3.75&quot;</span><span class="p">],</span>
+    <span class="s2">&quot;haiku55&quot;</span><span class="p">:</span>  <span class="p">[</span><span class="s2">&quot;--reader&quot;</span><span class="p">,</span> <span class="s2">&quot;claude&quot;</span><span class="p">,</span> <span class="s2">&quot;--model&quot;</span><span class="p">,</span> <span class="s2">&quot;claude-haiku-5-5&quot;</span><span class="p">,</span>
+                 <span class="s2">&quot;--thinking&quot;</span><span class="p">,</span> <span class="s2">&quot;adaptive&quot;</span><span class="p">,</span> <span class="s2">&quot;--effort&quot;</span><span class="p">,</span> <span class="s2">&quot;high&quot;</span><span class="p">],</span>
+<span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">label</span><span class="p">(</span><span class="n">model_label</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">repeat</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``gemini38_r5baset2``: the bake-off&#39;s own label for a table pass, plus the repeat.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">bo</span><span class="o">.</span><span class="n">label_for</span><span class="p">(</span><span class="n">model_label</span><span class="p">,</span> <span class="n">VARIANT</span><span class="p">,</span> <span class="n">KIND</span><span class="p">)</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">repeat</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">rows_file</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">bo</span><span class="o">.</span><span class="n">PASS_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;table_rows_</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">.csv&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">read_by_model</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A pass is done when its rows file holds channel A rows, not the text layer alone.&quot;&quot;&quot;</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">rows_file</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">with</span> <span class="n">path</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">any</span><span class="p">(</span><span class="n">line</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;A,&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">fh</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">plan</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Interleaved by repeat, so a run cut short leaves both readers comparable.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="p">[{</span><span class="s2">&quot;model_label&quot;</span><span class="p">:</span> <span class="n">m</span><span class="p">,</span> <span class="s2">&quot;repeat&quot;</span><span class="p">:</span> <span class="n">r</span><span class="p">,</span> <span class="s2">&quot;label&quot;</span><span class="p">:</span> <span class="n">label</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">r</span><span class="p">),</span>
+             <span class="s2">&quot;done&quot;</span><span class="p">:</span> <span class="n">read_by_model</span><span class="p">(</span><span class="n">label</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">r</span><span class="p">))}</span>
+            <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">REPEATS</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="n">READERS</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">flags</span><span class="p">(</span><span class="n">job</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">dry_run</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``bakeoff.flags_for`` for the table kind, with the hosted reader swapped in.&quot;&quot;&quot;</span>
+    <span class="n">argv</span> <span class="o">=</span> <span class="n">bo</span><span class="o">.</span><span class="n">flags_for</span><span class="p">(</span><span class="n">job</span><span class="p">[</span><span class="s2">&quot;model_label&quot;</span><span class="p">],</span> <span class="n">job</span><span class="p">[</span><span class="s2">&quot;label&quot;</span><span class="p">],</span> <span class="n">bo</span><span class="o">.</span><span class="n">gold_pages</span><span class="p">(),</span>
+                        <span class="n">bo</span><span class="o">.</span><span class="n">VARIANT</span><span class="p">[</span><span class="n">VARIANT</span><span class="p">],</span> <span class="p">{},</span> <span class="n">kind</span><span class="o">=</span><span class="n">KIND</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">,</span> <span class="n">skip</span> <span class="o">=</span> <span class="p">[],</span> <span class="kc">False</span>
+    <span class="k">for</span> <span class="n">arg</span> <span class="ow">in</span> <span class="n">argv</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">skip</span><span class="p">:</span>
+            <span class="n">skip</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="k">continue</span>
+        <span class="k">if</span> <span class="n">arg</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;--reader&quot;</span><span class="p">,</span> <span class="s2">&quot;--reader-model&quot;</span><span class="p">,</span> <span class="s2">&quot;--workers&quot;</span><span class="p">):</span>
+            <span class="n">skip</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="k">continue</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">arg</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">+=</span> <span class="p">[</span><span class="s2">&quot;--workers&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">WORKERS</span><span class="p">),</span> <span class="o">*</span><span class="n">READERS</span><span class="p">[</span><span class="n">job</span><span class="p">[</span><span class="s2">&quot;model_label&quot;</span><span class="p">]]]</span>
+    <span class="k">if</span> <span class="n">dry_run</span><span class="p">:</span>
+        <span class="c1"># Away from the pass directory: a dry run still writes the text layer&#39;s</span>
+        <span class="c1"># rows, and the scorer&#39;s default sweep must not find them.</span>
+        <span class="n">out</span><span class="p">[</span><span class="n">out</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="s2">&quot;--out&quot;</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">bo</span><span class="o">.</span><span class="n">PASS_DIR</span> <span class="o">/</span> <span class="s2">&quot;dry_run&quot;</span><span class="p">)</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;--dry-run&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="n">force</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">dry_run</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+    <span class="n">jobs</span> <span class="o">=</span> <span class="n">plan</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;table arm </span><span class="si">{</span><span class="n">bo</span><span class="o">.</span><span class="n">RUN_TAG</span><span class="si">}</span><span class="s2">: pages </span><span class="si">{</span><span class="n">bo</span><span class="o">.</span><span class="n">gold_pages</span><span class="p">()</span><span class="si">}</span><span class="s2">  (</span><span class="si">{</span><span class="n">bo</span><span class="o">.</span><span class="n">HOST</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">job</span> <span class="ow">in</span> <span class="n">jobs</span><span class="p">:</span>
+        <span class="n">state</span> <span class="o">=</span> <span class="s2">&quot;on disk&quot;</span> <span class="k">if</span> <span class="n">job</span><span class="p">[</span><span class="s2">&quot;done&quot;</span><span class="p">]</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">force</span> <span class="k">else</span> <span class="s2">&quot;to run&quot;</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">job</span><span class="p">[</span><span class="s1">&#39;label&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">24s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">state</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">ok</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="k">for</span> <span class="n">job</span> <span class="ow">in</span> <span class="n">jobs</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">job</span><span class="p">[</span><span class="s2">&quot;done&quot;</span><span class="p">]</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">force</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">dry_run</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">rc</span><span class="p">,</span> <span class="n">seconds</span> <span class="o">=</span> <span class="n">bo</span><span class="o">.</span><span class="n">run_pilot</span><span class="p">(</span><span class="n">flags</span><span class="p">(</span><span class="n">job</span><span class="p">,</span> <span class="n">dry_run</span><span class="p">),</span> <span class="n">job</span><span class="p">[</span><span class="s2">&quot;label&quot;</span><span class="p">])</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">job</span><span class="p">[</span><span class="s1">&#39;label&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">: rc=</span><span class="si">{</span><span class="n">rc</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">seconds</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2">s&quot;</span><span class="p">)</span>
+        <span class="n">ok</span> <span class="o">&amp;=</span> <span class="n">rc</span> <span class="o">==</span> <span class="mi">0</span>
+        <span class="k">if</span> <span class="n">dry_run</span><span class="p">:</span>
+            <span class="k">break</span>                   <span class="c1"># one estimate prices them all</span>
+    <span class="k">return</span> <span class="n">ok</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="k">for</span> <span class="n">stream</span> <span class="ow">in</span> <span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">stdout</span><span class="p">,</span> <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">stream</span><span class="o">.</span><span class="n">reconfigure</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;replace&quot;</span><span class="p">)</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">AttributeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">):</span>
+            <span class="k">pass</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="p">,</span>
+                                 <span class="n">formatter_class</span><span class="o">=</span><span class="n">argparse</span><span class="o">.</span><span class="n">RawDescriptionHelpFormatter</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--score&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;score only; spend nothing&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--dry-run&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;print the plan and the pilot&#39;s cost estimate; spend nothing&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--force&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;re-run passes on disk&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">args</span><span class="o">.</span><span class="n">score</span><span class="p">:</span>
+        <span class="n">ok</span> <span class="o">=</span> <span class="n">run</span><span class="p">(</span><span class="n">force</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">force</span><span class="p">,</span> <span class="n">dry_run</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">dry_run</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">dry_run</span><span class="p">:</span>
+            <span class="k">return</span> <span class="mi">0</span> <span class="k">if</span> <span class="n">ok</span> <span class="k">else</span> <span class="mi">1</span>
+    <span class="c1"># Scored from every machine&#39;s folder, as the other r5 scorers are: the</span>
+    <span class="c1"># passes are read on Heavyhorse6 and scored wherever Dropbox brings them.</span>
+    <span class="n">files</span> <span class="o">=</span> <span class="p">[</span><span class="n">path</span> <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="n">plan</span><span class="p">()</span>
+             <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;*/table_rows_</span><span class="si">{</span><span class="n">j</span><span class="p">[</span><span class="s1">&#39;label&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">.csv&quot;</span><span class="p">))</span>
+             <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">line</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;A,&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">path</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">))]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">files</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;no table passes on disk yet&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="mi">1</span>
+    <span class="n">tag</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">bo</span><span class="o">.</span><span class="n">RUN_TAG</span> <span class="o">==</span> <span class="s2">&quot;r5&quot;</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">&quot;_</span><span class="si">{</span><span class="n">bo</span><span class="o">.</span><span class="n">RUN_TAG</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="k">return</span> <span class="n">stp</span><span class="o">.</span><span class="n">main</span><span class="p">([</span><span class="s2">&quot;--rows&quot;</span><span class="p">,</span> <span class="o">*</span><span class="nb">map</span><span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">files</span><span class="p">),</span>
+                     <span class="s2">&quot;--out&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;table_arm</span><span class="si">{</span><span class="n">tag</span><span class="si">}</span><span class="s2">.csv&quot;</span><span class="p">)])</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>

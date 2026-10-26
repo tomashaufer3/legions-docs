@@ -1,0 +1,1264 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Re-score every cached symbol pass at the analysis unit. No model call, no spend.</p><p class="tldr-facts"><b>1910 register</b> · v1.4.0 · 333 lines · 11 public functions · 5 constants · used by <code>utils/lexikon_1910/run_e1b_second_reader.py</code>, <code>utils/lexikon_1910/run_frozen.py</code> · <code>utils/lexikon_1910/rescore_passes.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-lexikon_1910-rescore_passes-out_paths">out_paths</a><a class="chip" href="#fn-utils-lexikon_1910-rescore_passes-write_csv">write_csv</a><a class="chip" href="#fn-utils-lexikon_1910-rescore_passes-gold_line">gold_line</a><a class="chip" href="#fn-utils-lexikon_1910-rescore_passes-sidecar">sidecar</a><a class="chip" href="#fn-utils-lexikon_1910-rescore_passes-score_sidecars">score_sidecars</a><a class="chip" href="#fn-utils-lexikon_1910-rescore_passes-family_of">family_of</a><a class="chip" href="#fn-utils-lexikon_1910-rescore_passes-order_frames">order_frames</a><a class="chip" href="#fn-utils-lexikon_1910-rescore_passes-dispute_means">dispute_means</a><a class="chip" href="#fn-utils-lexikon_1910-rescore_passes-order_ledger">order_ledger</a><a class="chip" href="#fn-utils-lexikon_1910-rescore_passes-rescore">rescore</a><a class="chip" href="#fn-utils-lexikon_1910-rescore_passes-main">main</a><a class="chip const" href="#c-utils-lexikon_1910-rescore_passes-HERE">HERE</a><a class="chip const" href="#c-utils-lexikon_1910-rescore_passes-ROOT">ROOT</a><a class="chip const" href="#c-utils-lexikon_1910-rescore_passes-PARTS_HUMAN">PARTS_HUMAN</a><a class="chip const" href="#c-utils-lexikon_1910-rescore_passes-ATTRIBUTES_HUMAN">ATTRIBUTES_HUMAN</a><a class="chip const" href="#c-utils-lexikon_1910-rescore_passes-INTERVAL_KEYS">INTERVAL_KEYS</a></div>
+<h2>How it works</h2><p><code>SYMBOL_ACCURACY_PLAN.md</code> (revision of 2026-09-22, D-56) moves the headline from
+the <code>(entry, code)</code> claim to <code>(entry, settlement, code)</code> — the part of a
+municipality an institution is filed under is what a birthplace joins to — and
+asks for three things beside it before any new model run: an interval that treats
+a page as one cluster, sensitivity and specificity per glyph, and a diagnosis of
+the claims that name the right institution under the wrong part. This script
+applies <code>lexikon_1910_institutions</code> 0.6.0 to the inventories already on disk
+and writes all four.</p>
+<p>It reads <code>inventory_human.csv</code> and every <code>inventory_&amp;lt;label&amp;gt;.csv</code> under
+<code>output/lexikon_1910_pilot/bakeoff/&amp;lt;host&amp;gt;/</code>. The inventories are the decoded
+passes, so nothing is re-decoded here: a pass written before the 0.5.0 decoder
+fix still carries its misfiled parts, and its row says so in <code>false_misfiled</code>.
+Rate-limited passes are excluded, as everywhere (<code>bakeoff.passes_on_disk</code>).</p>
+<p>What it does not cover: the whole-page (v2) repeats of 2026-09-10, which are
+rebuilt from raw payloads by <code>run_e1_gemini_version.py</code> and whose pipeline the
+plan has stopped.</p>
+<p>Outputs, all under <code>output/lexikon_1910_pilot/bakeoff/</code>, named for the run tag
+(<code>r4</code> here) so an earlier run's report is not overwritten by a later one:</p>
+<pre><code>rescore_r4_accuracy.csv           one row per pass: both units, counts, interval
+rescore_r4_symbol_rates.csv       one row per (pass, glyph): tp fp fn tn, rates
+rescore_r4_part_attribution.csv   one row per misfiled institution
+rescore_r4_named_parts.csv        one row per pass: the Části osad parts
+rescore_r4_parts_symbols.csv      one row per named part whose symbol differs
+rescore_r4_attributes.csv         one row per (pass, attribute): schools,
+                                  burgher schools, cooperatives
+rescore_r4_order.csv              one row per pass: what the printed order
+                                  of the marks flags (I22)
+rescore_r4_order_flags.csv        one row per flagged mark, on every page
+rescore_r4_order_disputes.csv     one row per pair of passes: the flags on
+                                  the claims the two disagree on
+rescore_r4_report.txt             the ledgers below, as printed
+</code></pre>
+<p>The last three need the two files a pass writes since 2026-10-06 — its named
+parts (<code>parts_&amp;lt;label&amp;gt;.csv</code>) and what it read beside the school and cooperative
+glyphs (<code>attributes_&amp;lt;label&amp;gt;.csv</code>) — and the gold's own, <code>parts_human.csv</code> and
+<code>attributes_human.csv</code>. A pass read before that date has neither until it is
+replayed from its crop cache; it is then scored on symbols only, and says so.</p>
+<p>The three <code>order</code> files are the printed-order check of
+<code>lexikon_1910_institutions</code> 0.9.0 (D-73). It needs each mark's place in its
+line, which an inventory does not keep, so it reads the pass's decoded records,
+<code>institutions_&amp;lt;label&amp;gt;.csv</code>. The order itself is learned from the gold sheets
+of the purposive and calibration roles, read directly
+(<code>read_transcription_md.read_order_reference</code>) and never from the sealed
+certification sheets; each page is judged on the order of the other pages. The
+check flags and routes. It changes no claim, and no figure above it moves.</p>
+<h4>Usage</h4>
+<pre><code>python utils/lexikon_1910/rescore_passes.py                 # every host's passes
+python utils/lexikon_1910/rescore_passes.py --hosts ""      # this machine's only
+python utils/lexikon_1910/rescore_passes.py --legacy        # + pre-split passes
+python utils/lexikon_1910/rescore_passes.py --top 5         # detail for the best 5
+python utils/lexikon_1910/rescore_passes.py --run-tag r3    # an earlier run's passes
+</code></pre>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-lexikon_1910-rescore_passes-out_paths">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">out_paths</span><span class="p">(</span><span class="n">run_tag</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Path</span><span class="p">]</span></pre>
+<div class="fndoc"><p>The outputs of one run, named for its tag.</p>
+<p>Tagged since 1.1.0, so the report of an earlier run is not overwritten the
+first time a later one is scored: <code>rescore_r3_report.txt</code> and
+<code>rescore_r4_report.txt</code> sit side by side.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 89–106 (18 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">out_paths</span><span class="p">(</span><span class="n">run_tag</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Path</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The outputs of one run, named for its tag.</span>
+
+<span class="sd">    Tagged since 1.1.0, so the report of an earlier run is not overwritten the</span>
+<span class="sd">    first time a later one is scored: ``rescore_r3_report.txt`` and</span>
+<span class="sd">    ``rescore_r4_report.txt`` sit side by side.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">stem</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;rescore_</span><span class="si">{</span><span class="n">run_tag</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;accuracy&quot;</span><span class="p">:</span> <span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stem</span><span class="si">}</span><span class="s2">_accuracy.csv&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;rates&quot;</span><span class="p">:</span> <span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stem</span><span class="si">}</span><span class="s2">_symbol_rates.csv&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;parts&quot;</span><span class="p">:</span> <span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stem</span><span class="si">}</span><span class="s2">_part_attribution.csv&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;named_parts&quot;</span><span class="p">:</span> <span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stem</span><span class="si">}</span><span class="s2">_named_parts.csv&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;parts_symbols&quot;</span><span class="p">:</span> <span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stem</span><span class="si">}</span><span class="s2">_parts_symbols.csv&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;attributes&quot;</span><span class="p">:</span> <span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stem</span><span class="si">}</span><span class="s2">_attributes.csv&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;order&quot;</span><span class="p">:</span> <span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stem</span><span class="si">}</span><span class="s2">_order.csv&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;order_flags&quot;</span><span class="p">:</span> <span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stem</span><span class="si">}</span><span class="s2">_order_flags.csv&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;order_disputes&quot;</span><span class="p">:</span> <span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stem</span><span class="si">}</span><span class="s2">_order_disputes.csv&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;report&quot;</span><span class="p">:</span> <span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stem</span><span class="si">}</span><span class="s2">_report.txt&quot;</span><span class="p">}</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-rescore_passes-write_csv">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">write_csv</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="kc">None</span></pre>
+<div class="fndoc"><p>Write <code>rows</code>; with none, write nothing rather than a headerless file.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/lexikon_1910/run_e1b_second_reader.py</code> <code>utils/lexikon_1910/run_e3_pages.py</code> <code>utils/lexikon_1910/run_glyph_e3.py</code> <code>utils/lexikon_1910/run_lexikon_1910_pilot.py</code> <code>utils/lexikon_1910/run_r5_german_notes.py</code> <code>utils/lexikon_1910/score_r5_german_notes.py</code></p>
+<details><summary>source · lines 113–121 (9 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">write_csv</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Write ``rows``; with none, write nothing rather than a headerless file.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">rows</span><span class="p">:</span>
+        <span class="n">path</span><span class="o">.</span><span class="n">unlink</span><span class="p">(</span><span class="n">missing_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">return</span>
+    <span class="k">with</span> <span class="n">path</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;w&quot;</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+        <span class="n">writer</span> <span class="o">=</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictWriter</span><span class="p">(</span><span class="n">fh</span><span class="p">,</span> <span class="n">fieldnames</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="n">rows</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+        <span class="n">writer</span><span class="o">.</span><span class="n">writeheader</span><span class="p">()</span>
+        <span class="n">writer</span><span class="o">.</span><span class="n">writerows</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-rescore_passes-gold_line">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">gold_line</span><span class="p">(</span><span class="n">human</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<div class="fndoc"><p>What the reference is, counted from the file rather than typed.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/lexikon_1910/run_e1b_second_reader.py</code></p>
+<details><summary>source · lines 124–127 (4 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">gold_line</span><span class="p">(</span><span class="n">human</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;What the reference is, counted from the file rather than typed.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot;gold: </span><span class="si">{</span><span class="n">bo</span><span class="o">.</span><span class="n">HUMAN</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2"> — </span><span class="si">{</span><span class="n">lxin</span><span class="o">.</span><span class="n">describe_reference</span><span class="p">(</span><span class="n">human</span><span class="p">)</span><span class="si">}</span><span class="s2"> &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;(development gold; certifies nothing)&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-rescore_passes-sidecar">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">sidecar</span><span class="p">(</span><span class="n">label</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">stem</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span></pre>
+<div class="fndoc"><p>A pass's <code>&amp;lt;stem&amp;gt;_&amp;lt;label&amp;gt;.csv</code>, from whichever machine's folder holds it.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/lexikon_1910/run_frozen.py</code></p>
+<details><summary>source · lines 130–133 (4 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">sidecar</span><span class="p">(</span><span class="n">label</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">stem</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A pass&#39;s ``&lt;stem&gt;_&lt;label&gt;.csv``, from whichever machine&#39;s folder holds it.&quot;&quot;&quot;</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">bo</span><span class="o">.</span><span class="n">find_pass_file</span><span class="p">(</span><span class="n">stem</span><span class="p">,</span> <span class="n">label</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">bo</span><span class="o">.</span><span class="n">load_pass</span><span class="p">(</span><span class="n">path</span><span class="p">)</span> <span class="k">if</span> <span class="n">path</span> <span class="k">else</span> <span class="p">[]</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-rescore_passes-score_sidecars">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">score_sidecars</span><span class="p">(</span><span class="n">passes</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">human</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">dict</span></pre>
+<div class="fndoc"><p>The named parts and the attributes of every pass that wrote them.</p>
+<p>Returns <code>named_parts</code>, <code>parts_symbols</code> and <code>attributes</code> as row lists and
+<code>reports</code> as <code>{label: ledger text}</code>. Both gold frames are held to the pages
+<code>inventory_human.csv</code> covers, so the scored gold is one set of pages for
+every figure in the report; the attributes are also held to the entries the
+pass and the gold both read, as the symbols are.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 136–169 (34 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">score_sidecars</span><span class="p">(</span><span class="n">passes</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">human</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The named parts and the attributes of every pass that wrote them.</span>
+
+<span class="sd">    Returns ``named_parts``, ``parts_symbols`` and ``attributes`` as row lists and</span>
+<span class="sd">    ``reports`` as ``{label: ledger text}``. Both gold frames are held to the pages</span>
+<span class="sd">    ``inventory_human.csv`` covers, so the scored gold is one set of pages for</span>
+<span class="sd">    every figure in the report; the attributes are also held to the entries the</span>
+<span class="sd">    pass and the gold both read, as the symbols are.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">pages</span> <span class="o">=</span> <span class="p">{</span><span class="nb">str</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">])</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">human</span><span class="p">}</span>
+    <span class="n">gold_parts</span> <span class="o">=</span> <span class="n">bo</span><span class="o">.</span><span class="n">load_pass</span><span class="p">(</span><span class="n">PARTS_HUMAN</span><span class="p">)</span> <span class="k">if</span> <span class="n">PARTS_HUMAN</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="k">else</span> <span class="p">[]</span>
+    <span class="n">gold_attributes</span> <span class="o">=</span> <span class="p">[</span><span class="n">row</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="p">(</span><span class="n">bo</span><span class="o">.</span><span class="n">load_pass</span><span class="p">(</span><span class="n">ATTRIBUTES_HUMAN</span><span class="p">)</span>
+                                       <span class="k">if</span> <span class="n">ATTRIBUTES_HUMAN</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="k">else</span> <span class="p">[])</span>
+                       <span class="k">if</span> <span class="nb">str</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">])</span> <span class="ow">in</span> <span class="n">pages</span><span class="p">]</span>
+    <span class="n">read_by_gold</span> <span class="o">=</span> <span class="n">lxin</span><span class="o">.</span><span class="n">_claim_counts</span><span class="p">(</span><span class="n">human</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;named_parts&quot;</span><span class="p">:</span> <span class="p">[],</span> <span class="s2">&quot;parts_symbols&quot;</span><span class="p">:</span> <span class="p">[],</span> <span class="s2">&quot;attributes&quot;</span><span class="p">:</span> <span class="p">[],</span> <span class="s2">&quot;reports&quot;</span><span class="p">:</span> <span class="p">{}}</span>
+    <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">rows</span> <span class="ow">in</span> <span class="n">passes</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">ledgers</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">parts</span> <span class="o">=</span> <span class="n">sidecar</span><span class="p">(</span><span class="n">label</span><span class="p">,</span> <span class="s2">&quot;parts&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">gold_parts</span> <span class="ow">and</span> <span class="n">parts</span><span class="p">:</span>
+            <span class="n">summary</span><span class="p">,</span> <span class="n">differ</span> <span class="o">=</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">score_parts</span><span class="p">(</span><span class="n">gold_parts</span><span class="p">,</span> <span class="n">parts</span><span class="p">,</span> <span class="n">pages</span><span class="o">=</span><span class="n">pages</span><span class="p">)</span>
+            <span class="n">out</span><span class="p">[</span><span class="s2">&quot;named_parts&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;pass&quot;</span><span class="p">:</span> <span class="n">label</span><span class="p">,</span> <span class="o">**</span><span class="n">summary</span><span class="p">})</span>
+            <span class="n">out</span><span class="p">[</span><span class="s2">&quot;parts_symbols&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="p">[{</span><span class="s2">&quot;pass&quot;</span><span class="p">:</span> <span class="n">label</span><span class="p">,</span> <span class="o">**</span><span class="n">pair</span><span class="p">}</span> <span class="k">for</span> <span class="n">pair</span> <span class="ow">in</span> <span class="n">differ</span><span class="p">]</span>
+            <span class="n">ledgers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">lxnt</span><span class="o">.</span><span class="n">lexikon_1910_parts_score_report</span><span class="p">(</span><span class="n">summary</span><span class="p">,</span> <span class="n">differ</span><span class="p">,</span> <span class="n">label</span><span class="p">))</span>
+        <span class="n">attributes</span> <span class="o">=</span> <span class="n">sidecar</span><span class="p">(</span><span class="n">label</span><span class="p">,</span> <span class="s2">&quot;attributes&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">gold_attributes</span> <span class="ow">and</span> <span class="n">attributes</span><span class="p">:</span>
+            <span class="n">shared</span> <span class="o">=</span> <span class="p">{</span><span class="nb">tuple</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">entry</span><span class="p">))</span>
+                      <span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="n">read_by_gold</span> <span class="o">&amp;</span> <span class="n">lxin</span><span class="o">.</span><span class="n">_claim_counts</span><span class="p">(</span><span class="n">rows</span><span class="p">)[</span><span class="mi">0</span><span class="p">]}</span>
+            <span class="n">scored</span> <span class="o">=</span> <span class="n">lxat</span><span class="o">.</span><span class="n">score_attributes</span><span class="p">(</span><span class="n">gold_attributes</span><span class="p">,</span> <span class="n">attributes</span><span class="p">,</span> <span class="n">entries</span><span class="o">=</span><span class="n">shared</span><span class="p">)</span>
+            <span class="n">out</span><span class="p">[</span><span class="s2">&quot;attributes&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="p">[{</span><span class="s2">&quot;pass&quot;</span><span class="p">:</span> <span class="n">label</span><span class="p">,</span> <span class="o">**</span><span class="n">row</span><span class="p">}</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">scored</span><span class="p">]</span>
+            <span class="n">ledgers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">lxat</span><span class="o">.</span><span class="n">lexikon_1910_attributes_report</span><span class="p">(</span><span class="n">scored</span><span class="p">,</span> <span class="n">label</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">ledgers</span><span class="p">:</span>
+            <span class="n">out</span><span class="p">[</span><span class="s2">&quot;reports&quot;</span><span class="p">][</span><span class="n">label</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">ledgers</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-rescore_passes-family_of">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">family_of</span><span class="p">(</span><span class="n">label</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<div class="fndoc"><p>The reader a pass label belongs to: <code>gemini38_r4atlasntg2</code> -&gt; <code>gemini38</code>.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_e1b_candidates.py</code> <code>utils/lexikon_1910/run_e1b_second_reader.py</code> <code>utils/lexikon_1910/score_r5_german_notes.py</code></p>
+<details><summary>source · lines 172–174 (3 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">family_of</span><span class="p">(</span><span class="n">label</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The reader a pass label belongs to: ``gemini38_r4atlasntg2`` -&gt; ``gemini38``.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">label</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;_</span><span class="si">{</span><span class="n">bo</span><span class="o">.</span><span class="n">RUN_TAG</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-rescore_passes-order_frames">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">order_frames</span><span class="p">(</span><span class="n">passes</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">human</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">dict</span></pre>
+<div class="fndoc"><p>The printed-order check (I22) on every pass whose decoded records are on disk.</p>
+<p>Returns <code>reference</code> (the runs of marks the gold sheets print), <code>flags</code>
+as <code>{label: rows}</code>, and three row lists: <code>scores</code> (one per pass),
+<code>flag_rows</code> (one per flagged mark, with <code>in_reference</code> saying whether
+the scored gold has the claim, blank where it has no such entry, and
+<code>in_sheets</code> the same against the line of whichever gold sheet transcribes
+the part) and <code>disputes</code> (one per pair of passes).</p>
+<p>The pass's entry text is not on disk, so a named part inside an entry is
+seen only where the name stands directly before a mark, and parentheses are
+not seen at all (<code>lexikon_1910_institutions.order_runs</code>).</p></div>
+<p class="calls"><b>Called by</b> <code>utils/lexikon_1910/run_e1b_second_reader.py</code></p>
+<details><summary>source · lines 177–214 (38 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">order_frames</span><span class="p">(</span><span class="n">passes</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">human</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The printed-order check (I22) on every pass whose decoded records are on disk.</span>
+
+<span class="sd">    Returns ``reference`` (the runs of marks the gold sheets print), ``flags``</span>
+<span class="sd">    as ``{label: rows}``, and three row lists: ``scores`` (one per pass),</span>
+<span class="sd">    ``flag_rows`` (one per flagged mark, with ``in_reference`` saying whether</span>
+<span class="sd">    the scored gold has the claim, blank where it has no such entry, and</span>
+<span class="sd">    ``in_sheets`` the same against the line of whichever gold sheet transcribes</span>
+<span class="sd">    the part) and ``disputes`` (one per pair of passes).</span>
+
+<span class="sd">    The pass&#39;s entry text is not on disk, so a named part inside an entry is</span>
+<span class="sd">    seen only where the name stands directly before a mark, and parentheses are</span>
+<span class="sd">    not seen at all (:func:`lexikon_1910_institutions.order_runs`).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">reference</span> <span class="o">=</span> <span class="n">gold_sheets</span><span class="o">.</span><span class="n">read_order_reference</span><span class="p">()</span>
+    <span class="n">flags</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">label</span> <span class="ow">in</span> <span class="n">passes</span><span class="p">:</span>
+        <span class="n">records</span> <span class="o">=</span> <span class="n">sidecar</span><span class="p">(</span><span class="n">label</span><span class="p">,</span> <span class="s2">&quot;institutions&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">records</span><span class="p">:</span>
+            <span class="n">flags</span><span class="p">[</span><span class="n">label</span><span class="p">]</span> <span class="o">=</span> <span class="n">lxin</span><span class="o">.</span><span class="n">check_order</span><span class="p">(</span><span class="n">records</span><span class="p">,</span> <span class="n">reference</span><span class="p">,</span> <span class="n">leave_page_out</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">scored</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;human&quot;</span><span class="p">:</span> <span class="n">human</span><span class="p">,</span> <span class="o">**</span><span class="n">passes</span><span class="p">}</span>
+    <span class="n">gold_entries</span><span class="p">,</span> <span class="n">_units</span><span class="p">,</span> <span class="n">gold_claims</span> <span class="o">=</span> <span class="n">lxin</span><span class="o">.</span><span class="n">_claim_counts</span><span class="p">(</span><span class="n">human</span><span class="p">)</span>
+    <span class="n">_entries</span><span class="p">,</span> <span class="n">sheet_units</span><span class="p">,</span> <span class="n">sheet_claims</span> <span class="o">=</span> <span class="n">lxin</span><span class="o">.</span><span class="n">_claim_counts</span><span class="p">(</span>
+        <span class="n">lxin</span><span class="o">.</span><span class="n">order_sheet_rows</span><span class="p">(</span><span class="n">reference</span><span class="p">))</span>
+    <span class="n">flag_rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">rows</span> <span class="ow">in</span> <span class="n">flags</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+            <span class="p">(</span><span class="n">claim</span><span class="p">,)</span> <span class="o">=</span> <span class="n">lxin</span><span class="o">.</span><span class="n">_claim_counts</span><span class="p">([</span><span class="n">row</span><span class="p">])[</span><span class="mi">2</span><span class="p">]</span>
+            <span class="n">flag_rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;pass&quot;</span><span class="p">:</span> <span class="n">label</span><span class="p">,</span> <span class="o">**</span><span class="n">row</span><span class="p">,</span> <span class="s2">&quot;in_reference&quot;</span><span class="p">:</span> <span class="p">(</span>
+                <span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">claim</span><span class="p">[:</span><span class="mi">3</span><span class="p">]</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">gold_entries</span> <span class="k">else</span> <span class="n">claim</span> <span class="ow">in</span> <span class="n">gold_claims</span><span class="p">),</span>
+                <span class="s2">&quot;in_sheets&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">claim</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">sheet_units</span>
+                              <span class="k">else</span> <span class="n">claim</span> <span class="ow">in</span> <span class="n">sheet_claims</span><span class="p">)})</span>
+    <span class="n">labels</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">flags</span><span class="p">)</span>
+    <span class="n">disputes</span> <span class="o">=</span> <span class="p">[</span><span class="n">lxin</span><span class="o">.</span><span class="n">order_disputes</span><span class="p">(</span><span class="n">scored</span><span class="p">,</span> <span class="n">flags</span><span class="p">,</span> <span class="n">first</span><span class="p">,</span> <span class="n">second</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">first</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">labels</span><span class="p">)</span> <span class="k">for</span> <span class="n">second</span> <span class="ow">in</span> <span class="n">labels</span><span class="p">[</span><span class="n">k</span> <span class="o">+</span> <span class="mi">1</span><span class="p">:]]</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;reference&quot;</span><span class="p">:</span> <span class="n">reference</span><span class="p">,</span> <span class="s2">&quot;flags&quot;</span><span class="p">:</span> <span class="n">flags</span><span class="p">,</span> <span class="s2">&quot;flag_rows&quot;</span><span class="p">:</span> <span class="n">flag_rows</span><span class="p">,</span>
+            <span class="s2">&quot;scores&quot;</span><span class="p">:</span> <span class="n">lxin</span><span class="o">.</span><span class="n">order_scores</span><span class="p">(</span><span class="n">scored</span><span class="p">,</span> <span class="n">flags</span><span class="p">,</span> <span class="n">sheets</span><span class="o">=</span><span class="n">reference</span><span class="p">),</span>
+            <span class="s2">&quot;disputes&quot;</span><span class="p">:</span> <span class="n">disputes</span><span class="p">}</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-rescore_passes-dispute_means">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">dispute_means</span><span class="p">(</span><span class="n">disputes</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span></pre>
+<div class="fndoc"><p>The pair rows averaged over the repeats of each two readers.</p>
+<p>One row per (first reader, second reader) as the rows have them — a reader
+with itself is its repeats against each other — with every count averaged
+and <code>pairs</code> saying how many pairs of passes went in.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/lexikon_1910/run_e1b_second_reader.py</code></p>
+<details><summary>source · lines 217–233 (17 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">dispute_means</span><span class="p">(</span><span class="n">disputes</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The pair rows averaged over the repeats of each two readers.</span>
+
+<span class="sd">    One row per (first reader, second reader) as the rows have them — a reader</span>
+<span class="sd">    with itself is its repeats against each other — with every count averaged</span>
+<span class="sd">    and ``pairs`` saying how many pairs of passes went in.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">groups</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">tuple</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">disputes</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;disputed&quot;</span><span class="p">):</span>
+            <span class="n">key</span> <span class="o">=</span> <span class="p">(</span><span class="n">family_of</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;first&quot;</span><span class="p">]),</span> <span class="n">family_of</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;second&quot;</span><span class="p">]))</span>
+            <span class="n">groups</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="p">[])</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">row</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">[{</span><span class="o">**</span><span class="p">{</span><span class="n">key</span><span class="p">:</span> <span class="p">(</span><span class="nb">round</span><span class="p">(</span><span class="nb">sum</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">)</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">),</span> <span class="mi">2</span><span class="p">)</span>
+                      <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="nb">int</span><span class="p">)</span> <span class="k">else</span> <span class="n">value</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">()},</span>
+             <span class="s2">&quot;first&quot;</span><span class="p">:</span> <span class="n">first</span><span class="p">,</span> <span class="s2">&quot;second&quot;</span><span class="p">:</span> <span class="n">second</span><span class="p">,</span> <span class="s2">&quot;pairs&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">)}</span>
+            <span class="k">for</span> <span class="p">(</span><span class="n">first</span><span class="p">,</span> <span class="n">second</span><span class="p">),</span> <span class="n">rows</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">groups</span><span class="o">.</span><span class="n">items</span><span class="p">())]</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-rescore_passes-order_ledger">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">order_ledger</span><span class="p">(</span><span class="n">frames</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<div class="fndoc"><p>The I22 block of the report: the reference, each pass, each two readers.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 236–245 (10 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">order_ledger</span><span class="p">(</span><span class="n">frames</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The I22 block of the report: the reference, each pass, each two readers.&quot;&quot;&quot;</span>
+    <span class="n">reference</span> <span class="o">=</span> <span class="n">frames</span><span class="p">[</span><span class="s2">&quot;reference&quot;</span><span class="p">]</span>
+    <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span>
+        <span class="n">lxin</span><span class="o">.</span><span class="n">lexikon_1910_order_report</span><span class="p">(</span>
+            <span class="n">lxin</span><span class="o">.</span><span class="n">order_summary</span><span class="p">(</span><span class="n">reference</span><span class="p">),</span> <span class="n">frames</span><span class="p">[</span><span class="s2">&quot;scores&quot;</span><span class="p">],</span>
+            <span class="n">sheet_flags</span><span class="o">=</span><span class="n">lxin</span><span class="o">.</span><span class="n">order_reference_flags</span><span class="p">(</span><span class="n">reference</span><span class="p">),</span>
+            <span class="n">joins</span><span class="o">=</span><span class="n">lxin</span><span class="o">.</span><span class="n">order_joins</span><span class="p">(</span><span class="n">reference</span><span class="p">)),</span>
+        <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;  mean over the pairs of repeats of each two readers:&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="n">lxin</span><span class="o">.</span><span class="n">lexikon_1910_order_disputes_report</span><span class="p">(</span><span class="n">dispute_means</span><span class="p">(</span><span class="n">frames</span><span class="p">[</span><span class="s2">&quot;disputes&quot;</span><span class="p">]))])</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-rescore_passes-rescore">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">rescore</span><span class="p">(</span><span class="n">hosts</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;all&#39;</span><span class="p">,</span> <span class="n">legacy</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">top</span><span class="p">:</span> <span class="nb">int</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">draws</span><span class="p">:</span> <span class="nb">int</span><span class="o">=</span><span class="mi">2000</span><span class="p">,</span> <span class="n">run_tag</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<div class="fndoc"><p>Score every pass on disk, write the outputs, return the report.</p>
+<p><code>run_tag</code> names an earlier run to score (<code>r3</code>); empty means the current
+one. <code>bakeoff.passes_on_disk</code> only reads labels carrying its run tag, so
+without this the passes of every earlier run would drop out of the report the
+day the tag is bumped.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 248–309 (62 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">rescore</span><span class="p">(</span><span class="n">hosts</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;all&quot;</span><span class="p">,</span> <span class="n">legacy</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">top</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">3</span><span class="p">,</span>
+            <span class="n">draws</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">2000</span><span class="p">,</span> <span class="n">run_tag</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Score every pass on disk, write the outputs, return the report.</span>
+
+<span class="sd">    ``run_tag`` names an earlier run to score (``r3``); empty means the current</span>
+<span class="sd">    one. :func:`bakeoff.passes_on_disk` only reads labels carrying its run tag, so</span>
+<span class="sd">    without this the passes of every earlier run would drop out of the report the</span>
+<span class="sd">    day the tag is bumped.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">bo</span><span class="o">.</span><span class="n">HUMAN</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;no gold at </span><span class="si">{</span><span class="n">bo</span><span class="o">.</span><span class="n">HUMAN</span><span class="si">}</span><span class="s2"> — nothing to score against&quot;</span>
+    <span class="n">human</span> <span class="o">=</span> <span class="n">bo</span><span class="o">.</span><span class="n">load_pass</span><span class="p">(</span><span class="n">bo</span><span class="o">.</span><span class="n">HUMAN</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">run_tag</span><span class="p">:</span>
+        <span class="n">bo</span><span class="o">.</span><span class="n">RUN_TAG</span> <span class="o">=</span> <span class="n">run_tag</span>
+    <span class="n">passes</span> <span class="o">=</span> <span class="n">bo</span><span class="o">.</span><span class="n">passes_on_disk</span><span class="p">(</span><span class="n">legacy</span><span class="o">=</span><span class="n">legacy</span><span class="p">,</span> <span class="n">hosts</span><span class="o">=</span><span class="n">hosts</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">passes</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot;no </span><span class="si">{</span><span class="n">bo</span><span class="o">.</span><span class="n">RUN_TAG</span><span class="si">}</span><span class="s2"> passes under </span><span class="si">{</span><span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span><span class="si">}</span><span class="s2"> (hosts=</span><span class="si">{</span><span class="n">hosts</span><span class="si">!r}</span><span class="s2">, &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;legacy=</span><span class="si">{</span><span class="n">legacy</span><span class="si">}</span><span class="s2">); an earlier run is scored with --run-tag&quot;</span><span class="p">)</span>
+
+    <span class="n">scored</span> <span class="o">=</span> <span class="n">lxin</span><span class="o">.</span><span class="n">score_against_reference</span><span class="p">({</span><span class="s2">&quot;human&quot;</span><span class="p">:</span> <span class="n">human</span><span class="p">,</span> <span class="o">**</span><span class="n">passes</span><span class="p">},</span>
+                                          <span class="n">reference</span><span class="o">=</span><span class="s2">&quot;human&quot;</span><span class="p">)</span>
+    <span class="n">intervals</span><span class="p">,</span> <span class="n">rates</span><span class="p">,</span> <span class="n">misfiled</span> <span class="o">=</span> <span class="p">{},</span> <span class="p">[],</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">rows</span> <span class="ow">in</span> <span class="n">passes</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">pair</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;human&quot;</span><span class="p">:</span> <span class="n">human</span><span class="p">,</span> <span class="n">label</span><span class="p">:</span> <span class="n">rows</span><span class="p">}</span>
+        <span class="n">intervals</span><span class="p">[</span><span class="n">label</span><span class="p">]</span> <span class="o">=</span> <span class="n">lxin</span><span class="o">.</span><span class="n">clustered_interval</span><span class="p">(</span><span class="n">pair</span><span class="p">,</span> <span class="n">label</span><span class="p">,</span> <span class="n">draws</span><span class="o">=</span><span class="n">draws</span><span class="p">)</span>
+        <span class="n">rates</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">lxin</span><span class="o">.</span><span class="n">symbol_rates</span><span class="p">(</span><span class="n">pair</span><span class="p">,</span> <span class="n">label</span><span class="p">))</span>
+        <span class="n">misfiled</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">lxin</span><span class="o">.</span><span class="n">part_attribution</span><span class="p">(</span><span class="n">pair</span><span class="p">,</span> <span class="n">label</span><span class="p">))</span>
+    <span class="n">accuracy</span> <span class="o">=</span> <span class="p">[{</span><span class="o">**</span><span class="n">row</span><span class="p">,</span> <span class="o">**</span><span class="p">{</span><span class="n">key</span><span class="p">:</span> <span class="n">intervals</span><span class="p">[</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;pass&quot;</span><span class="p">]][</span><span class="n">key</span><span class="p">]</span>
+                           <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">INTERVAL_KEYS</span><span class="p">}}</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">scored</span><span class="p">]</span>
+    <span class="n">beside</span> <span class="o">=</span> <span class="n">score_sidecars</span><span class="p">(</span><span class="n">passes</span><span class="p">,</span> <span class="n">human</span><span class="p">)</span>
+    <span class="n">order</span> <span class="o">=</span> <span class="n">order_frames</span><span class="p">(</span><span class="n">passes</span><span class="p">,</span> <span class="n">human</span><span class="p">)</span>
+
+    <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;rescore_passes v</span><span class="si">{</span><span class="n">__version__</span><span class="si">}</span><span class="s2"> — </span><span class="si">{</span><span class="n">time</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y-%m-</span><span class="si">%d</span><span class="s1"> %H:%M&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span>
+             <span class="sa">f</span><span class="s2">&quot; — run </span><span class="si">{</span><span class="n">bo</span><span class="o">.</span><span class="n">RUN_TAG</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+             <span class="n">gold_line</span><span class="p">(</span><span class="n">human</span><span class="p">),</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+             <span class="n">lxin</span><span class="o">.</span><span class="n">lexikon_1910_accuracy_report</span><span class="p">(</span><span class="n">scored</span><span class="p">),</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+             <span class="n">lxin</span><span class="o">.</span><span class="n">lexikon_1910_clustered_interval_report</span><span class="p">(</span>
+                 <span class="p">[</span><span class="n">intervals</span><span class="p">[</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;pass&quot;</span><span class="p">]]</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">scored</span><span class="p">]),</span>
+             <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">order_ledger</span><span class="p">(</span><span class="n">order</span><span class="p">)]</span>
+    <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">scored</span><span class="p">[:</span><span class="n">top</span><span class="p">]:</span>
+        <span class="n">label</span> <span class="o">=</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;pass&quot;</span><span class="p">]</span>
+        <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">lxin</span><span class="o">.</span><span class="n">lexikon_1910_symbol_rates_report</span><span class="p">(</span>
+                      <span class="p">[</span><span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rates</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;pass&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">label</span><span class="p">]),</span>
+                  <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">lxin</span><span class="o">.</span><span class="n">lexikon_1910_part_attribution_report</span><span class="p">(</span>
+                      <span class="p">[</span><span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">misfiled</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;pass&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">label</span><span class="p">])]</span>
+        <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">beside</span><span class="p">[</span><span class="s2">&quot;reports&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span>
+            <span class="n">label</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">: no named-parts or attributes file — a pass read &quot;</span>
+                   <span class="sa">f</span><span class="s2">&quot;before 2026-10-06 has neither until it is replayed&quot;</span><span class="p">)]</span>
+    <span class="n">report</span> <span class="o">=</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+
+    <span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">out_paths</span><span class="p">(</span><span class="n">bo</span><span class="o">.</span><span class="n">RUN_TAG</span><span class="p">)</span>
+    <span class="n">write_csv</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;accuracy&quot;</span><span class="p">],</span> <span class="n">accuracy</span><span class="p">)</span>
+    <span class="n">write_csv</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;rates&quot;</span><span class="p">],</span> <span class="n">rates</span><span class="p">)</span>
+    <span class="n">write_csv</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;parts&quot;</span><span class="p">],</span> <span class="n">misfiled</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;named_parts&quot;</span><span class="p">,</span> <span class="s2">&quot;parts_symbols&quot;</span><span class="p">,</span> <span class="s2">&quot;attributes&quot;</span><span class="p">):</span>
+        <span class="n">write_csv</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="n">name</span><span class="p">],</span> <span class="n">beside</span><span class="p">[</span><span class="n">name</span><span class="p">])</span>
+    <span class="n">write_csv</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;order&quot;</span><span class="p">],</span> <span class="n">order</span><span class="p">[</span><span class="s2">&quot;scores&quot;</span><span class="p">])</span>
+    <span class="n">write_csv</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;order_flags&quot;</span><span class="p">],</span> <span class="n">order</span><span class="p">[</span><span class="s2">&quot;flag_rows&quot;</span><span class="p">])</span>
+    <span class="n">write_csv</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;order_disputes&quot;</span><span class="p">],</span> <span class="n">order</span><span class="p">[</span><span class="s2">&quot;disputes&quot;</span><span class="p">])</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;report&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">report</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">report</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-rescore_passes-main">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 312–329 (18 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--hosts&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;all&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s1">&#39;&quot;all&quot; pools every machine</span><span class="se">\&#39;</span><span class="s1">s passes (default); &#39;</span>
+                         <span class="s1">&#39;&quot;&quot; reads this machine</span><span class="se">\&#39;</span><span class="s1">s only&#39;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--legacy&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;also read passes written before the per-host split&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--top&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;passes to print glyph rates and misfilings for&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--bootstrap&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">2000</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;page-bootstrap draws for the interval&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--run-tag&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;score an earlier run&#39;s passes (e.g. r3) instead of the &quot;</span>
+                         <span class="s2">&quot;current one&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">rescore</span><span class="p">(</span><span class="n">hosts</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">hosts</span><span class="p">,</span> <span class="n">legacy</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">legacy</span><span class="p">,</span> <span class="n">top</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">top</span><span class="p">,</span>
+                  <span class="n">draws</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">bootstrap</span><span class="p">,</span> <span class="n">run_tag</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">run_tag</span><span class="p">))</span>
+    <span class="k">return</span> <span class="mi">0</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-lexikon_1910-rescore_passes-HERE"><pre class="sig">HERE<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-rescore_passes-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">HERE</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-rescore_passes-PARTS_HUMAN"><pre class="sig">PARTS_HUMAN<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">bo</span><span class="o">.</span><span class="n">OUT_DIR</span> <span class="o">/</span> <span class="s1">&#39;parts_human.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-rescore_passes-ATTRIBUTES_HUMAN"><pre class="sig">ATTRIBUTES_HUMAN<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">bo</span><span class="o">.</span><span class="n">OUT_DIR</span> <span class="o">/</span> <span class="s1">&#39;attributes_human.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-rescore_passes-INTERVAL_KEYS"><pre class="sig">INTERVAL_KEYS<span class="kind">tuple · 4 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">(</span><span class="s1">&#39;pages&#39;</span><span class="p">,</span> <span class="s1">&#39;f1_lo&#39;</span><span class="p">,</span> <span class="s1">&#39;f1_hi&#39;</span><span class="p">,</span> <span class="s1">&#39;f1_by_page&#39;</span><span class="p">)</span>
+</pre></div>
+</details></div>
+<h2>Used by</h2><p><code>utils/lexikon_1910/run_e1b_second_reader.py</code> <code>utils/lexikon_1910/run_frozen.py</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/lexikon_1910/rescore_passes.py · 333 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;Re-score every cached symbol pass at the analysis unit. No model call, no spend.</span>
+
+<span class="sd">``SYMBOL_ACCURACY_PLAN.md`` (revision of 2026-09-22, D-56) moves the headline from</span>
+<span class="sd">the ``(entry, code)`` claim to ``(entry, settlement, code)`` — the part of a</span>
+<span class="sd">municipality an institution is filed under is what a birthplace joins to — and</span>
+<span class="sd">asks for three things beside it before any new model run: an interval that treats</span>
+<span class="sd">a page as one cluster, sensitivity and specificity per glyph, and a diagnosis of</span>
+<span class="sd">the claims that name the right institution under the wrong part. This script</span>
+<span class="sd">applies ``lexikon_1910_institutions`` 0.6.0 to the inventories already on disk</span>
+<span class="sd">and writes all four.</span>
+
+<span class="sd">It reads ``inventory_human.csv`` and every ``inventory_&lt;label&gt;.csv`` under</span>
+<span class="sd">``output/lexikon_1910_pilot/bakeoff/&lt;host&gt;/``. The inventories are the decoded</span>
+<span class="sd">passes, so nothing is re-decoded here: a pass written before the 0.5.0 decoder</span>
+<span class="sd">fix still carries its misfiled parts, and its row says so in ``false_misfiled``.</span>
+<span class="sd">Rate-limited passes are excluded, as everywhere (:func:`bakeoff.passes_on_disk`).</span>
+
+<span class="sd">What it does not cover: the whole-page (v2) repeats of 2026-09-10, which are</span>
+<span class="sd">rebuilt from raw payloads by ``run_e1_gemini_version.py`` and whose pipeline the</span>
+<span class="sd">plan has stopped.</span>
+
+<span class="sd">Outputs, all under ``output/lexikon_1910_pilot/bakeoff/``, named for the run tag</span>
+<span class="sd">(``r4`` here) so an earlier run&#39;s report is not overwritten by a later one:</span>
+
+<span class="sd">    rescore_r4_accuracy.csv           one row per pass: both units, counts, interval</span>
+<span class="sd">    rescore_r4_symbol_rates.csv       one row per (pass, glyph): tp fp fn tn, rates</span>
+<span class="sd">    rescore_r4_part_attribution.csv   one row per misfiled institution</span>
+<span class="sd">    rescore_r4_named_parts.csv        one row per pass: the Části osad parts</span>
+<span class="sd">    rescore_r4_parts_symbols.csv      one row per named part whose symbol differs</span>
+<span class="sd">    rescore_r4_attributes.csv         one row per (pass, attribute): schools,</span>
+<span class="sd">                                      burgher schools, cooperatives</span>
+<span class="sd">    rescore_r4_order.csv              one row per pass: what the printed order</span>
+<span class="sd">                                      of the marks flags (I22)</span>
+<span class="sd">    rescore_r4_order_flags.csv        one row per flagged mark, on every page</span>
+<span class="sd">    rescore_r4_order_disputes.csv     one row per pair of passes: the flags on</span>
+<span class="sd">                                      the claims the two disagree on</span>
+<span class="sd">    rescore_r4_report.txt             the ledgers below, as printed</span>
+
+<span class="sd">The last three need the two files a pass writes since 2026-10-06 — its named</span>
+<span class="sd">parts (``parts_&lt;label&gt;.csv``) and what it read beside the school and cooperative</span>
+<span class="sd">glyphs (``attributes_&lt;label&gt;.csv``) — and the gold&#39;s own, ``parts_human.csv`` and</span>
+<span class="sd">``attributes_human.csv``. A pass read before that date has neither until it is</span>
+<span class="sd">replayed from its crop cache; it is then scored on symbols only, and says so.</span>
+
+<span class="sd">The three ``order`` files are the printed-order check of</span>
+<span class="sd">``lexikon_1910_institutions`` 0.9.0 (D-73). It needs each mark&#39;s place in its</span>
+<span class="sd">line, which an inventory does not keep, so it reads the pass&#39;s decoded records,</span>
+<span class="sd">``institutions_&lt;label&gt;.csv``. The order itself is learned from the gold sheets</span>
+<span class="sd">of the purposive and calibration roles, read directly</span>
+<span class="sd">(:func:`read_transcription_md.read_order_reference`) and never from the sealed</span>
+<span class="sd">certification sheets; each page is judged on the order of the other pages. The</span>
+<span class="sd">check flags and routes. It changes no claim, and no figure above it moves.</span>
+
+<span class="sd">Usage</span>
+<span class="sd">-----</span>
+<span class="sd">    python utils/lexikon_1910/rescore_passes.py                 # every host&#39;s passes</span>
+<span class="sd">    python utils/lexikon_1910/rescore_passes.py --hosts &quot;&quot;      # this machine&#39;s only</span>
+<span class="sd">    python utils/lexikon_1910/rescore_passes.py --legacy        # + pre-split passes</span>
+<span class="sd">    python utils/lexikon_1910/rescore_passes.py --top 5         # detail for the best 5</span>
+<span class="sd">    python utils/lexikon_1910/rescore_passes.py --run-tag r3    # an earlier run&#39;s passes</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.4.0&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">csv</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="n">HERE</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span>
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">HERE</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">))</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">HERE</span><span class="p">))</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">bakeoff</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">bo</span>                                             <span class="c1"># noqa: E402</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">read_transcription_md</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">gold_sheets</span>                      <span class="c1"># noqa: E402</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_attributes</span> <span class="k">as</span> <span class="n">lxat</span>        <span class="c1"># noqa: E402</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_institutions</span> <span class="k">as</span> <span class="n">lxin</span>      <span class="c1"># noqa: E402</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_notes</span> <span class="k">as</span> <span class="n">lxnt</span>             <span class="c1"># noqa: E402</span>
+
+<span class="c1">#: The frames the gold sheets yield beside the symbol inventory.</span>
+<span class="n">PARTS_HUMAN</span> <span class="o">=</span> <span class="n">bo</span><span class="o">.</span><span class="n">OUT_DIR</span> <span class="o">/</span> <span class="s2">&quot;parts_human.csv&quot;</span>
+<span class="n">ATTRIBUTES_HUMAN</span> <span class="o">=</span> <span class="n">bo</span><span class="o">.</span><span class="n">OUT_DIR</span> <span class="o">/</span> <span class="s2">&quot;attributes_human.csv&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">out_paths</span><span class="p">(</span><span class="n">run_tag</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Path</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The outputs of one run, named for its tag.</span>
+
+<span class="sd">    Tagged since 1.1.0, so the report of an earlier run is not overwritten the</span>
+<span class="sd">    first time a later one is scored: ``rescore_r3_report.txt`` and</span>
+<span class="sd">    ``rescore_r4_report.txt`` sit side by side.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">stem</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;rescore_</span><span class="si">{</span><span class="n">run_tag</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;accuracy&quot;</span><span class="p">:</span> <span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stem</span><span class="si">}</span><span class="s2">_accuracy.csv&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;rates&quot;</span><span class="p">:</span> <span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stem</span><span class="si">}</span><span class="s2">_symbol_rates.csv&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;parts&quot;</span><span class="p">:</span> <span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stem</span><span class="si">}</span><span class="s2">_part_attribution.csv&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;named_parts&quot;</span><span class="p">:</span> <span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stem</span><span class="si">}</span><span class="s2">_named_parts.csv&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;parts_symbols&quot;</span><span class="p">:</span> <span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stem</span><span class="si">}</span><span class="s2">_parts_symbols.csv&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;attributes&quot;</span><span class="p">:</span> <span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stem</span><span class="si">}</span><span class="s2">_attributes.csv&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;order&quot;</span><span class="p">:</span> <span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stem</span><span class="si">}</span><span class="s2">_order.csv&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;order_flags&quot;</span><span class="p">:</span> <span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stem</span><span class="si">}</span><span class="s2">_order_flags.csv&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;order_disputes&quot;</span><span class="p">:</span> <span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stem</span><span class="si">}</span><span class="s2">_order_disputes.csv&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;report&quot;</span><span class="p">:</span> <span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stem</span><span class="si">}</span><span class="s2">_report.txt&quot;</span><span class="p">}</span>
+
+
+<span class="c1">#: The interval&#39;s columns, copied onto each pass&#39;s accuracy row.</span>
+<span class="n">INTERVAL_KEYS</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;pages&quot;</span><span class="p">,</span> <span class="s2">&quot;f1_lo&quot;</span><span class="p">,</span> <span class="s2">&quot;f1_hi&quot;</span><span class="p">,</span> <span class="s2">&quot;f1_by_page&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">write_csv</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Write ``rows``; with none, write nothing rather than a headerless file.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">rows</span><span class="p">:</span>
+        <span class="n">path</span><span class="o">.</span><span class="n">unlink</span><span class="p">(</span><span class="n">missing_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">return</span>
+    <span class="k">with</span> <span class="n">path</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;w&quot;</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+        <span class="n">writer</span> <span class="o">=</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictWriter</span><span class="p">(</span><span class="n">fh</span><span class="p">,</span> <span class="n">fieldnames</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="n">rows</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+        <span class="n">writer</span><span class="o">.</span><span class="n">writeheader</span><span class="p">()</span>
+        <span class="n">writer</span><span class="o">.</span><span class="n">writerows</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">gold_line</span><span class="p">(</span><span class="n">human</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;What the reference is, counted from the file rather than typed.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot;gold: </span><span class="si">{</span><span class="n">bo</span><span class="o">.</span><span class="n">HUMAN</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2"> — </span><span class="si">{</span><span class="n">lxin</span><span class="o">.</span><span class="n">describe_reference</span><span class="p">(</span><span class="n">human</span><span class="p">)</span><span class="si">}</span><span class="s2"> &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;(development gold; certifies nothing)&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">sidecar</span><span class="p">(</span><span class="n">label</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">stem</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A pass&#39;s ``&lt;stem&gt;_&lt;label&gt;.csv``, from whichever machine&#39;s folder holds it.&quot;&quot;&quot;</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">bo</span><span class="o">.</span><span class="n">find_pass_file</span><span class="p">(</span><span class="n">stem</span><span class="p">,</span> <span class="n">label</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">bo</span><span class="o">.</span><span class="n">load_pass</span><span class="p">(</span><span class="n">path</span><span class="p">)</span> <span class="k">if</span> <span class="n">path</span> <span class="k">else</span> <span class="p">[]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">score_sidecars</span><span class="p">(</span><span class="n">passes</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">human</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The named parts and the attributes of every pass that wrote them.</span>
+
+<span class="sd">    Returns ``named_parts``, ``parts_symbols`` and ``attributes`` as row lists and</span>
+<span class="sd">    ``reports`` as ``{label: ledger text}``. Both gold frames are held to the pages</span>
+<span class="sd">    ``inventory_human.csv`` covers, so the scored gold is one set of pages for</span>
+<span class="sd">    every figure in the report; the attributes are also held to the entries the</span>
+<span class="sd">    pass and the gold both read, as the symbols are.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">pages</span> <span class="o">=</span> <span class="p">{</span><span class="nb">str</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">])</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">human</span><span class="p">}</span>
+    <span class="n">gold_parts</span> <span class="o">=</span> <span class="n">bo</span><span class="o">.</span><span class="n">load_pass</span><span class="p">(</span><span class="n">PARTS_HUMAN</span><span class="p">)</span> <span class="k">if</span> <span class="n">PARTS_HUMAN</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="k">else</span> <span class="p">[]</span>
+    <span class="n">gold_attributes</span> <span class="o">=</span> <span class="p">[</span><span class="n">row</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="p">(</span><span class="n">bo</span><span class="o">.</span><span class="n">load_pass</span><span class="p">(</span><span class="n">ATTRIBUTES_HUMAN</span><span class="p">)</span>
+                                       <span class="k">if</span> <span class="n">ATTRIBUTES_HUMAN</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="k">else</span> <span class="p">[])</span>
+                       <span class="k">if</span> <span class="nb">str</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">])</span> <span class="ow">in</span> <span class="n">pages</span><span class="p">]</span>
+    <span class="n">read_by_gold</span> <span class="o">=</span> <span class="n">lxin</span><span class="o">.</span><span class="n">_claim_counts</span><span class="p">(</span><span class="n">human</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;named_parts&quot;</span><span class="p">:</span> <span class="p">[],</span> <span class="s2">&quot;parts_symbols&quot;</span><span class="p">:</span> <span class="p">[],</span> <span class="s2">&quot;attributes&quot;</span><span class="p">:</span> <span class="p">[],</span> <span class="s2">&quot;reports&quot;</span><span class="p">:</span> <span class="p">{}}</span>
+    <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">rows</span> <span class="ow">in</span> <span class="n">passes</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">ledgers</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">parts</span> <span class="o">=</span> <span class="n">sidecar</span><span class="p">(</span><span class="n">label</span><span class="p">,</span> <span class="s2">&quot;parts&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">gold_parts</span> <span class="ow">and</span> <span class="n">parts</span><span class="p">:</span>
+            <span class="n">summary</span><span class="p">,</span> <span class="n">differ</span> <span class="o">=</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">score_parts</span><span class="p">(</span><span class="n">gold_parts</span><span class="p">,</span> <span class="n">parts</span><span class="p">,</span> <span class="n">pages</span><span class="o">=</span><span class="n">pages</span><span class="p">)</span>
+            <span class="n">out</span><span class="p">[</span><span class="s2">&quot;named_parts&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;pass&quot;</span><span class="p">:</span> <span class="n">label</span><span class="p">,</span> <span class="o">**</span><span class="n">summary</span><span class="p">})</span>
+            <span class="n">out</span><span class="p">[</span><span class="s2">&quot;parts_symbols&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="p">[{</span><span class="s2">&quot;pass&quot;</span><span class="p">:</span> <span class="n">label</span><span class="p">,</span> <span class="o">**</span><span class="n">pair</span><span class="p">}</span> <span class="k">for</span> <span class="n">pair</span> <span class="ow">in</span> <span class="n">differ</span><span class="p">]</span>
+            <span class="n">ledgers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">lxnt</span><span class="o">.</span><span class="n">lexikon_1910_parts_score_report</span><span class="p">(</span><span class="n">summary</span><span class="p">,</span> <span class="n">differ</span><span class="p">,</span> <span class="n">label</span><span class="p">))</span>
+        <span class="n">attributes</span> <span class="o">=</span> <span class="n">sidecar</span><span class="p">(</span><span class="n">label</span><span class="p">,</span> <span class="s2">&quot;attributes&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">gold_attributes</span> <span class="ow">and</span> <span class="n">attributes</span><span class="p">:</span>
+            <span class="n">shared</span> <span class="o">=</span> <span class="p">{</span><span class="nb">tuple</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">entry</span><span class="p">))</span>
+                      <span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="n">read_by_gold</span> <span class="o">&amp;</span> <span class="n">lxin</span><span class="o">.</span><span class="n">_claim_counts</span><span class="p">(</span><span class="n">rows</span><span class="p">)[</span><span class="mi">0</span><span class="p">]}</span>
+            <span class="n">scored</span> <span class="o">=</span> <span class="n">lxat</span><span class="o">.</span><span class="n">score_attributes</span><span class="p">(</span><span class="n">gold_attributes</span><span class="p">,</span> <span class="n">attributes</span><span class="p">,</span> <span class="n">entries</span><span class="o">=</span><span class="n">shared</span><span class="p">)</span>
+            <span class="n">out</span><span class="p">[</span><span class="s2">&quot;attributes&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="p">[{</span><span class="s2">&quot;pass&quot;</span><span class="p">:</span> <span class="n">label</span><span class="p">,</span> <span class="o">**</span><span class="n">row</span><span class="p">}</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">scored</span><span class="p">]</span>
+            <span class="n">ledgers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">lxat</span><span class="o">.</span><span class="n">lexikon_1910_attributes_report</span><span class="p">(</span><span class="n">scored</span><span class="p">,</span> <span class="n">label</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">ledgers</span><span class="p">:</span>
+            <span class="n">out</span><span class="p">[</span><span class="s2">&quot;reports&quot;</span><span class="p">][</span><span class="n">label</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">ledgers</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">family_of</span><span class="p">(</span><span class="n">label</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The reader a pass label belongs to: ``gemini38_r4atlasntg2`` -&gt; ``gemini38``.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">label</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;_</span><span class="si">{</span><span class="n">bo</span><span class="o">.</span><span class="n">RUN_TAG</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">order_frames</span><span class="p">(</span><span class="n">passes</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">human</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The printed-order check (I22) on every pass whose decoded records are on disk.</span>
+
+<span class="sd">    Returns ``reference`` (the runs of marks the gold sheets print), ``flags``</span>
+<span class="sd">    as ``{label: rows}``, and three row lists: ``scores`` (one per pass),</span>
+<span class="sd">    ``flag_rows`` (one per flagged mark, with ``in_reference`` saying whether</span>
+<span class="sd">    the scored gold has the claim, blank where it has no such entry, and</span>
+<span class="sd">    ``in_sheets`` the same against the line of whichever gold sheet transcribes</span>
+<span class="sd">    the part) and ``disputes`` (one per pair of passes).</span>
+
+<span class="sd">    The pass&#39;s entry text is not on disk, so a named part inside an entry is</span>
+<span class="sd">    seen only where the name stands directly before a mark, and parentheses are</span>
+<span class="sd">    not seen at all (:func:`lexikon_1910_institutions.order_runs`).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">reference</span> <span class="o">=</span> <span class="n">gold_sheets</span><span class="o">.</span><span class="n">read_order_reference</span><span class="p">()</span>
+    <span class="n">flags</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">label</span> <span class="ow">in</span> <span class="n">passes</span><span class="p">:</span>
+        <span class="n">records</span> <span class="o">=</span> <span class="n">sidecar</span><span class="p">(</span><span class="n">label</span><span class="p">,</span> <span class="s2">&quot;institutions&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">records</span><span class="p">:</span>
+            <span class="n">flags</span><span class="p">[</span><span class="n">label</span><span class="p">]</span> <span class="o">=</span> <span class="n">lxin</span><span class="o">.</span><span class="n">check_order</span><span class="p">(</span><span class="n">records</span><span class="p">,</span> <span class="n">reference</span><span class="p">,</span> <span class="n">leave_page_out</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">scored</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;human&quot;</span><span class="p">:</span> <span class="n">human</span><span class="p">,</span> <span class="o">**</span><span class="n">passes</span><span class="p">}</span>
+    <span class="n">gold_entries</span><span class="p">,</span> <span class="n">_units</span><span class="p">,</span> <span class="n">gold_claims</span> <span class="o">=</span> <span class="n">lxin</span><span class="o">.</span><span class="n">_claim_counts</span><span class="p">(</span><span class="n">human</span><span class="p">)</span>
+    <span class="n">_entries</span><span class="p">,</span> <span class="n">sheet_units</span><span class="p">,</span> <span class="n">sheet_claims</span> <span class="o">=</span> <span class="n">lxin</span><span class="o">.</span><span class="n">_claim_counts</span><span class="p">(</span>
+        <span class="n">lxin</span><span class="o">.</span><span class="n">order_sheet_rows</span><span class="p">(</span><span class="n">reference</span><span class="p">))</span>
+    <span class="n">flag_rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">rows</span> <span class="ow">in</span> <span class="n">flags</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+            <span class="p">(</span><span class="n">claim</span><span class="p">,)</span> <span class="o">=</span> <span class="n">lxin</span><span class="o">.</span><span class="n">_claim_counts</span><span class="p">([</span><span class="n">row</span><span class="p">])[</span><span class="mi">2</span><span class="p">]</span>
+            <span class="n">flag_rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;pass&quot;</span><span class="p">:</span> <span class="n">label</span><span class="p">,</span> <span class="o">**</span><span class="n">row</span><span class="p">,</span> <span class="s2">&quot;in_reference&quot;</span><span class="p">:</span> <span class="p">(</span>
+                <span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">claim</span><span class="p">[:</span><span class="mi">3</span><span class="p">]</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">gold_entries</span> <span class="k">else</span> <span class="n">claim</span> <span class="ow">in</span> <span class="n">gold_claims</span><span class="p">),</span>
+                <span class="s2">&quot;in_sheets&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">claim</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">sheet_units</span>
+                              <span class="k">else</span> <span class="n">claim</span> <span class="ow">in</span> <span class="n">sheet_claims</span><span class="p">)})</span>
+    <span class="n">labels</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">flags</span><span class="p">)</span>
+    <span class="n">disputes</span> <span class="o">=</span> <span class="p">[</span><span class="n">lxin</span><span class="o">.</span><span class="n">order_disputes</span><span class="p">(</span><span class="n">scored</span><span class="p">,</span> <span class="n">flags</span><span class="p">,</span> <span class="n">first</span><span class="p">,</span> <span class="n">second</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">first</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">labels</span><span class="p">)</span> <span class="k">for</span> <span class="n">second</span> <span class="ow">in</span> <span class="n">labels</span><span class="p">[</span><span class="n">k</span> <span class="o">+</span> <span class="mi">1</span><span class="p">:]]</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;reference&quot;</span><span class="p">:</span> <span class="n">reference</span><span class="p">,</span> <span class="s2">&quot;flags&quot;</span><span class="p">:</span> <span class="n">flags</span><span class="p">,</span> <span class="s2">&quot;flag_rows&quot;</span><span class="p">:</span> <span class="n">flag_rows</span><span class="p">,</span>
+            <span class="s2">&quot;scores&quot;</span><span class="p">:</span> <span class="n">lxin</span><span class="o">.</span><span class="n">order_scores</span><span class="p">(</span><span class="n">scored</span><span class="p">,</span> <span class="n">flags</span><span class="p">,</span> <span class="n">sheets</span><span class="o">=</span><span class="n">reference</span><span class="p">),</span>
+            <span class="s2">&quot;disputes&quot;</span><span class="p">:</span> <span class="n">disputes</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">dispute_means</span><span class="p">(</span><span class="n">disputes</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The pair rows averaged over the repeats of each two readers.</span>
+
+<span class="sd">    One row per (first reader, second reader) as the rows have them — a reader</span>
+<span class="sd">    with itself is its repeats against each other — with every count averaged</span>
+<span class="sd">    and ``pairs`` saying how many pairs of passes went in.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">groups</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">tuple</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">disputes</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;disputed&quot;</span><span class="p">):</span>
+            <span class="n">key</span> <span class="o">=</span> <span class="p">(</span><span class="n">family_of</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;first&quot;</span><span class="p">]),</span> <span class="n">family_of</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;second&quot;</span><span class="p">]))</span>
+            <span class="n">groups</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="p">[])</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">row</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">[{</span><span class="o">**</span><span class="p">{</span><span class="n">key</span><span class="p">:</span> <span class="p">(</span><span class="nb">round</span><span class="p">(</span><span class="nb">sum</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">)</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">),</span> <span class="mi">2</span><span class="p">)</span>
+                      <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="nb">int</span><span class="p">)</span> <span class="k">else</span> <span class="n">value</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">()},</span>
+             <span class="s2">&quot;first&quot;</span><span class="p">:</span> <span class="n">first</span><span class="p">,</span> <span class="s2">&quot;second&quot;</span><span class="p">:</span> <span class="n">second</span><span class="p">,</span> <span class="s2">&quot;pairs&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">)}</span>
+            <span class="k">for</span> <span class="p">(</span><span class="n">first</span><span class="p">,</span> <span class="n">second</span><span class="p">),</span> <span class="n">rows</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">groups</span><span class="o">.</span><span class="n">items</span><span class="p">())]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">order_ledger</span><span class="p">(</span><span class="n">frames</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The I22 block of the report: the reference, each pass, each two readers.&quot;&quot;&quot;</span>
+    <span class="n">reference</span> <span class="o">=</span> <span class="n">frames</span><span class="p">[</span><span class="s2">&quot;reference&quot;</span><span class="p">]</span>
+    <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span>
+        <span class="n">lxin</span><span class="o">.</span><span class="n">lexikon_1910_order_report</span><span class="p">(</span>
+            <span class="n">lxin</span><span class="o">.</span><span class="n">order_summary</span><span class="p">(</span><span class="n">reference</span><span class="p">),</span> <span class="n">frames</span><span class="p">[</span><span class="s2">&quot;scores&quot;</span><span class="p">],</span>
+            <span class="n">sheet_flags</span><span class="o">=</span><span class="n">lxin</span><span class="o">.</span><span class="n">order_reference_flags</span><span class="p">(</span><span class="n">reference</span><span class="p">),</span>
+            <span class="n">joins</span><span class="o">=</span><span class="n">lxin</span><span class="o">.</span><span class="n">order_joins</span><span class="p">(</span><span class="n">reference</span><span class="p">)),</span>
+        <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;  mean over the pairs of repeats of each two readers:&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+        <span class="n">lxin</span><span class="o">.</span><span class="n">lexikon_1910_order_disputes_report</span><span class="p">(</span><span class="n">dispute_means</span><span class="p">(</span><span class="n">frames</span><span class="p">[</span><span class="s2">&quot;disputes&quot;</span><span class="p">]))])</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">rescore</span><span class="p">(</span><span class="n">hosts</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;all&quot;</span><span class="p">,</span> <span class="n">legacy</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">top</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">3</span><span class="p">,</span>
+            <span class="n">draws</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">2000</span><span class="p">,</span> <span class="n">run_tag</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Score every pass on disk, write the outputs, return the report.</span>
+
+<span class="sd">    ``run_tag`` names an earlier run to score (``r3``); empty means the current</span>
+<span class="sd">    one. :func:`bakeoff.passes_on_disk` only reads labels carrying its run tag, so</span>
+<span class="sd">    without this the passes of every earlier run would drop out of the report the</span>
+<span class="sd">    day the tag is bumped.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">bo</span><span class="o">.</span><span class="n">HUMAN</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;no gold at </span><span class="si">{</span><span class="n">bo</span><span class="o">.</span><span class="n">HUMAN</span><span class="si">}</span><span class="s2"> — nothing to score against&quot;</span>
+    <span class="n">human</span> <span class="o">=</span> <span class="n">bo</span><span class="o">.</span><span class="n">load_pass</span><span class="p">(</span><span class="n">bo</span><span class="o">.</span><span class="n">HUMAN</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">run_tag</span><span class="p">:</span>
+        <span class="n">bo</span><span class="o">.</span><span class="n">RUN_TAG</span> <span class="o">=</span> <span class="n">run_tag</span>
+    <span class="n">passes</span> <span class="o">=</span> <span class="n">bo</span><span class="o">.</span><span class="n">passes_on_disk</span><span class="p">(</span><span class="n">legacy</span><span class="o">=</span><span class="n">legacy</span><span class="p">,</span> <span class="n">hosts</span><span class="o">=</span><span class="n">hosts</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">passes</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot;no </span><span class="si">{</span><span class="n">bo</span><span class="o">.</span><span class="n">RUN_TAG</span><span class="si">}</span><span class="s2"> passes under </span><span class="si">{</span><span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span><span class="si">}</span><span class="s2"> (hosts=</span><span class="si">{</span><span class="n">hosts</span><span class="si">!r}</span><span class="s2">, &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;legacy=</span><span class="si">{</span><span class="n">legacy</span><span class="si">}</span><span class="s2">); an earlier run is scored with --run-tag&quot;</span><span class="p">)</span>
+
+    <span class="n">scored</span> <span class="o">=</span> <span class="n">lxin</span><span class="o">.</span><span class="n">score_against_reference</span><span class="p">({</span><span class="s2">&quot;human&quot;</span><span class="p">:</span> <span class="n">human</span><span class="p">,</span> <span class="o">**</span><span class="n">passes</span><span class="p">},</span>
+                                          <span class="n">reference</span><span class="o">=</span><span class="s2">&quot;human&quot;</span><span class="p">)</span>
+    <span class="n">intervals</span><span class="p">,</span> <span class="n">rates</span><span class="p">,</span> <span class="n">misfiled</span> <span class="o">=</span> <span class="p">{},</span> <span class="p">[],</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">rows</span> <span class="ow">in</span> <span class="n">passes</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">pair</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;human&quot;</span><span class="p">:</span> <span class="n">human</span><span class="p">,</span> <span class="n">label</span><span class="p">:</span> <span class="n">rows</span><span class="p">}</span>
+        <span class="n">intervals</span><span class="p">[</span><span class="n">label</span><span class="p">]</span> <span class="o">=</span> <span class="n">lxin</span><span class="o">.</span><span class="n">clustered_interval</span><span class="p">(</span><span class="n">pair</span><span class="p">,</span> <span class="n">label</span><span class="p">,</span> <span class="n">draws</span><span class="o">=</span><span class="n">draws</span><span class="p">)</span>
+        <span class="n">rates</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">lxin</span><span class="o">.</span><span class="n">symbol_rates</span><span class="p">(</span><span class="n">pair</span><span class="p">,</span> <span class="n">label</span><span class="p">))</span>
+        <span class="n">misfiled</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">lxin</span><span class="o">.</span><span class="n">part_attribution</span><span class="p">(</span><span class="n">pair</span><span class="p">,</span> <span class="n">label</span><span class="p">))</span>
+    <span class="n">accuracy</span> <span class="o">=</span> <span class="p">[{</span><span class="o">**</span><span class="n">row</span><span class="p">,</span> <span class="o">**</span><span class="p">{</span><span class="n">key</span><span class="p">:</span> <span class="n">intervals</span><span class="p">[</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;pass&quot;</span><span class="p">]][</span><span class="n">key</span><span class="p">]</span>
+                           <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">INTERVAL_KEYS</span><span class="p">}}</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">scored</span><span class="p">]</span>
+    <span class="n">beside</span> <span class="o">=</span> <span class="n">score_sidecars</span><span class="p">(</span><span class="n">passes</span><span class="p">,</span> <span class="n">human</span><span class="p">)</span>
+    <span class="n">order</span> <span class="o">=</span> <span class="n">order_frames</span><span class="p">(</span><span class="n">passes</span><span class="p">,</span> <span class="n">human</span><span class="p">)</span>
+
+    <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;rescore_passes v</span><span class="si">{</span><span class="n">__version__</span><span class="si">}</span><span class="s2"> — </span><span class="si">{</span><span class="n">time</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y-%m-</span><span class="si">%d</span><span class="s1"> %H:%M&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span>
+             <span class="sa">f</span><span class="s2">&quot; — run </span><span class="si">{</span><span class="n">bo</span><span class="o">.</span><span class="n">RUN_TAG</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+             <span class="n">gold_line</span><span class="p">(</span><span class="n">human</span><span class="p">),</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+             <span class="n">lxin</span><span class="o">.</span><span class="n">lexikon_1910_accuracy_report</span><span class="p">(</span><span class="n">scored</span><span class="p">),</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+             <span class="n">lxin</span><span class="o">.</span><span class="n">lexikon_1910_clustered_interval_report</span><span class="p">(</span>
+                 <span class="p">[</span><span class="n">intervals</span><span class="p">[</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;pass&quot;</span><span class="p">]]</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">scored</span><span class="p">]),</span>
+             <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">order_ledger</span><span class="p">(</span><span class="n">order</span><span class="p">)]</span>
+    <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">scored</span><span class="p">[:</span><span class="n">top</span><span class="p">]:</span>
+        <span class="n">label</span> <span class="o">=</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;pass&quot;</span><span class="p">]</span>
+        <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">lxin</span><span class="o">.</span><span class="n">lexikon_1910_symbol_rates_report</span><span class="p">(</span>
+                      <span class="p">[</span><span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rates</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;pass&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">label</span><span class="p">]),</span>
+                  <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">lxin</span><span class="o">.</span><span class="n">lexikon_1910_part_attribution_report</span><span class="p">(</span>
+                      <span class="p">[</span><span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">misfiled</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;pass&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">label</span><span class="p">])]</span>
+        <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">beside</span><span class="p">[</span><span class="s2">&quot;reports&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span>
+            <span class="n">label</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">: no named-parts or attributes file — a pass read &quot;</span>
+                   <span class="sa">f</span><span class="s2">&quot;before 2026-10-06 has neither until it is replayed&quot;</span><span class="p">)]</span>
+    <span class="n">report</span> <span class="o">=</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+
+    <span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">out_paths</span><span class="p">(</span><span class="n">bo</span><span class="o">.</span><span class="n">RUN_TAG</span><span class="p">)</span>
+    <span class="n">write_csv</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;accuracy&quot;</span><span class="p">],</span> <span class="n">accuracy</span><span class="p">)</span>
+    <span class="n">write_csv</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;rates&quot;</span><span class="p">],</span> <span class="n">rates</span><span class="p">)</span>
+    <span class="n">write_csv</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;parts&quot;</span><span class="p">],</span> <span class="n">misfiled</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;named_parts&quot;</span><span class="p">,</span> <span class="s2">&quot;parts_symbols&quot;</span><span class="p">,</span> <span class="s2">&quot;attributes&quot;</span><span class="p">):</span>
+        <span class="n">write_csv</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="n">name</span><span class="p">],</span> <span class="n">beside</span><span class="p">[</span><span class="n">name</span><span class="p">])</span>
+    <span class="n">write_csv</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;order&quot;</span><span class="p">],</span> <span class="n">order</span><span class="p">[</span><span class="s2">&quot;scores&quot;</span><span class="p">])</span>
+    <span class="n">write_csv</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;order_flags&quot;</span><span class="p">],</span> <span class="n">order</span><span class="p">[</span><span class="s2">&quot;flag_rows&quot;</span><span class="p">])</span>
+    <span class="n">write_csv</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;order_disputes&quot;</span><span class="p">],</span> <span class="n">order</span><span class="p">[</span><span class="s2">&quot;disputes&quot;</span><span class="p">])</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;report&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">report</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">report</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--hosts&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;all&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s1">&#39;&quot;all&quot; pools every machine</span><span class="se">\&#39;</span><span class="s1">s passes (default); &#39;</span>
+                         <span class="s1">&#39;&quot;&quot; reads this machine</span><span class="se">\&#39;</span><span class="s1">s only&#39;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--legacy&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;also read passes written before the per-host split&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--top&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;passes to print glyph rates and misfilings for&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--bootstrap&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">2000</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;page-bootstrap draws for the interval&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--run-tag&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;score an earlier run&#39;s passes (e.g. r3) instead of the &quot;</span>
+                         <span class="s2">&quot;current one&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">rescore</span><span class="p">(</span><span class="n">hosts</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">hosts</span><span class="p">,</span> <span class="n">legacy</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">legacy</span><span class="p">,</span> <span class="n">top</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">top</span><span class="p">,</span>
+                  <span class="n">draws</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">bootstrap</span><span class="p">,</span> <span class="n">run_tag</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">run_tag</span><span class="p">))</span>
+    <span class="k">return</span> <span class="mi">0</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>

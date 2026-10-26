@@ -1,0 +1,1237 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Assigns a <strong>court district (soudní okres / Gerichtsbezirk)</strong> to any point given in
+WGS84 lon/lat, by locating it inside the <a class="cite" data-ref="mpidr_2012" href="#references" onclick="return bibGo(event)">MPIDR</a> / <a class="cite" data-ref="rumpler_seger_2010" href="#references" onclick="return bibGo(event)">Rumpler-Seger</a> 1910 court polygons
+(<code>reference/places/mpidr/…v.1.0.shp</code>). This is the finer
+juridical layer the name-based okres matcher (<code>utils.parsing.records_geo</code>) cannot
+resolve — a court is a <em>sub</em>-okres unit, so it can only be fixed geometrically.</p><p class="tldr-facts"><b>Geography &amp; census</b> · v1.1.0 · 346 lines · 6 public functions · 1 constant · used by <code>02_data_cleaning.ipynb</code>, <code>utils/docs/build_docs.py</code> · <code>utils/parsing/spatial.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-parsing-spatial-laea_forward">laea_forward</a><a class="chip" href="#fn-utils-parsing-spatial-read_polygons">read_polygons</a><a class="chip" href="#fn-utils-parsing-spatial-CourtLocator">CourtLocator</a><a class="chip" href="#fn-utils-parsing-spatial-add_court_ids">add_court_ids</a><a class="chip" href="#fn-utils-parsing-spatial-add_settlement_courts">add_settlement_courts</a><a class="chip" href="#fn-utils-parsing-spatial-settlement_court_report">settlement_court_report</a><a class="chip const" href="#c-utils-parsing-spatial-SNAP_TOL_M">SNAP_TOL_M</a></div>
+<h2>How it works</h2><h4>Why pure <code>numpy</code> (no geopandas / pyshp / pyproj)</h4>
+<p>Consistent with <code>utils.parsing.districts</code> (which hand-reads the <code>.dbf</code>), this module
+avoids a heavy geo stack:</p>
+<ul>
+<li>a <strong>minimal ESRI shapefile reader</strong> for polygon records (shape type 5) — record order
+  aligns 1-to-1 with the <code>.dbf</code> rows (<code>districts.read_dbf</code>), so each polygon inherits
+  <code>ID_1</code> (=<code>court_id</code>) and its parent <code>REGION</code>/<code>DISTRICT</code> (=okres);</li>
+<li>a closed-form <strong>ellipsoidal LAEA forward projection</strong> (GRS80, EPSG:3035, the <code>.shp</code> CRS)
+  to turn lon/lat into the projected metres the polygons live in;</li>
+<li><strong>ray-casting</strong> point-in-polygon with a bounding-box prefilter.</li>
+</ul>
+<p>Validation: of the settlements carrying both a court and a name-based <code>okres_id</code>, the
+court's okres agrees with the name <strong>90.0 %</strong> of the time on containment alone (build of
+2026-09-23) and ~96 % after the D-35 near-miss repair — which agrees by construction on the
+rows it snaps, so the QA gate counts those rows as the disagreements they were (audit
+2026-09-22 §B9). The 68 % first measured on 2026-07-16 was <strong>not</strong>
+structural, as this note once claimed: it was a coordinate bug — a third of geocodes came
+from an unguarded unique-name fallback (audit 2026-07-16 §D2). Treat <code>court_id</code> as a
+<strong>complementary juridical layer</strong>; the analysis-grade okres key remains the name-based
+<code>okres_id</code>.</p>
+<p>.. warning::
+   Until 2026-08-05 this note also claimed that central-Prague coordinates "correctly land
+   in the separate 1910 okresy Královské Vinohrady / Nusle / Vršovice, not okres Praha —
+   verified". <strong>That was wrong, and it hid a defect for three weeks.</strong> Staré Město was
+   inside the 1910 city; the reason the coordinate landed in Vinohrady is that the <a class="cite" data-ref="mpidr_2012" href="#references" onclick="return bibGo(event)">MPIDR</a>
+   polygon for Prague — the right <em>size</em>, 20.8 km² against ~21 km² — has its eastern edge
+   drawn some 500 m too far west. A generalisation artefact had been written down as
+   expected behaviour, which is the most expensive kind of comment there is: every later
+   reader who checked stopped checking. See <code>SNAP_TOL_M</code> and
+   <code>CourtLocator.locate_snapped</code> for the repair, and D-35.</p>
+<h4>Usage</h4>
+<pre><code>from utils.parsing import spatial as sp
+loc = sp.CourtLocator(DBF_PATH, SHP_PATH)          # Czech-lands courts only
+df = sp.add_court_ids(df, loc, lat_col="lat", lon_col="lon", prefix="")
+# -&gt; adds court_id (Int64) + okres_code (parent, e.g. "302-4")
+</code></pre>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-parsing-spatial-laea_forward">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">laea_forward</span><span class="p">(</span><span class="n">lon</span><span class="p">,</span> <span class="n">lat</span><span class="p">)</span></pre>
+<div class="fndoc"><p>WGS84 lon/lat (degrees) → EPSG:3035 (ETRS89-LAEA) x/y in metres.</p>
+<p>Ellipsoidal Lambert Azimuthal Equal-Area, oblique aspect (Snyder 1987, eqs. 24-16 ff.),
+vectorised. Accepts scalars or arrays.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/docs/build_docs.py</code></p>
+<details><summary>source · lines 78–104 (27 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">laea_forward</span><span class="p">(</span><span class="n">lon</span><span class="p">,</span> <span class="n">lat</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;WGS84 lon/lat (degrees) → EPSG:3035 (ETRS89-LAEA) x/y in metres.</span>
+
+<span class="sd">    Ellipsoidal Lambert Azimuthal Equal-Area, oblique aspect (Snyder 1987, eqs. 24-16 ff.),</span>
+<span class="sd">    vectorised. Accepts scalars or arrays.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">lon</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">lon</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;f8&quot;</span><span class="p">))</span>
+    <span class="n">lat</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">lat</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;f8&quot;</span><span class="p">))</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_q</span><span class="p">(</span><span class="n">phi</span><span class="p">):</span>
+        <span class="n">s</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">phi</span><span class="p">)</span>
+        <span class="k">return</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">_E2</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="n">s</span> <span class="o">/</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">_E2</span> <span class="o">*</span> <span class="n">s</span> <span class="o">*</span> <span class="n">s</span><span class="p">)</span>
+                            <span class="o">-</span> <span class="p">(</span><span class="mi">1</span> <span class="o">/</span> <span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">_E</span><span class="p">))</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">((</span><span class="mi">1</span> <span class="o">-</span> <span class="n">_E</span> <span class="o">*</span> <span class="n">s</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="mi">1</span> <span class="o">+</span> <span class="n">_E</span> <span class="o">*</span> <span class="n">s</span><span class="p">)))</span>
+
+    <span class="n">qp</span> <span class="o">=</span> <span class="n">_q</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mi">2</span><span class="p">)</span>
+    <span class="n">rq</span> <span class="o">=</span> <span class="n">_A</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">qp</span> <span class="o">/</span> <span class="mi">2</span><span class="p">)</span>
+    <span class="n">beta</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arcsin</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">_q</span><span class="p">(</span><span class="n">lat</span><span class="p">)</span> <span class="o">/</span> <span class="n">qp</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+    <span class="n">beta0</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arcsin</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">_q</span><span class="p">(</span><span class="n">_LAT0</span><span class="p">)</span> <span class="o">/</span> <span class="n">qp</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+    <span class="n">m0</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">_LAT0</span><span class="p">)</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">_E2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">_LAT0</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">_A</span> <span class="o">*</span> <span class="n">m0</span> <span class="o">/</span> <span class="p">(</span><span class="n">rq</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">beta0</span><span class="p">))</span>
+    <span class="n">dl</span> <span class="o">=</span> <span class="n">lon</span> <span class="o">-</span> <span class="n">_LON0</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="n">rq</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mi">2</span> <span class="o">/</span> <span class="p">(</span><span class="mi">1</span> <span class="o">+</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">beta0</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">beta</span><span class="p">)</span>
+                          <span class="o">+</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">beta0</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">beta</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">dl</span><span class="p">)))</span>
+    <span class="n">x</span> <span class="o">=</span> <span class="n">b</span> <span class="o">*</span> <span class="n">d</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">beta</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">dl</span><span class="p">)</span>
+    <span class="n">y</span> <span class="o">=</span> <span class="p">(</span><span class="n">b</span> <span class="o">/</span> <span class="n">d</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">beta0</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">beta</span><span class="p">)</span>
+                   <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">beta0</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">beta</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">dl</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">_FE</span> <span class="o">+</span> <span class="n">x</span><span class="p">,</span> <span class="n">_FN</span> <span class="o">+</span> <span class="n">y</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-spatial-read_polygons">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">read_polygons</span><span class="p">(</span><span class="n">shp_path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]]</span></pre>
+<div class="fndoc"><p>Read an ESRI <code>.shp</code> into one entry per record (record order = <code>.dbf</code> row order).</p>
+<p>Each entry is a list of rings; each ring is an <code>(N, 2)</code> float array of projected
+coordinates. Non-polygon / null records yield an empty list.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/docs/build_docs.py</code></p>
+<details><summary>source · lines 108–135 (28 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">read_polygons</span><span class="p">(</span><span class="n">shp_path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Read an ESRI ``.shp`` into one entry per record (record order = ``.dbf`` row order).</span>
+
+<span class="sd">    Each entry is a list of rings; each ring is an ``(N, 2)`` float array of projected</span>
+<span class="sd">    coordinates. Non-polygon / null records yield an empty list.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">raw</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">shp_path</span><span class="p">)</span><span class="o">.</span><span class="n">read_bytes</span><span class="p">()</span>
+    <span class="n">pos</span><span class="p">,</span> <span class="n">n</span> <span class="o">=</span> <span class="mi">100</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span>                       <span class="c1"># skip the 100-byte file header</span>
+    <span class="n">recs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">while</span> <span class="n">pos</span> <span class="o">&lt;</span> <span class="n">n</span><span class="p">:</span>
+        <span class="n">_rec_no</span><span class="p">,</span> <span class="n">clen</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="s2">&quot;&gt;ii&quot;</span><span class="p">,</span> <span class="n">raw</span><span class="p">[</span><span class="n">pos</span><span class="p">:</span><span class="n">pos</span> <span class="o">+</span> <span class="mi">8</span><span class="p">])</span>
+        <span class="n">pos</span> <span class="o">+=</span> <span class="mi">8</span>
+        <span class="n">nxt</span> <span class="o">=</span> <span class="n">pos</span> <span class="o">+</span> <span class="n">clen</span> <span class="o">*</span> <span class="mi">2</span>                      <span class="c1"># content length is in 16-bit words</span>
+        <span class="n">shape_type</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="s2">&quot;&lt;i&quot;</span><span class="p">,</span> <span class="n">raw</span><span class="p">[</span><span class="n">pos</span><span class="p">:</span><span class="n">pos</span> <span class="o">+</span> <span class="mi">4</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">shape_type</span> <span class="o">!=</span> <span class="mi">5</span><span class="p">:</span>                       <span class="c1"># 5 = polygon; 0 = null / other</span>
+            <span class="n">recs</span><span class="o">.</span><span class="n">append</span><span class="p">([])</span>
+            <span class="n">pos</span> <span class="o">=</span> <span class="n">nxt</span>
+            <span class="k">continue</span>
+        <span class="n">p</span> <span class="o">=</span> <span class="n">pos</span> <span class="o">+</span> <span class="mi">4</span> <span class="o">+</span> <span class="mi">32</span>                          <span class="c1"># skip shape type (4) + bbox (4 doubles)</span>
+        <span class="n">n_parts</span><span class="p">,</span> <span class="n">n_pts</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="s2">&quot;&lt;ii&quot;</span><span class="p">,</span> <span class="n">raw</span><span class="p">[</span><span class="n">p</span><span class="p">:</span><span class="n">p</span> <span class="o">+</span> <span class="mi">8</span><span class="p">])</span>
+        <span class="n">p</span> <span class="o">+=</span> <span class="mi">8</span>
+        <span class="n">parts</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="s2">&quot;&lt;</span><span class="si">%d</span><span class="s2">i&quot;</span> <span class="o">%</span> <span class="n">n_parts</span><span class="p">,</span> <span class="n">raw</span><span class="p">[</span><span class="n">p</span><span class="p">:</span><span class="n">p</span> <span class="o">+</span> <span class="mi">4</span> <span class="o">*</span> <span class="n">n_parts</span><span class="p">])</span>
+        <span class="n">p</span> <span class="o">+=</span> <span class="mi">4</span> <span class="o">*</span> <span class="n">n_parts</span>
+        <span class="n">pts</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">frombuffer</span><span class="p">(</span><span class="n">raw</span><span class="p">[</span><span class="n">p</span><span class="p">:</span><span class="n">p</span> <span class="o">+</span> <span class="mi">16</span> <span class="o">*</span> <span class="n">n_pts</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;&lt;f8&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">n_pts</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+        <span class="n">idx</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span> <span class="o">+</span> <span class="p">[</span><span class="n">n_pts</span><span class="p">]</span>
+        <span class="n">recs</span><span class="o">.</span><span class="n">append</span><span class="p">([</span><span class="n">pts</span><span class="p">[</span><span class="n">a</span><span class="p">:</span><span class="n">b</span><span class="p">]</span> <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">idx</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">idx</span><span class="p">[</span><span class="mi">1</span><span class="p">:])])</span>
+        <span class="n">pos</span> <span class="o">=</span> <span class="n">nxt</span>
+    <span class="k">return</span> <span class="n">recs</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-spatial-CourtLocator">
+<pre class="sig"><span class="k">class</span><span class="w"> </span><span class="nc">CourtLocator</span></pre>
+<div class="fndoc"><p>Locate WGS84 points inside the <a class="cite" data-ref="mpidr_2012" href="#references" onclick="return bibGo(event)">MPIDR</a> Czech-lands court polygons.</p>
+<p>Builds an in-memory list of <code>(court_id, okres_code, rings, bbox)</code> from the aligned
+<code>.dbf</code> / <code>.shp</code> pair, filtered to the Czech crown lands. <code>locate</code> returns the
+<code>(court_id, okres_code)</code> of the polygon containing a point, or <code>(None, None)</code>.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code></p>
+<details><summary>source · lines 177–262 (86 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">CourtLocator</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Locate WGS84 points inside the MPIDR Czech-lands court polygons.</span>
+
+<span class="sd">    Builds an in-memory list of ``(court_id, okres_code, rings, bbox)`` from the aligned</span>
+<span class="sd">    ``.dbf`` / ``.shp`` pair, filtered to the Czech crown lands. :meth:`locate` returns the</span>
+<span class="sd">    ``(court_id, okres_code)`` of the polygon containing a point, or ``(None, None)``.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">dbf_path</span><span class="p">,</span> <span class="n">shp_path</span><span class="p">,</span> <span class="n">lands</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">_CZECH_LANDS</span><span class="p">):</span>
+        <span class="n">dbf</span> <span class="o">=</span> <span class="n">read_dbf</span><span class="p">(</span><span class="n">dbf_path</span><span class="p">)</span>
+        <span class="n">polys</span> <span class="o">=</span> <span class="n">read_polygons</span><span class="p">(</span><span class="n">shp_path</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">dbf</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">polys</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;.dbf (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">dbf</span><span class="p">)</span><span class="si">}</span><span class="s2">) and .shp (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">polys</span><span class="p">)</span><span class="si">}</span><span class="s2">) record counts differ; &quot;</span>
+                             <span class="s2">&quot;cannot align attributes to geometry.&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">courts</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">by_okres</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">rec</span><span class="p">,</span> <span class="n">rings</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">dbf</span><span class="p">,</span> <span class="n">polys</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">rec</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;LAND&quot;</span><span class="p">)</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">lands</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">rings</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">allpts</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">(</span><span class="n">rings</span><span class="p">)</span>
+            <span class="n">bbox</span> <span class="o">=</span> <span class="p">(</span><span class="n">allpts</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">min</span><span class="p">(),</span> <span class="n">allpts</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">min</span><span class="p">(),</span>
+                    <span class="n">allpts</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">max</span><span class="p">(),</span> <span class="n">allpts</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">max</span><span class="p">())</span>
+            <span class="n">code</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">rec</span><span class="p">[</span><span class="s1">&#39;REGION&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">-</span><span class="si">{</span><span class="n">rec</span><span class="p">[</span><span class="s1">&#39;DISTRICT&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="n">entry</span> <span class="o">=</span> <span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">rec</span><span class="p">[</span><span class="s2">&quot;ID_1&quot;</span><span class="p">]),</span> <span class="n">code</span><span class="p">,</span> <span class="n">rings</span><span class="p">,</span> <span class="n">bbox</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">courts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">entry</span><span class="p">)</span>
+            <span class="n">oid</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">rec</span><span class="p">[</span><span class="s2">&quot;REGION&quot;</span><span class="p">])</span> <span class="o">*</span> <span class="mi">1000</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">rec</span><span class="p">[</span><span class="s2">&quot;DISTRICT&quot;</span><span class="p">])</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">by_okres</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">oid</span><span class="p">,</span> <span class="p">[])</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">entry</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">locate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">px</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">py</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return ``(court_id, okres_code)`` for a projected point, else ``(None, None)``.</span>
+
+<span class="sd">        Containment is **even-odd over all rings** (odd ring count = inside): an ESRI</span>
+<span class="sd">        polygon&#39;s holes are extra rings, so a point inside an enclave (a city court cut</span>
+<span class="sd">        out of the surrounding rural court) tests inside the outer ring *and* the hole —</span>
+<span class="sd">        even parity, correctly outside. A plain ``any()`` would let whichever polygon</span>
+<span class="sd">        comes first in file order claim enclave points.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">court_id</span><span class="p">,</span> <span class="n">okres_code</span><span class="p">,</span> <span class="n">rings</span><span class="p">,</span> <span class="p">(</span><span class="n">x0</span><span class="p">,</span> <span class="n">y0</span><span class="p">,</span> <span class="n">x1</span><span class="p">,</span> <span class="n">y1</span><span class="p">)</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">courts</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="n">x0</span> <span class="o">&lt;=</span> <span class="n">px</span> <span class="o">&lt;=</span> <span class="n">x1</span> <span class="ow">and</span> <span class="n">y0</span> <span class="o">&lt;=</span> <span class="n">py</span> <span class="o">&lt;=</span> <span class="n">y1</span><span class="p">):</span>
+                <span class="k">continue</span>
+            <span class="k">if</span> <span class="nb">sum</span><span class="p">(</span><span class="n">_point_in_ring</span><span class="p">(</span><span class="n">px</span><span class="p">,</span> <span class="n">py</span><span class="p">,</span> <span class="n">r</span><span class="p">)</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rings</span><span class="p">)</span> <span class="o">%</span> <span class="mi">2</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">court_id</span><span class="p">,</span> <span class="n">okres_code</span>
+        <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">locate_snapped</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">px</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">py</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">prefer_okres</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+                       <span class="n">tol_m</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">SNAP_TOL_M</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;:meth:`locate`, but a near miss against *prefer_okres* is pulled back into it.</span>
+
+<span class="sd">        Returns ``(court_id, okres_code, snapped)``.</span>
+
+<span class="sd">        The MPIDR outlines are an empire-wide generalisation, so a city border can sit a</span>
+<span class="sd">        kilometre from where it ran. Prague is the case that made this necessary: the</span>
+<span class="sd">        polygon labelled *Prag/Praha St.* is the right size (20.8 km² against the city&#39;s</span>
+<span class="sd">        ~21 km²) but its eastern edge is drawn ~500 m too far west, so the single Wikidata</span>
+<span class="sd">        coordinate every ``Praha`` birth carries — Old Town Square, 50.0875 N 14.4214 E,</span>
+<span class="sd">        unambiguously inside the 1910 city — fell into neighbouring Královské Vinohrady.</span>
+<span class="sd">        All 2,691 court-placed Prague births went there and the Praha court polygon</span>
+<span class="sd">        received **none**.</span>
+
+<span class="sd">        The repair only fires where the name evidence and the geometry disagree *and* the</span>
+<span class="sd">        point is within ``tol_m`` of the named okres — the signature of a boundary drawn</span>
+<span class="sd">        slightly wrong. A disagreement further out is a disagreement about which place this</span>
+<span class="sd">        is, not about where a line runs, and is left standing so the layer keeps its value</span>
+<span class="sd">        as a cross-check. Snapped rows are flagged, so any use of the court layer as</span>
+<span class="sd">        independent evidence can drop them.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">court_id</span><span class="p">,</span> <span class="n">okres_code</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">locate</span><span class="p">(</span><span class="n">px</span><span class="p">,</span> <span class="n">py</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">prefer_okres</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">prefer_okres</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">court_id</span><span class="p">,</span> <span class="n">okres_code</span><span class="p">,</span> <span class="kc">False</span>
+        <span class="n">prefer_okres</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">prefer_okres</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">okres_code</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">r</span><span class="p">,</span> <span class="n">d</span> <span class="o">=</span> <span class="n">okres_code</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;-&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nb">int</span><span class="p">(</span><span class="n">r</span><span class="p">)</span> <span class="o">*</span> <span class="mi">1000</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">d</span><span class="p">)</span> <span class="o">==</span> <span class="n">prefer_okres</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">court_id</span><span class="p">,</span> <span class="n">okres_code</span><span class="p">,</span> <span class="kc">False</span>        <span class="c1"># geometry already agrees</span>
+
+        <span class="n">best</span><span class="p">,</span> <span class="n">best_d</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">tol_m</span>
+        <span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">by_okres</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">prefer_okres</span><span class="p">,</span> <span class="p">[]):</span>
+            <span class="n">_cid</span><span class="p">,</span> <span class="n">_code</span><span class="p">,</span> <span class="n">rings</span><span class="p">,</span> <span class="p">(</span><span class="n">x0</span><span class="p">,</span> <span class="n">y0</span><span class="p">,</span> <span class="n">x1</span><span class="p">,</span> <span class="n">y1</span><span class="p">)</span> <span class="o">=</span> <span class="n">entry</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="n">x0</span> <span class="o">-</span> <span class="n">tol_m</span> <span class="o">&lt;=</span> <span class="n">px</span> <span class="o">&lt;=</span> <span class="n">x1</span> <span class="o">+</span> <span class="n">tol_m</span> <span class="ow">and</span> <span class="n">y0</span> <span class="o">-</span> <span class="n">tol_m</span> <span class="o">&lt;=</span> <span class="n">py</span> <span class="o">&lt;=</span> <span class="n">y1</span> <span class="o">+</span> <span class="n">tol_m</span><span class="p">):</span>
+                <span class="k">continue</span>
+            <span class="n">dist</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">_ring_min_distance</span><span class="p">(</span><span class="n">px</span><span class="p">,</span> <span class="n">py</span><span class="p">,</span> <span class="n">r</span><span class="p">)</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rings</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">dist</span> <span class="o">&lt;=</span> <span class="n">best_d</span><span class="p">:</span>
+                <span class="n">best</span><span class="p">,</span> <span class="n">best_d</span> <span class="o">=</span> <span class="n">entry</span><span class="p">,</span> <span class="n">dist</span>
+        <span class="k">if</span> <span class="n">best</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">court_id</span><span class="p">,</span> <span class="n">okres_code</span><span class="p">,</span> <span class="kc">False</span>
+        <span class="k">return</span> <span class="n">best</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">best</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="kc">True</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-spatial-add_court_ids">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">add_court_ids</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">locator</span><span class="p">:</span> <span class="n">CourtLocator</span><span class="p">,</span> <span class="n">lat_col</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;lat&#39;</span><span class="p">,</span> <span class="n">lon_col</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;lon&#39;</span><span class="p">,</span> <span class="n">prefix</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">okres_col</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">tol_m</span><span class="p">:</span> <span class="nb">float</span><span class="o">=</span><span class="n">SNAP_TOL_M</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Append <code>{prefix}court_id</code> (Int64) and <code>{prefix}okres_code</code> from a spatial lookup.</p>
+<p>Rows with a missing coordinate — or points outside every Czech-lands court polygon —
+get <code>&amp;lt;NA&amp;gt;</code>. Distinct coordinate pairs are located once and broadcast.</p>
+<p>Pass <em>okres_col</em> — the row's own name-derived okres id — to enable the near-miss repair
+described in <code>CourtLocator.locate_snapped</code>; a boolean <code>{prefix}court_snapped</code>
+then records which rows it moved. Without it the lookup is pure containment, as before.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 265–309 (45 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">add_court_ids</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">locator</span><span class="p">:</span> <span class="n">CourtLocator</span><span class="p">,</span>
+                  <span class="n">lat_col</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;lat&quot;</span><span class="p">,</span> <span class="n">lon_col</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;lon&quot;</span><span class="p">,</span>
+                  <span class="n">prefix</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">okres_col</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                  <span class="n">tol_m</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">SNAP_TOL_M</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Append ``{prefix}court_id`` (Int64) and ``{prefix}okres_code`` from a spatial lookup.</span>
+
+<span class="sd">    Rows with a missing coordinate — or points outside every Czech-lands court polygon —</span>
+<span class="sd">    get ``&lt;NA&gt;``. Distinct coordinate pairs are located once and broadcast.</span>
+
+<span class="sd">    Pass *okres_col* — the row&#39;s own name-derived okres id — to enable the near-miss repair</span>
+<span class="sd">    described in :meth:`CourtLocator.locate_snapped`; a boolean ``{prefix}court_snapped``</span>
+<span class="sd">    then records which rows it moved. Without it the lookup is pure containment, as before.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">has</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="n">lat_col</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">out</span><span class="p">[</span><span class="n">lon_col</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span>
+    <span class="n">cid</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">out</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+    <span class="n">ocode</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">object</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">out</span><span class="p">)</span>
+    <span class="n">snapped</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">out</span><span class="p">),</span> <span class="nb">bool</span><span class="p">)</span>
+    <span class="n">prefer</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="n">okres_col</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">()</span> <span class="k">if</span> <span class="n">okres_col</span> <span class="ow">and</span> <span class="n">okres_col</span> <span class="ow">in</span> <span class="n">out</span><span class="o">.</span><span class="n">columns</span> <span class="k">else</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="n">has</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+        <span class="n">sub</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">has</span><span class="p">,</span> <span class="p">[</span><span class="n">lon_col</span><span class="p">,</span> <span class="n">lat_col</span><span class="p">]]</span>
+        <span class="n">xs</span><span class="p">,</span> <span class="n">ys</span> <span class="o">=</span> <span class="n">laea_forward</span><span class="p">(</span><span class="n">sub</span><span class="p">[</span><span class="n">lon_col</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span> <span class="n">sub</span><span class="p">[</span><span class="n">lat_col</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">())</span>
+        <span class="c1"># cache by rounded coordinate *and* preferred okres: the same point can legitimately</span>
+        <span class="c1"># resolve differently for two settlements whose names put them in different okresy</span>
+        <span class="n">cache</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">tuple</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="n">pos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">flatnonzero</span><span class="p">(</span><span class="n">has</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">())</span>
+        <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">px</span><span class="p">,</span> <span class="n">py</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">pos</span><span class="p">,</span> <span class="n">xs</span><span class="p">,</span> <span class="n">ys</span><span class="p">):</span>
+            <span class="n">want</span> <span class="o">=</span> <span class="kc">None</span> <span class="k">if</span> <span class="n">prefer</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">prefer</span><span class="p">[</span><span class="n">k</span><span class="p">])</span> <span class="k">else</span> <span class="nb">int</span><span class="p">(</span><span class="n">prefer</span><span class="p">[</span><span class="n">k</span><span class="p">])</span>
+            <span class="n">key</span> <span class="o">=</span> <span class="p">(</span><span class="nb">round</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">px</span><span class="p">),</span> <span class="mi">1</span><span class="p">),</span> <span class="nb">round</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">py</span><span class="p">),</span> <span class="mi">1</span><span class="p">),</span> <span class="n">want</span><span class="p">)</span>
+            <span class="n">hit</span> <span class="o">=</span> <span class="n">cache</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">hit</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">hit</span> <span class="o">=</span> <span class="p">(</span><span class="n">locator</span><span class="o">.</span><span class="n">locate</span><span class="p">(</span><span class="n">px</span><span class="p">,</span> <span class="n">py</span><span class="p">)</span> <span class="o">+</span> <span class="p">(</span><span class="kc">False</span><span class="p">,)</span> <span class="k">if</span> <span class="n">want</span> <span class="ow">is</span> <span class="kc">None</span>
+                       <span class="k">else</span> <span class="n">locator</span><span class="o">.</span><span class="n">locate_snapped</span><span class="p">(</span><span class="n">px</span><span class="p">,</span> <span class="n">py</span><span class="p">,</span> <span class="n">want</span><span class="p">,</span> <span class="n">tol_m</span><span class="p">))</span>
+                <span class="n">cache</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">hit</span>
+            <span class="k">if</span> <span class="n">hit</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">cid</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">hit</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                <span class="n">ocode</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">hit</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+                <span class="n">snapped</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">hit</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+    <span class="n">out</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">prefix</span><span class="si">}</span><span class="s2">court_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cid</span>
+    <span class="n">out</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">prefix</span><span class="si">}</span><span class="s2">okres_code&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">ocode</span>
+    <span class="c1"># &lt;NA&gt; where there is no court to have snapped: a row with no coordinate, or a point</span>
+    <span class="c1"># outside every polygon, was not &quot;not snapped&quot; — the question did not arise for it.</span>
+    <span class="n">out</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">prefix</span><span class="si">}</span><span class="s2">court_snapped&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">cid</span><span class="p">),</span> <span class="kc">None</span><span class="p">,</span> <span class="n">snapped</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;boolean&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-spatial-add_settlement_courts">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">add_settlement_courts</span><span class="p">(</span><span class="n">settlements</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">locator</span><span class="p">:</span> <span class="n">CourtLocator</span><span class="p">,</span> <span class="n">snap</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">tol_m</span><span class="p">:</span> <span class="nb">float</span><span class="o">=</span><span class="n">SNAP_TOL_M</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Enrich the settlement crosswalk with its court district (soudní okres) by spatial join.</p>
+<p>Locates each geocoded settlement (<code>lat</code>/<code>lon</code>) inside the <a class="cite" data-ref="mpidr_2012" href="#references" onclick="return bibGo(event)">MPIDR</a> court polygons and attaches
+<code>court_id</code> (Int64) plus the backbone's <code>court_cs</code> / <code>court_de</code> names. Settlements without
+coordinates — or points outside every Czech-lands court polygon — get <code>&amp;lt;NA&amp;gt;</code>. The court is a
+<em>sub</em>-okres unit, so it is the finer geographic key the name-based okres matcher cannot supply.</p>
+<p>With <em>snap</em> (the default) a settlement landing just outside the polygon of its own
+<code>okres_id</code> is pulled back into it — see <code>CourtLocator.locate_snapped</code>. Pass
+<code>snap=False</code> for the raw containment answer, which is what the layer must be reduced
+to when it is used as independent evidence about the okres matcher.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code></p>
+<details><summary>source · lines 312–335 (24 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span>
+<span class="normal">334</span>
+<span class="normal">335</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">add_settlement_courts</span><span class="p">(</span><span class="n">settlements</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+                          <span class="n">locator</span><span class="p">:</span> <span class="n">CourtLocator</span><span class="p">,</span> <span class="n">snap</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+                          <span class="n">tol_m</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">SNAP_TOL_M</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Enrich the settlement crosswalk with its court district (soudní okres) by spatial join.</span>
+
+<span class="sd">    Locates each geocoded settlement (``lat``/``lon``) inside the MPIDR court polygons and attaches</span>
+<span class="sd">    ``court_id`` (Int64) plus the backbone&#39;s ``court_cs`` / ``court_de`` names. Settlements without</span>
+<span class="sd">    coordinates — or points outside every Czech-lands court polygon — get ``&lt;NA&gt;``. The court is a</span>
+<span class="sd">    *sub*-okres unit, so it is the finer geographic key the name-based okres matcher cannot supply.</span>
+
+<span class="sd">    With *snap* (the default) a settlement landing just outside the polygon of its own</span>
+<span class="sd">    ``okres_id`` is pulled back into it — see :meth:`CourtLocator.locate_snapped`. Pass</span>
+<span class="sd">    ``snap=False`` for the raw containment answer, which is what the layer must be reduced</span>
+<span class="sd">    to when it is used as independent evidence about the okres matcher.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">add_court_ids</span><span class="p">(</span><span class="n">settlements</span><span class="p">,</span> <span class="n">locator</span><span class="p">,</span> <span class="n">lat_col</span><span class="o">=</span><span class="s2">&quot;lat&quot;</span><span class="p">,</span> <span class="n">lon_col</span><span class="o">=</span><span class="s2">&quot;lon&quot;</span><span class="p">,</span> <span class="n">prefix</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span>
+                        <span class="n">okres_col</span><span class="o">=</span><span class="s2">&quot;okres_id&quot;</span> <span class="k">if</span> <span class="n">snap</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span> <span class="n">tol_m</span><span class="o">=</span><span class="n">tol_m</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">])</span>           <span class="c1"># parent okres already carried via okres_id</span>
+    <span class="n">cid</span> <span class="o">=</span> <span class="n">districts</span><span class="p">[</span><span class="s2">&quot;court_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>      <span class="c1"># .dbf reader yields str; align to Int64 keys</span>
+    <span class="n">court_cs</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">cid</span><span class="p">,</span> <span class="n">districts</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_cs&quot;</span><span class="p">]))</span>
+    <span class="n">court_de</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">cid</span><span class="p">,</span> <span class="n">districts</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_de&quot;</span><span class="p">]))</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;court_cs&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;court_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">court_cs</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;court_de&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;court_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">court_de</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-spatial-settlement_court_report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">settlement_court_report</span><span class="p">(</span><span class="n">settlements</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span></pre>
+<div class="fndoc"><p>Print court-district fill rate on the enriched settlement crosswalk.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code></p>
+<details><summary>source · lines 338–346 (9 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">338</span>
+<span class="normal">339</span>
+<span class="normal">340</span>
+<span class="normal">341</span>
+<span class="normal">342</span>
+<span class="normal">343</span>
+<span class="normal">344</span>
+<span class="normal">345</span>
+<span class="normal">346</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">settlement_court_report</span><span class="p">(</span><span class="n">settlements</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Print court-district fill rate on the enriched settlement crosswalk.&quot;&quot;&quot;</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">settlements</span><span class="p">)</span>
+    <span class="n">geo</span> <span class="o">=</span> <span class="n">settlements</span><span class="p">[</span><span class="s2">&quot;lat&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="k">if</span> <span class="s2">&quot;lat&quot;</span> <span class="ow">in</span> <span class="n">settlements</span><span class="o">.</span><span class="n">columns</span> <span class="k">else</span> <span class="mi">0</span>
+    <span class="n">has</span> <span class="o">=</span> <span class="n">settlements</span><span class="p">[</span><span class="s2">&quot;court_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Settlement court districts  (settlements = </span><span class="si">{</span><span class="n">n</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  geocoded (lat/lon):   </span><span class="si">{</span><span class="n">geo</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">  (</span><span class="si">{</span><span class="n">geo</span><span class="o">/</span><span class="n">n</span><span class="o">*</span><span class="mi">100</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  located in a court:   </span><span class="si">{</span><span class="n">has</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">  (</span><span class="si">{</span><span class="n">has</span><span class="o">/</span><span class="n">n</span><span class="o">*</span><span class="mi">100</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%&quot;</span>
+          <span class="o">+</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot;, </span><span class="si">{</span><span class="n">has</span><span class="o">/</span><span class="n">geo</span><span class="o">*</span><span class="mi">100</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">% of geocoded)&quot;</span> <span class="k">if</span> <span class="n">geo</span> <span class="k">else</span> <span class="s2">&quot;)&quot;</span><span class="p">))</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-parsing-spatial-SNAP_TOL_M"><pre class="sig">SNAP_TOL_M<span class="kind">float</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mf">1000.0</span>
+</pre></div>
+</details></div>
+<h2>Used by</h2><p><code>02_data_cleaning.ipynb</code> <code>utils/docs/build_docs.py</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/parsing/spatial.py · 346 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span>
+<span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span>
+<span class="normal">337</span>
+<span class="normal">338</span>
+<span class="normal">339</span>
+<span class="normal">340</span>
+<span class="normal">341</span>
+<span class="normal">342</span>
+<span class="normal">343</span>
+<span class="normal">344</span>
+<span class="normal">345</span>
+<span class="normal">346</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">spatial.py — point-in-polygon court-district assignment from the MPIDR 1910 polygons</span>
+<span class="sd">====================================================================================</span>
+<span class="sd">Assigns a **court district (soudní okres / Gerichtsbezirk)** to any point given in</span>
+<span class="sd">WGS84 lon/lat, by locating it inside the MPIDR / Rumpler-Seger 1910 court polygons</span>
+<span class="sd">(``reference/places/mpidr/…v.1.0.shp``). This is the finer</span>
+<span class="sd">juridical layer the name-based okres matcher (:mod:`utils.parsing.records_geo`) cannot</span>
+<span class="sd">resolve — a court is a *sub*-okres unit, so it can only be fixed geometrically.</span>
+
+<span class="sd">Why pure ``numpy`` (no geopandas / pyshp / pyproj)</span>
+<span class="sd">--------------------------------------------------</span>
+<span class="sd">Consistent with :mod:`utils.parsing.districts` (which hand-reads the ``.dbf``), this module</span>
+<span class="sd">avoids a heavy geo stack:</span>
+
+<span class="sd">* a **minimal ESRI shapefile reader** for polygon records (shape type 5) — record order</span>
+<span class="sd">  aligns 1-to-1 with the ``.dbf`` rows (:func:`districts.read_dbf`), so each polygon inherits</span>
+<span class="sd">  ``ID_1`` (=``court_id``) and its parent ``REGION``/``DISTRICT`` (=okres);</span>
+<span class="sd">* a closed-form **ellipsoidal LAEA forward projection** (GRS80, EPSG:3035, the ``.shp`` CRS)</span>
+<span class="sd">  to turn lon/lat into the projected metres the polygons live in;</span>
+<span class="sd">* **ray-casting** point-in-polygon with a bounding-box prefilter.</span>
+
+<span class="sd">Validation: of the settlements carrying both a court and a name-based ``okres_id``, the</span>
+<span class="sd">court&#39;s okres agrees with the name **90.0 %** of the time on containment alone (build of</span>
+<span class="sd">2026-09-23) and ~96 % after the D-35 near-miss repair — which agrees by construction on the</span>
+<span class="sd">rows it snaps, so the QA gate counts those rows as the disagreements they were (audit</span>
+<span class="sd">2026-09-22 §B9). The 68 % first measured on 2026-07-16 was **not**</span>
+<span class="sd">structural, as this note once claimed: it was a coordinate bug — a third of geocodes came</span>
+<span class="sd">from an unguarded unique-name fallback (audit 2026-07-16 §D2). Treat ``court_id`` as a</span>
+<span class="sd">**complementary juridical layer**; the analysis-grade okres key remains the name-based</span>
+<span class="sd">``okres_id``.</span>
+
+<span class="sd">.. warning::</span>
+<span class="sd">   Until 2026-08-05 this note also claimed that central-Prague coordinates &quot;correctly land</span>
+<span class="sd">   in the separate 1910 okresy Královské Vinohrady / Nusle / Vršovice, not okres Praha —</span>
+<span class="sd">   verified&quot;. **That was wrong, and it hid a defect for three weeks.** Staré Město was</span>
+<span class="sd">   inside the 1910 city; the reason the coordinate landed in Vinohrady is that the MPIDR</span>
+<span class="sd">   polygon for Prague — the right *size*, 20.8 km² against ~21 km² — has its eastern edge</span>
+<span class="sd">   drawn some 500 m too far west. A generalisation artefact had been written down as</span>
+<span class="sd">   expected behaviour, which is the most expensive kind of comment there is: every later</span>
+<span class="sd">   reader who checked stopped checking. See :data:`SNAP_TOL_M` and</span>
+<span class="sd">   :meth:`CourtLocator.locate_snapped` for the repair, and D-35.</span>
+
+<span class="sd">Usage</span>
+<span class="sd">-----</span>
+<span class="sd">    from utils.parsing import spatial as sp</span>
+<span class="sd">    loc = sp.CourtLocator(DBF_PATH, SHP_PATH)          # Czech-lands courts only</span>
+<span class="sd">    df = sp.add_court_ids(df, loc, lat_col=&quot;lat&quot;, lon_col=&quot;lon&quot;, prefix=&quot;&quot;)</span>
+<span class="sd">    # -&gt; adds court_id (Int64) + okres_code (parent, e.g. &quot;302-4&quot;)</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">struct</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing.districts</span><span class="w"> </span><span class="kn">import</span> <span class="n">read_dbf</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.1.0&quot;</span>
+
+<span class="c1"># Crown-land codes kept (Czech lands); the empire-wide .dbf is filtered to these.</span>
+<span class="n">_CZECH_LANDS</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;BOEHMEN&quot;</span><span class="p">,</span> <span class="s2">&quot;MAEHREN&quot;</span><span class="p">,</span> <span class="s2">&quot;SCHLESIEN&quot;</span><span class="p">}</span>
+
+<span class="c1"># GRS80 / EPSG:3035 (ETRS89-LAEA) parameters — read off the .prj.</span>
+<span class="n">_A</span> <span class="o">=</span> <span class="mf">6378137.0</span>
+<span class="n">_F</span> <span class="o">=</span> <span class="mi">1</span> <span class="o">/</span> <span class="mf">298.257222101</span>
+<span class="n">_E2</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">_F</span> <span class="o">-</span> <span class="n">_F</span> <span class="o">*</span> <span class="n">_F</span>
+<span class="n">_E</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">_E2</span><span class="p">)</span>
+<span class="n">_LAT0</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="mf">52.0</span><span class="p">)</span>
+<span class="n">_LON0</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="mf">10.0</span><span class="p">)</span>
+<span class="n">_FE</span> <span class="o">=</span> <span class="mf">4321000.0</span>
+<span class="n">_FN</span> <span class="o">=</span> <span class="mf">3210000.0</span>
+
+
+<span class="c1"># ── projection ────────────────────────────────────────────────────────────────</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">laea_forward</span><span class="p">(</span><span class="n">lon</span><span class="p">,</span> <span class="n">lat</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;WGS84 lon/lat (degrees) → EPSG:3035 (ETRS89-LAEA) x/y in metres.</span>
+
+<span class="sd">    Ellipsoidal Lambert Azimuthal Equal-Area, oblique aspect (Snyder 1987, eqs. 24-16 ff.),</span>
+<span class="sd">    vectorised. Accepts scalars or arrays.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">lon</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">lon</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;f8&quot;</span><span class="p">))</span>
+    <span class="n">lat</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">radians</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">lat</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;f8&quot;</span><span class="p">))</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_q</span><span class="p">(</span><span class="n">phi</span><span class="p">):</span>
+        <span class="n">s</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">phi</span><span class="p">)</span>
+        <span class="k">return</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">_E2</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="n">s</span> <span class="o">/</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">_E2</span> <span class="o">*</span> <span class="n">s</span> <span class="o">*</span> <span class="n">s</span><span class="p">)</span>
+                            <span class="o">-</span> <span class="p">(</span><span class="mi">1</span> <span class="o">/</span> <span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">_E</span><span class="p">))</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">((</span><span class="mi">1</span> <span class="o">-</span> <span class="n">_E</span> <span class="o">*</span> <span class="n">s</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="mi">1</span> <span class="o">+</span> <span class="n">_E</span> <span class="o">*</span> <span class="n">s</span><span class="p">)))</span>
+
+    <span class="n">qp</span> <span class="o">=</span> <span class="n">_q</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">/</span> <span class="mi">2</span><span class="p">)</span>
+    <span class="n">rq</span> <span class="o">=</span> <span class="n">_A</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">qp</span> <span class="o">/</span> <span class="mi">2</span><span class="p">)</span>
+    <span class="n">beta</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arcsin</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">_q</span><span class="p">(</span><span class="n">lat</span><span class="p">)</span> <span class="o">/</span> <span class="n">qp</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+    <span class="n">beta0</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arcsin</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">_q</span><span class="p">(</span><span class="n">_LAT0</span><span class="p">)</span> <span class="o">/</span> <span class="n">qp</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+    <span class="n">m0</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">_LAT0</span><span class="p">)</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">_E2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">_LAT0</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">_A</span> <span class="o">*</span> <span class="n">m0</span> <span class="o">/</span> <span class="p">(</span><span class="n">rq</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">beta0</span><span class="p">))</span>
+    <span class="n">dl</span> <span class="o">=</span> <span class="n">lon</span> <span class="o">-</span> <span class="n">_LON0</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="n">rq</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mi">2</span> <span class="o">/</span> <span class="p">(</span><span class="mi">1</span> <span class="o">+</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">beta0</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">beta</span><span class="p">)</span>
+                          <span class="o">+</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">beta0</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">beta</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">dl</span><span class="p">)))</span>
+    <span class="n">x</span> <span class="o">=</span> <span class="n">b</span> <span class="o">*</span> <span class="n">d</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">beta</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">dl</span><span class="p">)</span>
+    <span class="n">y</span> <span class="o">=</span> <span class="p">(</span><span class="n">b</span> <span class="o">/</span> <span class="n">d</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">beta0</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">beta</span><span class="p">)</span>
+                   <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">beta0</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">beta</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">dl</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">_FE</span> <span class="o">+</span> <span class="n">x</span><span class="p">,</span> <span class="n">_FN</span> <span class="o">+</span> <span class="n">y</span>
+
+
+<span class="c1"># ── minimal ESRI .shp polygon reader ────────────────────────────────────────────</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">read_polygons</span><span class="p">(</span><span class="n">shp_path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Read an ESRI ``.shp`` into one entry per record (record order = ``.dbf`` row order).</span>
+
+<span class="sd">    Each entry is a list of rings; each ring is an ``(N, 2)`` float array of projected</span>
+<span class="sd">    coordinates. Non-polygon / null records yield an empty list.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">raw</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">shp_path</span><span class="p">)</span><span class="o">.</span><span class="n">read_bytes</span><span class="p">()</span>
+    <span class="n">pos</span><span class="p">,</span> <span class="n">n</span> <span class="o">=</span> <span class="mi">100</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span>                       <span class="c1"># skip the 100-byte file header</span>
+    <span class="n">recs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">while</span> <span class="n">pos</span> <span class="o">&lt;</span> <span class="n">n</span><span class="p">:</span>
+        <span class="n">_rec_no</span><span class="p">,</span> <span class="n">clen</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="s2">&quot;&gt;ii&quot;</span><span class="p">,</span> <span class="n">raw</span><span class="p">[</span><span class="n">pos</span><span class="p">:</span><span class="n">pos</span> <span class="o">+</span> <span class="mi">8</span><span class="p">])</span>
+        <span class="n">pos</span> <span class="o">+=</span> <span class="mi">8</span>
+        <span class="n">nxt</span> <span class="o">=</span> <span class="n">pos</span> <span class="o">+</span> <span class="n">clen</span> <span class="o">*</span> <span class="mi">2</span>                      <span class="c1"># content length is in 16-bit words</span>
+        <span class="n">shape_type</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="s2">&quot;&lt;i&quot;</span><span class="p">,</span> <span class="n">raw</span><span class="p">[</span><span class="n">pos</span><span class="p">:</span><span class="n">pos</span> <span class="o">+</span> <span class="mi">4</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">shape_type</span> <span class="o">!=</span> <span class="mi">5</span><span class="p">:</span>                       <span class="c1"># 5 = polygon; 0 = null / other</span>
+            <span class="n">recs</span><span class="o">.</span><span class="n">append</span><span class="p">([])</span>
+            <span class="n">pos</span> <span class="o">=</span> <span class="n">nxt</span>
+            <span class="k">continue</span>
+        <span class="n">p</span> <span class="o">=</span> <span class="n">pos</span> <span class="o">+</span> <span class="mi">4</span> <span class="o">+</span> <span class="mi">32</span>                          <span class="c1"># skip shape type (4) + bbox (4 doubles)</span>
+        <span class="n">n_parts</span><span class="p">,</span> <span class="n">n_pts</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="s2">&quot;&lt;ii&quot;</span><span class="p">,</span> <span class="n">raw</span><span class="p">[</span><span class="n">p</span><span class="p">:</span><span class="n">p</span> <span class="o">+</span> <span class="mi">8</span><span class="p">])</span>
+        <span class="n">p</span> <span class="o">+=</span> <span class="mi">8</span>
+        <span class="n">parts</span> <span class="o">=</span> <span class="n">struct</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="s2">&quot;&lt;</span><span class="si">%d</span><span class="s2">i&quot;</span> <span class="o">%</span> <span class="n">n_parts</span><span class="p">,</span> <span class="n">raw</span><span class="p">[</span><span class="n">p</span><span class="p">:</span><span class="n">p</span> <span class="o">+</span> <span class="mi">4</span> <span class="o">*</span> <span class="n">n_parts</span><span class="p">])</span>
+        <span class="n">p</span> <span class="o">+=</span> <span class="mi">4</span> <span class="o">*</span> <span class="n">n_parts</span>
+        <span class="n">pts</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">frombuffer</span><span class="p">(</span><span class="n">raw</span><span class="p">[</span><span class="n">p</span><span class="p">:</span><span class="n">p</span> <span class="o">+</span> <span class="mi">16</span> <span class="o">*</span> <span class="n">n_pts</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;&lt;f8&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">n_pts</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+        <span class="n">idx</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span> <span class="o">+</span> <span class="p">[</span><span class="n">n_pts</span><span class="p">]</span>
+        <span class="n">recs</span><span class="o">.</span><span class="n">append</span><span class="p">([</span><span class="n">pts</span><span class="p">[</span><span class="n">a</span><span class="p">:</span><span class="n">b</span><span class="p">]</span> <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">idx</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">idx</span><span class="p">[</span><span class="mi">1</span><span class="p">:])])</span>
+        <span class="n">pos</span> <span class="o">=</span> <span class="n">nxt</span>
+    <span class="k">return</span> <span class="n">recs</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_point_in_ring</span><span class="p">(</span><span class="n">x</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">y</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">ring</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Ray-casting even-odd test for a single ring.&quot;&quot;&quot;</span>
+    <span class="n">inside</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">ring</span><span class="p">)</span>
+    <span class="n">j</span> <span class="o">=</span> <span class="n">n</span> <span class="o">-</span> <span class="mi">1</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
+        <span class="n">xi</span><span class="p">,</span> <span class="n">yi</span> <span class="o">=</span> <span class="n">ring</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+        <span class="n">xj</span><span class="p">,</span> <span class="n">yj</span> <span class="o">=</span> <span class="n">ring</span><span class="p">[</span><span class="n">j</span><span class="p">]</span>
+        <span class="k">if</span> <span class="p">((</span><span class="n">yi</span> <span class="o">&gt;</span> <span class="n">y</span><span class="p">)</span> <span class="o">!=</span> <span class="p">(</span><span class="n">yj</span> <span class="o">&gt;</span> <span class="n">y</span><span class="p">))</span> <span class="ow">and</span> <span class="p">(</span><span class="n">x</span> <span class="o">&lt;</span> <span class="p">(</span><span class="n">xj</span> <span class="o">-</span> <span class="n">xi</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="n">y</span> <span class="o">-</span> <span class="n">yi</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">yj</span> <span class="o">-</span> <span class="n">yi</span><span class="p">)</span> <span class="o">+</span> <span class="n">xi</span><span class="p">):</span>
+            <span class="n">inside</span> <span class="o">=</span> <span class="ow">not</span> <span class="n">inside</span>
+        <span class="n">j</span> <span class="o">=</span> <span class="n">i</span>
+    <span class="k">return</span> <span class="n">inside</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_ring_min_distance</span><span class="p">(</span><span class="n">x</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">y</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">ring</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Shortest distance in metres from a point to a ring&#39;s edge (not its interior).&quot;&quot;&quot;</span>
+    <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="o">=</span> <span class="n">ring</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">ring</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">b</span> <span class="o">-</span> <span class="n">a</span>
+    <span class="n">ll</span> <span class="o">=</span> <span class="p">(</span><span class="n">d</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">ll</span><span class="p">[</span><span class="n">ll</span> <span class="o">==</span> <span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="mf">1e-12</span>
+    <span class="n">t</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(((</span><span class="n">x</span> <span class="o">-</span> <span class="n">a</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">])</span> <span class="o">*</span> <span class="n">d</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="p">(</span><span class="n">y</span> <span class="o">-</span> <span class="n">a</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">])</span> <span class="o">*</span> <span class="n">d</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">])</span> <span class="o">/</span> <span class="n">ll</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
+    <span class="n">cx</span> <span class="o">=</span> <span class="n">a</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="n">t</span> <span class="o">*</span> <span class="n">d</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span>
+    <span class="n">cy</span> <span class="o">=</span> <span class="n">a</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="n">t</span> <span class="o">*</span> <span class="n">d</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span>
+    <span class="k">return</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">((</span><span class="n">x</span> <span class="o">-</span> <span class="n">cx</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span> <span class="o">+</span> <span class="p">(</span><span class="n">y</span> <span class="o">-</span> <span class="n">cy</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">min</span><span class="p">())</span>
+
+
+<span class="c1"># How far a point may sit outside the polygon of its own (name-derived) okres and still be</span>
+<span class="c1"># snapped back into it. The MPIDR boundaries are an empire-wide generalisation, so a city</span>
+<span class="c1"># outline is accurate to something like a kilometre — which is enough to put a genuine</span>
+<span class="c1"># central-city coordinate on the wrong side of its own border.</span>
+<span class="c1">#</span>
+<span class="c1"># Chosen from the measured distribution rather than from taste. Of 5,660 geocoded</span>
+<span class="c1"># settlements, 624 (11.0 %) locate into a court belonging to a *different* okres than their</span>
+<span class="c1"># name; their distance to the nearest polygon of their own okres has median 765 m and runs</span>
+<span class="c1"># out to 318 km. 1,000 m captures 382 of them and stops well below the tail, where the</span>
+<span class="c1"># disagreement is a real one — two different places — and must be left alone to say so.</span>
+<span class="n">SNAP_TOL_M</span> <span class="o">=</span> <span class="mf">1000.0</span>
+
+<span class="c1"># ── court locator ───────────────────────────────────────────────────────────────</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">CourtLocator</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Locate WGS84 points inside the MPIDR Czech-lands court polygons.</span>
+
+<span class="sd">    Builds an in-memory list of ``(court_id, okres_code, rings, bbox)`` from the aligned</span>
+<span class="sd">    ``.dbf`` / ``.shp`` pair, filtered to the Czech crown lands. :meth:`locate` returns the</span>
+<span class="sd">    ``(court_id, okres_code)`` of the polygon containing a point, or ``(None, None)``.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">dbf_path</span><span class="p">,</span> <span class="n">shp_path</span><span class="p">,</span> <span class="n">lands</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">_CZECH_LANDS</span><span class="p">):</span>
+        <span class="n">dbf</span> <span class="o">=</span> <span class="n">read_dbf</span><span class="p">(</span><span class="n">dbf_path</span><span class="p">)</span>
+        <span class="n">polys</span> <span class="o">=</span> <span class="n">read_polygons</span><span class="p">(</span><span class="n">shp_path</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">dbf</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">polys</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;.dbf (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">dbf</span><span class="p">)</span><span class="si">}</span><span class="s2">) and .shp (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">polys</span><span class="p">)</span><span class="si">}</span><span class="s2">) record counts differ; &quot;</span>
+                             <span class="s2">&quot;cannot align attributes to geometry.&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">courts</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">by_okres</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">rec</span><span class="p">,</span> <span class="n">rings</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">dbf</span><span class="p">,</span> <span class="n">polys</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">rec</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;LAND&quot;</span><span class="p">)</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">lands</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">rings</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">allpts</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">(</span><span class="n">rings</span><span class="p">)</span>
+            <span class="n">bbox</span> <span class="o">=</span> <span class="p">(</span><span class="n">allpts</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">min</span><span class="p">(),</span> <span class="n">allpts</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">min</span><span class="p">(),</span>
+                    <span class="n">allpts</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">max</span><span class="p">(),</span> <span class="n">allpts</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">max</span><span class="p">())</span>
+            <span class="n">code</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">rec</span><span class="p">[</span><span class="s1">&#39;REGION&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">-</span><span class="si">{</span><span class="n">rec</span><span class="p">[</span><span class="s1">&#39;DISTRICT&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="n">entry</span> <span class="o">=</span> <span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">rec</span><span class="p">[</span><span class="s2">&quot;ID_1&quot;</span><span class="p">]),</span> <span class="n">code</span><span class="p">,</span> <span class="n">rings</span><span class="p">,</span> <span class="n">bbox</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">courts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">entry</span><span class="p">)</span>
+            <span class="n">oid</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">rec</span><span class="p">[</span><span class="s2">&quot;REGION&quot;</span><span class="p">])</span> <span class="o">*</span> <span class="mi">1000</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">rec</span><span class="p">[</span><span class="s2">&quot;DISTRICT&quot;</span><span class="p">])</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">by_okres</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">oid</span><span class="p">,</span> <span class="p">[])</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">entry</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">locate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">px</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">py</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return ``(court_id, okres_code)`` for a projected point, else ``(None, None)``.</span>
+
+<span class="sd">        Containment is **even-odd over all rings** (odd ring count = inside): an ESRI</span>
+<span class="sd">        polygon&#39;s holes are extra rings, so a point inside an enclave (a city court cut</span>
+<span class="sd">        out of the surrounding rural court) tests inside the outer ring *and* the hole —</span>
+<span class="sd">        even parity, correctly outside. A plain ``any()`` would let whichever polygon</span>
+<span class="sd">        comes first in file order claim enclave points.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">court_id</span><span class="p">,</span> <span class="n">okres_code</span><span class="p">,</span> <span class="n">rings</span><span class="p">,</span> <span class="p">(</span><span class="n">x0</span><span class="p">,</span> <span class="n">y0</span><span class="p">,</span> <span class="n">x1</span><span class="p">,</span> <span class="n">y1</span><span class="p">)</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">courts</span><span class="p">:</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="n">x0</span> <span class="o">&lt;=</span> <span class="n">px</span> <span class="o">&lt;=</span> <span class="n">x1</span> <span class="ow">and</span> <span class="n">y0</span> <span class="o">&lt;=</span> <span class="n">py</span> <span class="o">&lt;=</span> <span class="n">y1</span><span class="p">):</span>
+                <span class="k">continue</span>
+            <span class="k">if</span> <span class="nb">sum</span><span class="p">(</span><span class="n">_point_in_ring</span><span class="p">(</span><span class="n">px</span><span class="p">,</span> <span class="n">py</span><span class="p">,</span> <span class="n">r</span><span class="p">)</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rings</span><span class="p">)</span> <span class="o">%</span> <span class="mi">2</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">court_id</span><span class="p">,</span> <span class="n">okres_code</span>
+        <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">locate_snapped</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">px</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">py</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">prefer_okres</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+                       <span class="n">tol_m</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">SNAP_TOL_M</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;:meth:`locate`, but a near miss against *prefer_okres* is pulled back into it.</span>
+
+<span class="sd">        Returns ``(court_id, okres_code, snapped)``.</span>
+
+<span class="sd">        The MPIDR outlines are an empire-wide generalisation, so a city border can sit a</span>
+<span class="sd">        kilometre from where it ran. Prague is the case that made this necessary: the</span>
+<span class="sd">        polygon labelled *Prag/Praha St.* is the right size (20.8 km² against the city&#39;s</span>
+<span class="sd">        ~21 km²) but its eastern edge is drawn ~500 m too far west, so the single Wikidata</span>
+<span class="sd">        coordinate every ``Praha`` birth carries — Old Town Square, 50.0875 N 14.4214 E,</span>
+<span class="sd">        unambiguously inside the 1910 city — fell into neighbouring Královské Vinohrady.</span>
+<span class="sd">        All 2,691 court-placed Prague births went there and the Praha court polygon</span>
+<span class="sd">        received **none**.</span>
+
+<span class="sd">        The repair only fires where the name evidence and the geometry disagree *and* the</span>
+<span class="sd">        point is within ``tol_m`` of the named okres — the signature of a boundary drawn</span>
+<span class="sd">        slightly wrong. A disagreement further out is a disagreement about which place this</span>
+<span class="sd">        is, not about where a line runs, and is left standing so the layer keeps its value</span>
+<span class="sd">        as a cross-check. Snapped rows are flagged, so any use of the court layer as</span>
+<span class="sd">        independent evidence can drop them.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">court_id</span><span class="p">,</span> <span class="n">okres_code</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">locate</span><span class="p">(</span><span class="n">px</span><span class="p">,</span> <span class="n">py</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">prefer_okres</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">prefer_okres</span><span class="p">):</span>
+            <span class="k">return</span> <span class="n">court_id</span><span class="p">,</span> <span class="n">okres_code</span><span class="p">,</span> <span class="kc">False</span>
+        <span class="n">prefer_okres</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">prefer_okres</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">okres_code</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">r</span><span class="p">,</span> <span class="n">d</span> <span class="o">=</span> <span class="n">okres_code</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;-&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nb">int</span><span class="p">(</span><span class="n">r</span><span class="p">)</span> <span class="o">*</span> <span class="mi">1000</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">d</span><span class="p">)</span> <span class="o">==</span> <span class="n">prefer_okres</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">court_id</span><span class="p">,</span> <span class="n">okres_code</span><span class="p">,</span> <span class="kc">False</span>        <span class="c1"># geometry already agrees</span>
+
+        <span class="n">best</span><span class="p">,</span> <span class="n">best_d</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">tol_m</span>
+        <span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">by_okres</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">prefer_okres</span><span class="p">,</span> <span class="p">[]):</span>
+            <span class="n">_cid</span><span class="p">,</span> <span class="n">_code</span><span class="p">,</span> <span class="n">rings</span><span class="p">,</span> <span class="p">(</span><span class="n">x0</span><span class="p">,</span> <span class="n">y0</span><span class="p">,</span> <span class="n">x1</span><span class="p">,</span> <span class="n">y1</span><span class="p">)</span> <span class="o">=</span> <span class="n">entry</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="n">x0</span> <span class="o">-</span> <span class="n">tol_m</span> <span class="o">&lt;=</span> <span class="n">px</span> <span class="o">&lt;=</span> <span class="n">x1</span> <span class="o">+</span> <span class="n">tol_m</span> <span class="ow">and</span> <span class="n">y0</span> <span class="o">-</span> <span class="n">tol_m</span> <span class="o">&lt;=</span> <span class="n">py</span> <span class="o">&lt;=</span> <span class="n">y1</span> <span class="o">+</span> <span class="n">tol_m</span><span class="p">):</span>
+                <span class="k">continue</span>
+            <span class="n">dist</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">_ring_min_distance</span><span class="p">(</span><span class="n">px</span><span class="p">,</span> <span class="n">py</span><span class="p">,</span> <span class="n">r</span><span class="p">)</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rings</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">dist</span> <span class="o">&lt;=</span> <span class="n">best_d</span><span class="p">:</span>
+                <span class="n">best</span><span class="p">,</span> <span class="n">best_d</span> <span class="o">=</span> <span class="n">entry</span><span class="p">,</span> <span class="n">dist</span>
+        <span class="k">if</span> <span class="n">best</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">court_id</span><span class="p">,</span> <span class="n">okres_code</span><span class="p">,</span> <span class="kc">False</span>
+        <span class="k">return</span> <span class="n">best</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">best</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="kc">True</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">add_court_ids</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">locator</span><span class="p">:</span> <span class="n">CourtLocator</span><span class="p">,</span>
+                  <span class="n">lat_col</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;lat&quot;</span><span class="p">,</span> <span class="n">lon_col</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;lon&quot;</span><span class="p">,</span>
+                  <span class="n">prefix</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">okres_col</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                  <span class="n">tol_m</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">SNAP_TOL_M</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Append ``{prefix}court_id`` (Int64) and ``{prefix}okres_code`` from a spatial lookup.</span>
+
+<span class="sd">    Rows with a missing coordinate — or points outside every Czech-lands court polygon —</span>
+<span class="sd">    get ``&lt;NA&gt;``. Distinct coordinate pairs are located once and broadcast.</span>
+
+<span class="sd">    Pass *okres_col* — the row&#39;s own name-derived okres id — to enable the near-miss repair</span>
+<span class="sd">    described in :meth:`CourtLocator.locate_snapped`; a boolean ``{prefix}court_snapped``</span>
+<span class="sd">    then records which rows it moved. Without it the lookup is pure containment, as before.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">has</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="n">lat_col</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">out</span><span class="p">[</span><span class="n">lon_col</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span>
+    <span class="n">cid</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">out</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+    <span class="n">ocode</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">object</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">out</span><span class="p">)</span>
+    <span class="n">snapped</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">out</span><span class="p">),</span> <span class="nb">bool</span><span class="p">)</span>
+    <span class="n">prefer</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="n">okres_col</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">()</span> <span class="k">if</span> <span class="n">okres_col</span> <span class="ow">and</span> <span class="n">okres_col</span> <span class="ow">in</span> <span class="n">out</span><span class="o">.</span><span class="n">columns</span> <span class="k">else</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="n">has</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+        <span class="n">sub</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">has</span><span class="p">,</span> <span class="p">[</span><span class="n">lon_col</span><span class="p">,</span> <span class="n">lat_col</span><span class="p">]]</span>
+        <span class="n">xs</span><span class="p">,</span> <span class="n">ys</span> <span class="o">=</span> <span class="n">laea_forward</span><span class="p">(</span><span class="n">sub</span><span class="p">[</span><span class="n">lon_col</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span> <span class="n">sub</span><span class="p">[</span><span class="n">lat_col</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">())</span>
+        <span class="c1"># cache by rounded coordinate *and* preferred okres: the same point can legitimately</span>
+        <span class="c1"># resolve differently for two settlements whose names put them in different okresy</span>
+        <span class="n">cache</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">tuple</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="n">pos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">flatnonzero</span><span class="p">(</span><span class="n">has</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">())</span>
+        <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">px</span><span class="p">,</span> <span class="n">py</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">pos</span><span class="p">,</span> <span class="n">xs</span><span class="p">,</span> <span class="n">ys</span><span class="p">):</span>
+            <span class="n">want</span> <span class="o">=</span> <span class="kc">None</span> <span class="k">if</span> <span class="n">prefer</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">prefer</span><span class="p">[</span><span class="n">k</span><span class="p">])</span> <span class="k">else</span> <span class="nb">int</span><span class="p">(</span><span class="n">prefer</span><span class="p">[</span><span class="n">k</span><span class="p">])</span>
+            <span class="n">key</span> <span class="o">=</span> <span class="p">(</span><span class="nb">round</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">px</span><span class="p">),</span> <span class="mi">1</span><span class="p">),</span> <span class="nb">round</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">py</span><span class="p">),</span> <span class="mi">1</span><span class="p">),</span> <span class="n">want</span><span class="p">)</span>
+            <span class="n">hit</span> <span class="o">=</span> <span class="n">cache</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">hit</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">hit</span> <span class="o">=</span> <span class="p">(</span><span class="n">locator</span><span class="o">.</span><span class="n">locate</span><span class="p">(</span><span class="n">px</span><span class="p">,</span> <span class="n">py</span><span class="p">)</span> <span class="o">+</span> <span class="p">(</span><span class="kc">False</span><span class="p">,)</span> <span class="k">if</span> <span class="n">want</span> <span class="ow">is</span> <span class="kc">None</span>
+                       <span class="k">else</span> <span class="n">locator</span><span class="o">.</span><span class="n">locate_snapped</span><span class="p">(</span><span class="n">px</span><span class="p">,</span> <span class="n">py</span><span class="p">,</span> <span class="n">want</span><span class="p">,</span> <span class="n">tol_m</span><span class="p">))</span>
+                <span class="n">cache</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">hit</span>
+            <span class="k">if</span> <span class="n">hit</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">cid</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">hit</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                <span class="n">ocode</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">hit</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+                <span class="n">snapped</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">=</span> <span class="n">hit</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+    <span class="n">out</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">prefix</span><span class="si">}</span><span class="s2">court_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cid</span>
+    <span class="n">out</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">prefix</span><span class="si">}</span><span class="s2">okres_code&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">ocode</span>
+    <span class="c1"># &lt;NA&gt; where there is no court to have snapped: a row with no coordinate, or a point</span>
+    <span class="c1"># outside every polygon, was not &quot;not snapped&quot; — the question did not arise for it.</span>
+    <span class="n">out</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">prefix</span><span class="si">}</span><span class="s2">court_snapped&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">array</span><span class="p">(</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">cid</span><span class="p">),</span> <span class="kc">None</span><span class="p">,</span> <span class="n">snapped</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;boolean&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">add_settlement_courts</span><span class="p">(</span><span class="n">settlements</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+                          <span class="n">locator</span><span class="p">:</span> <span class="n">CourtLocator</span><span class="p">,</span> <span class="n">snap</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+                          <span class="n">tol_m</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">SNAP_TOL_M</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Enrich the settlement crosswalk with its court district (soudní okres) by spatial join.</span>
+
+<span class="sd">    Locates each geocoded settlement (``lat``/``lon``) inside the MPIDR court polygons and attaches</span>
+<span class="sd">    ``court_id`` (Int64) plus the backbone&#39;s ``court_cs`` / ``court_de`` names. Settlements without</span>
+<span class="sd">    coordinates — or points outside every Czech-lands court polygon — get ``&lt;NA&gt;``. The court is a</span>
+<span class="sd">    *sub*-okres unit, so it is the finer geographic key the name-based okres matcher cannot supply.</span>
+
+<span class="sd">    With *snap* (the default) a settlement landing just outside the polygon of its own</span>
+<span class="sd">    ``okres_id`` is pulled back into it — see :meth:`CourtLocator.locate_snapped`. Pass</span>
+<span class="sd">    ``snap=False`` for the raw containment answer, which is what the layer must be reduced</span>
+<span class="sd">    to when it is used as independent evidence about the okres matcher.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">add_court_ids</span><span class="p">(</span><span class="n">settlements</span><span class="p">,</span> <span class="n">locator</span><span class="p">,</span> <span class="n">lat_col</span><span class="o">=</span><span class="s2">&quot;lat&quot;</span><span class="p">,</span> <span class="n">lon_col</span><span class="o">=</span><span class="s2">&quot;lon&quot;</span><span class="p">,</span> <span class="n">prefix</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span>
+                        <span class="n">okres_col</span><span class="o">=</span><span class="s2">&quot;okres_id&quot;</span> <span class="k">if</span> <span class="n">snap</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span> <span class="n">tol_m</span><span class="o">=</span><span class="n">tol_m</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">])</span>           <span class="c1"># parent okres already carried via okres_id</span>
+    <span class="n">cid</span> <span class="o">=</span> <span class="n">districts</span><span class="p">[</span><span class="s2">&quot;court_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>      <span class="c1"># .dbf reader yields str; align to Int64 keys</span>
+    <span class="n">court_cs</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">cid</span><span class="p">,</span> <span class="n">districts</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_cs&quot;</span><span class="p">]))</span>
+    <span class="n">court_de</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">cid</span><span class="p">,</span> <span class="n">districts</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_de&quot;</span><span class="p">]))</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;court_cs&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;court_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">court_cs</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;court_de&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;court_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">court_de</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">settlement_court_report</span><span class="p">(</span><span class="n">settlements</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Print court-district fill rate on the enriched settlement crosswalk.&quot;&quot;&quot;</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">settlements</span><span class="p">)</span>
+    <span class="n">geo</span> <span class="o">=</span> <span class="n">settlements</span><span class="p">[</span><span class="s2">&quot;lat&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="k">if</span> <span class="s2">&quot;lat&quot;</span> <span class="ow">in</span> <span class="n">settlements</span><span class="o">.</span><span class="n">columns</span> <span class="k">else</span> <span class="mi">0</span>
+    <span class="n">has</span> <span class="o">=</span> <span class="n">settlements</span><span class="p">[</span><span class="s2">&quot;court_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Settlement court districts  (settlements = </span><span class="si">{</span><span class="n">n</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  geocoded (lat/lon):   </span><span class="si">{</span><span class="n">geo</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">  (</span><span class="si">{</span><span class="n">geo</span><span class="o">/</span><span class="n">n</span><span class="o">*</span><span class="mi">100</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  located in a court:   </span><span class="si">{</span><span class="n">has</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">  (</span><span class="si">{</span><span class="n">has</span><span class="o">/</span><span class="n">n</span><span class="o">*</span><span class="mi">100</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%&quot;</span>
+          <span class="o">+</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot;, </span><span class="si">{</span><span class="n">has</span><span class="o">/</span><span class="n">geo</span><span class="o">*</span><span class="mi">100</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">% of geocoded)&quot;</span> <span class="k">if</span> <span class="n">geo</span> <span class="k">else</span> <span class="s2">&quot;)&quot;</span><span class="p">))</span>
+</pre></div></td></tr></table></div>
+</details>

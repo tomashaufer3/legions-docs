@@ -1,0 +1,599 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Four-pass imputation of the Legion theatre from the raw <a class="cite" data-ref="csol" href="#references" onclick="return bibGo(event)">csol.cz</a> unit/place
+fields. Extracted verbatim from notebook 02 so the cleaning pipeline can call it
+like the other <code>add_*_columns</code> parsers.</p><p class="tldr-facts"><b>Person parsing</b> · v1.1.0 · 167 lines · 4 public functions · 1 constant · used by <code>02_data_cleaning.ipynb</code>, <code>03_visualisation.ipynb</code>, <code>utils/validation/data_checks.py</code> · <code>utils/parsing/theater.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-parsing-theater-extract_theater">extract_theater</a><a class="chip" href="#fn-utils-parsing-theater-theater_selftest">theater_selftest</a><a class="chip" href="#fn-utils-parsing-theater-add_theater_column">add_theater_column</a><a class="chip" href="#fn-utils-parsing-theater-theater_report">theater_report</a><a class="chip const" href="#c-utils-parsing-theater-CITY_THEATER">CITY_THEATER</a></div>
+<h2>How it works</h2><p>Passes (each only fills rows still "Unknown"):
+    1. regex on the enrolment unit (<code>Jednotka v době zařazení</code>);
+    2. regiment-mate majority vote for residual unknowns;
+    3. application-city lookup (<code>Misto podání přihlášky do legií</code>) — US cities map to
+       France, where the Czech-American volunteers served (v1.1.0);
+    4. regex on the transfer unit (<code>Převelen k útvaru</code>).</p>
+<p>Labels: Russia / Italy / France / Serbia/Balkans / Britain/Dominions /
+Post-war (ČSA) / Unknown.</p>
+<h4>Usage</h4>
+<pre><code>from utils.parsing.theater import add_theater_column, theater_report
+df = add_theater_column(df)        # adds "theater"
+theater_report(df)
+</code></pre>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-parsing-theater-extract_theater">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">extract_theater</span><span class="p">(</span><span class="n">unit</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<div class="fndoc"><p>Regex classifier on a unit / transfer-unit string (Pass 1 &amp; 4).</p>
+<p>Substring matching is CASE-SENSITIVE by design — that is what keeps the two
+fragile short tokens safe on the observed data: <code>"RA"</code> (Russia) does not fire
+inside lowercase words, and <code>"Fra"</code> (France) is checked before the Russia
+block so "Francie" never reaches <code>"RA"</code>. If the source strings ever change
+shape (e.g. an ALL-CAPS re-scrape), re-validate these two rules first. Note
+also that Pass 2 (regiment-mate majority vote) PROPAGATES any Pass-1 error to
+every unknown-theatre soldier of that regiment — QA new tokens against the
+residual report before adding them.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 56–89 (34 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">56</span>
+<span class="normal">57</span>
+<span class="normal">58</span>
+<span class="normal">59</span>
+<span class="normal">60</span>
+<span class="normal">61</span>
+<span class="normal">62</span>
+<span class="normal">63</span>
+<span class="normal">64</span>
+<span class="normal">65</span>
+<span class="normal">66</span>
+<span class="normal">67</span>
+<span class="normal">68</span>
+<span class="normal">69</span>
+<span class="normal">70</span>
+<span class="normal">71</span>
+<span class="normal">72</span>
+<span class="normal">73</span>
+<span class="normal">74</span>
+<span class="normal">75</span>
+<span class="normal">76</span>
+<span class="normal">77</span>
+<span class="normal">78</span>
+<span class="normal">79</span>
+<span class="normal">80</span>
+<span class="normal">81</span>
+<span class="normal">82</span>
+<span class="normal">83</span>
+<span class="normal">84</span>
+<span class="normal">85</span>
+<span class="normal">86</span>
+<span class="normal">87</span>
+<span class="normal">88</span>
+<span class="normal">89</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">extract_theater</span><span class="p">(</span><span class="n">unit</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Regex classifier on a unit / transfer-unit string (Pass 1 &amp; 4).</span>
+
+<span class="sd">    Substring matching is CASE-SENSITIVE by design — that is what keeps the two</span>
+<span class="sd">    fragile short tokens safe on the observed data: ``&quot;RA&quot;`` (Russia) does not fire</span>
+<span class="sd">    inside lowercase words, and ``&quot;Fra&quot;`` (France) is checked before the Russia</span>
+<span class="sd">    block so &quot;Francie&quot; never reaches ``&quot;RA&quot;``. If the source strings ever change</span>
+<span class="sd">    shape (e.g. an ALL-CAPS re-scrape), re-validate these two rules first. Note</span>
+<span class="sd">    also that Pass 2 (regiment-mate majority vote) PROPAGATES any Pass-1 error to</span>
+<span class="sd">    every unknown-theatre soldier of that regiment — QA new tokens against the</span>
+<span class="sd">    residual report before adding them.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">unit</span><span class="p">):</span>
+        <span class="k">return</span> <span class="s2">&quot;Unknown&quot;</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">unit</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">x</span> <span class="ow">in</span> <span class="n">s</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;Itálii&quot;</span><span class="p">,</span> <span class="s2">&quot;Itá&quot;</span><span class="p">,</span> <span class="s2">&quot;Italská&quot;</span><span class="p">,</span> <span class="s2">&quot;( Li )&quot;</span><span class="p">,</span> <span class="s2">&quot;Li )&quot;</span><span class="p">]):</span>
+        <span class="k">return</span> <span class="s2">&quot;Italy&quot;</span>
+    <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">x</span> <span class="ow">in</span> <span class="n">s</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;Cizinecké legie&quot;</span><span class="p">,</span> <span class="s2">&quot;Fra&quot;</span><span class="p">,</span> <span class="s2">&quot;( CL )&quot;</span><span class="p">,</span> <span class="s2">&quot;Armée polonaise&quot;</span><span class="p">]):</span>
+        <span class="k">return</span> <span class="s2">&quot;France&quot;</span>
+    <span class="c1"># &quot;Polská&quot; (the Polish Legion) is deliberately NOT here any more. It sent all 41 Polish-</span>
+    <span class="c1"># Legion records to Serbia/Balkans, whose units are Haller&#39;s Armée polonaise (France) and</span>
+    <span class="c1"># Russian formations (Dutova armáda, Krymský pl.); none is Balkan. Those records now take</span>
+    <span class="c1"># whatever the other cues and passes say, and Unknown where nothing does.</span>
+    <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">x</span> <span class="ow">in</span> <span class="n">s</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;Srbská&quot;</span><span class="p">,</span> <span class="s2">&quot;Rumunská&quot;</span><span class="p">]):</span>
+        <span class="k">return</span> <span class="s2">&quot;Serbia/Balkans&quot;</span>
+    <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">x</span> <span class="ow">in</span> <span class="n">s</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;Rus&quot;</span><span class="p">,</span> <span class="s2">&quot;Kornilo&quot;</span><span class="p">,</span> <span class="s2">&quot;RA&quot;</span><span class="p">,</span> <span class="s2">&quot;Česká družina&quot;</span><span class="p">,</span>
+                            <span class="s2">&quot;( Lr )&quot;</span><span class="p">,</span> <span class="s2">&quot;Lr )&quot;</span><span class="p">]):</span>
+        <span class="k">return</span> <span class="s2">&quot;Russia&quot;</span>
+    <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">x</span> <span class="ow">in</span> <span class="n">s</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;Britská&quot;</span><span class="p">,</span> <span class="s2">&quot;Kanadská&quot;</span><span class="p">,</span> <span class="s2">&quot;Americká&quot;</span><span class="p">,</span> <span class="s2">&quot;Australská&quot;</span><span class="p">,</span>
+                            <span class="s2">&quot;Fusiliers&quot;</span><span class="p">,</span> <span class="s2">&quot;K.O.Y.L&quot;</span><span class="p">,</span> <span class="s2">&quot;Lincolns&quot;</span><span class="p">,</span> <span class="s2">&quot;Battalion&quot;</span><span class="p">]):</span>
+        <span class="k">return</span> <span class="s2">&quot;Britain/Dominions&quot;</span>
+    <span class="k">if</span> <span class="s2">&quot;ČSA&quot;</span> <span class="ow">in</span> <span class="n">s</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">&quot;Post-war (ČSA)&quot;</span>
+    <span class="k">return</span> <span class="s2">&quot;Unknown&quot;</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-theater-theater_selftest">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">theater_selftest</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span></pre>
+<div class="fndoc"><p>Behaviours that shipped wrong once; empty list means all hold.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/validation/data_checks.py</code></p>
+<details><summary>source · lines 101–108 (8 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">theater_selftest</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Behaviours that shipped wrong once; empty list means all hold.&quot;&quot;&quot;</span>
+    <span class="n">fails</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;extract_theater(</span><span class="si">{</span><span class="n">u</span><span class="si">!r}</span><span class="s2">) = </span><span class="si">{</span><span class="n">extract_theater</span><span class="p">(</span><span class="n">u</span><span class="p">)</span><span class="si">!r}</span><span class="s2">, expected </span><span class="si">{</span><span class="n">want</span><span class="si">!r}</span><span class="s2">&quot;</span>
+             <span class="k">for</span> <span class="n">u</span><span class="p">,</span> <span class="n">want</span> <span class="ow">in</span> <span class="n">_SELFTEST</span> <span class="k">if</span> <span class="n">extract_theater</span><span class="p">(</span><span class="n">u</span><span class="p">)</span> <span class="o">!=</span> <span class="n">want</span><span class="p">]</span>
+    <span class="k">for</span> <span class="n">city</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;Chicago&quot;</span><span class="p">,</span> <span class="s2">&quot;Cleveland&quot;</span><span class="p">,</span> <span class="s2">&quot;USA&quot;</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">CITY_THEATER</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">city</span><span class="p">)</span> <span class="o">!=</span> <span class="s2">&quot;France&quot;</span><span class="p">:</span>
+            <span class="n">fails</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;CITY_THEATER[</span><span class="si">{</span><span class="n">city</span><span class="si">!r}</span><span class="s2">] = </span><span class="si">{</span><span class="n">CITY_THEATER</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">city</span><span class="p">)</span><span class="si">!r}</span><span class="s2">, expected &#39;France&#39;&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">fails</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-theater-add_theater_column">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">add_theater_column</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">unit_col</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;Jednotka v době zařazení&#39;</span><span class="p">,</span> <span class="n">app_col</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;Misto podání přihlášky do legií&#39;</span><span class="p">,</span> <span class="n">transfer_col</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;Převelen k útvaru&#39;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Append the four-pass <code>theater</code> column (not modified in place).</p>
+<h4>Args</h4>
+<dl>
+<dt><code>df</code></dt>
+<dd>input DataFrame (raw Czech columns)</dd>
+<dt><code>unit_col</code></dt>
+<dd>enrolment-unit column (Pass 1 + the regiment key of Pass 2)</dd>
+<dt><code>app_col</code></dt>
+<dd>application-place column (Pass 3)</dd>
+<dt><code>transfer_col</code></dt>
+<dd>transfer-unit column (Pass 4)</dd>
+</dl>
+<h4>Returns</h4>
+<p>Copy of <em>df</em> with a <code>theater</code> column.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code></p>
+<details><summary>source · lines 111–156 (46 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">add_theater_column</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+                       <span class="n">unit_col</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Jednotka v době zařazení&quot;</span><span class="p">,</span>
+                       <span class="n">app_col</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Misto podání přihlášky do legií&quot;</span><span class="p">,</span>
+                       <span class="n">transfer_col</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Převelen k útvaru&quot;</span><span class="p">,</span>
+                       <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Append the four-pass ``theater`` column (not modified in place).</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        df:           input DataFrame (raw Czech columns)</span>
+<span class="sd">        unit_col:     enrolment-unit column (Pass 1 + the regiment key of Pass 2)</span>
+<span class="sd">        app_col:      application-place column (Pass 3)</span>
+<span class="sd">        transfer_col: transfer-unit column (Pass 4)</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        Copy of *df* with a ``theater`` column.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+
+    <span class="c1"># Pass 1 — regex on enrolment unit.</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">unit_col</span><span class="p">]</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="n">extract_theater</span><span class="p">)</span>
+
+    <span class="c1"># Pass 2 — regiment-mate majority vote for residual unknowns.</span>
+    <span class="n">regiment_key</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">unit_col</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">extract</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;^([^(]+)&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="n">regiment_theater</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;Unknown&quot;</span><span class="p">]</span>
+        <span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="n">regiment_key</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;Unknown&quot;</span><span class="p">])[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span>
+        <span class="o">.</span><span class="n">agg</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">index</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="p">)</span>
+    <span class="n">unknown_mask</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;Unknown&quot;</span>
+    <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">unknown_mask</span><span class="p">,</span> <span class="s2">&quot;theater&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">regiment_key</span><span class="p">[</span><span class="n">unknown_mask</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">regiment_theater</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;Unknown&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Pass 3 — application city.</span>
+    <span class="n">unknown_mask</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;Unknown&quot;</span>
+    <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">unknown_mask</span><span class="p">,</span> <span class="s2">&quot;theater&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">unknown_mask</span><span class="p">,</span> <span class="n">app_col</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">CITY_THEATER</span><span class="p">)</span>
+    <span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;Unknown&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Pass 4 — transfer unit (same regex as Pass 1).</span>
+    <span class="n">unknown_mask</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;Unknown&quot;</span>
+    <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">unknown_mask</span><span class="p">,</span> <span class="s2">&quot;theater&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">unknown_mask</span><span class="p">,</span> <span class="n">transfer_col</span><span class="p">]</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="n">extract_theater</span><span class="p">)</span>
+    <span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;Unknown&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">df</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-theater-theater_report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">theater_report</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span></pre>
+<div class="fndoc"><p>Print the theatre distribution.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code></p>
+<details><summary>source · lines 159–167 (9 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">theater_report</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Print the theatre distribution.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="s2">&quot;theater&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;No theater column. Run add_theater_column() first.&quot;</span><span class="p">)</span>
+        <span class="k">return</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Theatre distribution (</span><span class="si">{</span><span class="n">n</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> records):&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">t</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">t</span><span class="si">:</span><span class="s2">&lt;18</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">c</span><span class="si">:</span><span class="s2">&gt;7,</span><span class="si">}</span><span class="s2">  (</span><span class="si">{</span><span class="n">c</span><span class="o">/</span><span class="n">n</span><span class="si">:</span><span class="s2">.1%</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-parsing-theater-CITY_THEATER"><pre class="sig">CITY_THEATER<span class="kind">dict · 32 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;Omsk&#39;</span><span class="p">:</span> <span class="s1">&#39;Russia&#39;</span><span class="p">,</span> <span class="s1">&#39;Vladivostok&#39;</span><span class="p">:</span> <span class="s1">&#39;Russia&#39;</span><span class="p">,</span> <span class="s1">&#39;Taganrog&#39;</span><span class="p">:</span> <span class="s1">&#39;Russia&#39;</span><span class="p">,</span> <span class="s1">&#39;Kyjev&#39;</span><span class="p">:</span> <span class="s1">&#39;Russia&#39;</span><span class="p">,</span> <span class="s1">&#39;Charbin&#39;</span><span class="p">:</span> <span class="s1">&#39;Russia&#39;</span><span class="p">,</span> <span class="s1">&#39;Taškent&#39;</span><span class="p">:</span> <span class="s1">&#39;Russia&#39;</span><span class="p">,</span> <span class="s1">&#39;Irkutsk&#39;</span><span class="p">:</span> <span class="s1">&#39;Russia&#39;</span><span class="p">,</span> <span class="s1">&#39;První Říčka&#39;</span><span class="p">:</span> <span class="s1">&#39;Russia&#39;</span><span class="p">,</span> <span class="s1">&#39;Tomsk&#39;</span><span class="p">:</span> <span class="s1">&#39;Russia&#39;</span><span class="p">,</span> <span class="s1">&#39;Novonikolajevsk&#39;</span><span class="p">:</span> <span class="s1">&#39;Russia&#39;</span><span class="p">,</span> <span class="s1">&#39;Cicikar&#39;</span><span class="p">:</span> <span class="s1">&#39;Russia&#39;</span><span class="p">,</span> <span class="s1">&#39;Čičikar&#39;</span><span class="p">:</span> <span class="s1">&#39;Russia&#39;</span><span class="p">,</span> <span class="s1">&#39;Darnice&#39;</span><span class="p">:</span> <span class="s1">&#39;Russia&#39;</span><span class="p">,</span> <span class="s1">&#39;Dárnice&#39;</span><span class="p">:</span> <span class="s1">&#39;Russia&#39;</span><span class="p">,</span> <span class="s1">&#39;Padula&#39;</span><span class="p">:</span> <span class="s1">&#39;Italy&#39;</span><span class="p">,</span> <span class="s1">&#39;Sulmona&#39;</span><span class="p">:</span> <span class="s1">&#39;Italy&#39;</span><span class="p">,</span> <span class="s1">&#39;Badia di Sulmona&#39;</span><span class="p">:</span> <span class="s1">&#39;Italy&#39;</span><span class="p">,</span> <span class="s1">&#39;Foligno&#39;</span><span class="p">:</span> <span class="s1">&#39;Italy&#39;</span><span class="p">,</span> <span class="s1">&#39;Chicago&#39;</span><span class="p">:</span> <span class="s1">&#39;France&#39;</span><span class="p">,</span> <span class="s1">&#39;Cleveland&#39;</span><span class="p">:</span> <span class="s1">&#39;France&#39;</span><span class="p">,</span> <span class="s1">&#39;New York&#39;</span><span class="p">:</span> <span class="s1">&#39;France&#39;</span><span class="p">,</span> <span class="s1">&#39;Amerika&#39;</span><span class="p">:</span> <span class="s1">&#39;France&#39;</span><span class="p">,</span> <span class="s1">&#39;Pittsburgh&#39;</span><span class="p">:</span> <span class="s1">&#39;France&#39;</span><span class="p">,</span> <span class="s1">&#39;Monessen&#39;</span><span class="p">:</span> <span class="s1">&#39;France&#39;</span><span class="p">,</span> <span class="s1">&#39;Philadelphia&#39;</span><span class="p">:</span> <span class="s1">&#39;France&#39;</span><span class="p">,</span> <span class="s1">&#39;USA&#39;</span><span class="p">:</span> <span class="s1">&#39;France&#39;</span><span class="p">,</span> <span class="s1">&#39;Omaha&#39;</span><span class="p">:</span> <span class="s1">&#39;France&#39;</span><span class="p">,</span> <span class="s1">&#39;Newark&#39;</span><span class="p">:</span> <span class="s1">&#39;France&#39;</span><span class="p">,</span> <span class="s1">&#39;Manessen&#39;</span><span class="p">:</span> <span class="s1">&#39;France&#39;</span><span class="p">,</span> <span class="s1">&#39;Paříž&#39;</span><span class="p">:</span> <span class="s1">&#39;France&#39;</span><span class="p">,</span> <span class="s1">&#39;Paris&#39;</span><span class="p">:</span> <span class="s1">&#39;France&#39;</span><span class="p">,</span> <span class="s1">&#39;Pariz&#39;</span><span class="p">:</span> <span class="s1">&#39;France&#39;</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<h2>Used by</h2><p><code>02_data_cleaning.ipynb</code> <code>03_visualisation.ipynb</code> <code>utils/validation/data_checks.py</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/parsing/theater.py · 167 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">theater.py — Theatre-of-service classifier (legionnaire dataset)</span>
+<span class="sd">================================================================</span>
+<span class="sd">Four-pass imputation of the Legion theatre from the raw csol.cz unit/place</span>
+<span class="sd">fields. Extracted verbatim from notebook 02 so the cleaning pipeline can call it</span>
+<span class="sd">like the other ``add_*_columns`` parsers.</span>
+
+<span class="sd">Passes (each only fills rows still &quot;Unknown&quot;):</span>
+<span class="sd">    1. regex on the enrolment unit (``Jednotka v době zařazení``);</span>
+<span class="sd">    2. regiment-mate majority vote for residual unknowns;</span>
+<span class="sd">    3. application-city lookup (``Misto podání přihlášky do legií``) — US cities map to</span>
+<span class="sd">       France, where the Czech-American volunteers served (v1.1.0);</span>
+<span class="sd">    4. regex on the transfer unit (``Převelen k útvaru``).</span>
+
+<span class="sd">Labels: Russia / Italy / France / Serbia/Balkans / Britain/Dominions /</span>
+<span class="sd">Post-war (ČSA) / Unknown.</span>
+
+<span class="sd">Usage</span>
+<span class="sd">-----</span>
+<span class="sd">    from utils.parsing.theater import add_theater_column, theater_report</span>
+<span class="sd">    df = add_theater_column(df)        # adds &quot;theater&quot;</span>
+<span class="sd">    theater_report(df)</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.1.0&quot;</span>   <span class="c1"># US applicants -&gt; France; no Polish -&gt; Balkans rule (audit 2026-09-22)</span>
+
+<span class="c1"># Application-city → theatre lookup (Pass 3).</span>
+<span class="n">CITY_THEATER</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="c1"># Russia</span>
+    <span class="s2">&quot;Omsk&quot;</span><span class="p">:</span> <span class="s2">&quot;Russia&quot;</span><span class="p">,</span> <span class="s2">&quot;Vladivostok&quot;</span><span class="p">:</span> <span class="s2">&quot;Russia&quot;</span><span class="p">,</span> <span class="s2">&quot;Taganrog&quot;</span><span class="p">:</span> <span class="s2">&quot;Russia&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Kyjev&quot;</span><span class="p">:</span> <span class="s2">&quot;Russia&quot;</span><span class="p">,</span> <span class="s2">&quot;Charbin&quot;</span><span class="p">:</span> <span class="s2">&quot;Russia&quot;</span><span class="p">,</span> <span class="s2">&quot;Taškent&quot;</span><span class="p">:</span> <span class="s2">&quot;Russia&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Irkutsk&quot;</span><span class="p">:</span> <span class="s2">&quot;Russia&quot;</span><span class="p">,</span> <span class="s2">&quot;První Říčka&quot;</span><span class="p">:</span> <span class="s2">&quot;Russia&quot;</span><span class="p">,</span> <span class="s2">&quot;Tomsk&quot;</span><span class="p">:</span> <span class="s2">&quot;Russia&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Novonikolajevsk&quot;</span><span class="p">:</span> <span class="s2">&quot;Russia&quot;</span><span class="p">,</span> <span class="s2">&quot;Cicikar&quot;</span><span class="p">:</span> <span class="s2">&quot;Russia&quot;</span><span class="p">,</span> <span class="s2">&quot;Čičikar&quot;</span><span class="p">:</span> <span class="s2">&quot;Russia&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Darnice&quot;</span><span class="p">:</span> <span class="s2">&quot;Russia&quot;</span><span class="p">,</span> <span class="s2">&quot;Dárnice&quot;</span><span class="p">:</span> <span class="s2">&quot;Russia&quot;</span><span class="p">,</span>
+    <span class="c1"># Italy</span>
+    <span class="s2">&quot;Padula&quot;</span><span class="p">:</span> <span class="s2">&quot;Italy&quot;</span><span class="p">,</span> <span class="s2">&quot;Sulmona&quot;</span><span class="p">:</span> <span class="s2">&quot;Italy&quot;</span><span class="p">,</span> <span class="s2">&quot;Badia di Sulmona&quot;</span><span class="p">:</span> <span class="s2">&quot;Italy&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Foligno&quot;</span><span class="p">:</span> <span class="s2">&quot;Italy&quot;</span><span class="p">,</span>
+    <span class="c1"># USA volunteers — the Czech-American recruits went to the Czechoslovak army in</span>
+    <span class="c1"># **France**. Until v1.1.0 these cities pointed at Britain/Dominions; in the data itself,</span>
+    <span class="c1"># of the US applicants whose own unit names a theatre, 1,659 served in France and 26 in a</span>
+    <span class="c1"># British or Dominion unit (98.4 %), so the 248 unit-less ones were imputed against the</span>
+    <span class="c1"># evidence of their own peers (audit 2026-09-22 §A5, DECISIONS D-60).</span>
+    <span class="s2">&quot;Chicago&quot;</span><span class="p">:</span> <span class="s2">&quot;France&quot;</span><span class="p">,</span> <span class="s2">&quot;Cleveland&quot;</span><span class="p">:</span> <span class="s2">&quot;France&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;New York&quot;</span><span class="p">:</span> <span class="s2">&quot;France&quot;</span><span class="p">,</span> <span class="s2">&quot;Amerika&quot;</span><span class="p">:</span> <span class="s2">&quot;France&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Pittsburgh&quot;</span><span class="p">:</span> <span class="s2">&quot;France&quot;</span><span class="p">,</span> <span class="s2">&quot;Monessen&quot;</span><span class="p">:</span> <span class="s2">&quot;France&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Philadelphia&quot;</span><span class="p">:</span> <span class="s2">&quot;France&quot;</span><span class="p">,</span> <span class="s2">&quot;USA&quot;</span><span class="p">:</span> <span class="s2">&quot;France&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Omaha&quot;</span><span class="p">:</span> <span class="s2">&quot;France&quot;</span><span class="p">,</span> <span class="s2">&quot;Newark&quot;</span><span class="p">:</span> <span class="s2">&quot;France&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Manessen&quot;</span><span class="p">:</span> <span class="s2">&quot;France&quot;</span><span class="p">,</span>
+    <span class="c1"># France</span>
+    <span class="s2">&quot;Paříž&quot;</span><span class="p">:</span> <span class="s2">&quot;France&quot;</span><span class="p">,</span> <span class="s2">&quot;Paris&quot;</span><span class="p">:</span> <span class="s2">&quot;France&quot;</span><span class="p">,</span> <span class="s2">&quot;Pariz&quot;</span><span class="p">:</span> <span class="s2">&quot;France&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">extract_theater</span><span class="p">(</span><span class="n">unit</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Regex classifier on a unit / transfer-unit string (Pass 1 &amp; 4).</span>
+
+<span class="sd">    Substring matching is CASE-SENSITIVE by design — that is what keeps the two</span>
+<span class="sd">    fragile short tokens safe on the observed data: ``&quot;RA&quot;`` (Russia) does not fire</span>
+<span class="sd">    inside lowercase words, and ``&quot;Fra&quot;`` (France) is checked before the Russia</span>
+<span class="sd">    block so &quot;Francie&quot; never reaches ``&quot;RA&quot;``. If the source strings ever change</span>
+<span class="sd">    shape (e.g. an ALL-CAPS re-scrape), re-validate these two rules first. Note</span>
+<span class="sd">    also that Pass 2 (regiment-mate majority vote) PROPAGATES any Pass-1 error to</span>
+<span class="sd">    every unknown-theatre soldier of that regiment — QA new tokens against the</span>
+<span class="sd">    residual report before adding them.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">unit</span><span class="p">):</span>
+        <span class="k">return</span> <span class="s2">&quot;Unknown&quot;</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">unit</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">x</span> <span class="ow">in</span> <span class="n">s</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;Itálii&quot;</span><span class="p">,</span> <span class="s2">&quot;Itá&quot;</span><span class="p">,</span> <span class="s2">&quot;Italská&quot;</span><span class="p">,</span> <span class="s2">&quot;( Li )&quot;</span><span class="p">,</span> <span class="s2">&quot;Li )&quot;</span><span class="p">]):</span>
+        <span class="k">return</span> <span class="s2">&quot;Italy&quot;</span>
+    <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">x</span> <span class="ow">in</span> <span class="n">s</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;Cizinecké legie&quot;</span><span class="p">,</span> <span class="s2">&quot;Fra&quot;</span><span class="p">,</span> <span class="s2">&quot;( CL )&quot;</span><span class="p">,</span> <span class="s2">&quot;Armée polonaise&quot;</span><span class="p">]):</span>
+        <span class="k">return</span> <span class="s2">&quot;France&quot;</span>
+    <span class="c1"># &quot;Polská&quot; (the Polish Legion) is deliberately NOT here any more. It sent all 41 Polish-</span>
+    <span class="c1"># Legion records to Serbia/Balkans, whose units are Haller&#39;s Armée polonaise (France) and</span>
+    <span class="c1"># Russian formations (Dutova armáda, Krymský pl.); none is Balkan. Those records now take</span>
+    <span class="c1"># whatever the other cues and passes say, and Unknown where nothing does.</span>
+    <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">x</span> <span class="ow">in</span> <span class="n">s</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;Srbská&quot;</span><span class="p">,</span> <span class="s2">&quot;Rumunská&quot;</span><span class="p">]):</span>
+        <span class="k">return</span> <span class="s2">&quot;Serbia/Balkans&quot;</span>
+    <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">x</span> <span class="ow">in</span> <span class="n">s</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;Rus&quot;</span><span class="p">,</span> <span class="s2">&quot;Kornilo&quot;</span><span class="p">,</span> <span class="s2">&quot;RA&quot;</span><span class="p">,</span> <span class="s2">&quot;Česká družina&quot;</span><span class="p">,</span>
+                            <span class="s2">&quot;( Lr )&quot;</span><span class="p">,</span> <span class="s2">&quot;Lr )&quot;</span><span class="p">]):</span>
+        <span class="k">return</span> <span class="s2">&quot;Russia&quot;</span>
+    <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">x</span> <span class="ow">in</span> <span class="n">s</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;Britská&quot;</span><span class="p">,</span> <span class="s2">&quot;Kanadská&quot;</span><span class="p">,</span> <span class="s2">&quot;Americká&quot;</span><span class="p">,</span> <span class="s2">&quot;Australská&quot;</span><span class="p">,</span>
+                            <span class="s2">&quot;Fusiliers&quot;</span><span class="p">,</span> <span class="s2">&quot;K.O.Y.L&quot;</span><span class="p">,</span> <span class="s2">&quot;Lincolns&quot;</span><span class="p">,</span> <span class="s2">&quot;Battalion&quot;</span><span class="p">]):</span>
+        <span class="k">return</span> <span class="s2">&quot;Britain/Dominions&quot;</span>
+    <span class="k">if</span> <span class="s2">&quot;ČSA&quot;</span> <span class="ow">in</span> <span class="n">s</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">&quot;Post-war (ČSA)&quot;</span>
+    <span class="k">return</span> <span class="s2">&quot;Unknown&quot;</span>
+
+
+<span class="n">_SELFTEST</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">],</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="p">(</span><span class="s2">&quot;33.p.pl. ( Francouská armáda )&quot;</span><span class="p">,</span> <span class="s2">&quot;France&quot;</span><span class="p">),</span>
+    <span class="p">(</span><span class="s2">&quot;Armée polonaise ( Polská legie )&quot;</span><span class="p">,</span> <span class="s2">&quot;France&quot;</span><span class="p">),</span>
+    <span class="p">(</span><span class="s2">&quot;( Polská legie )&quot;</span><span class="p">,</span> <span class="s2">&quot;Unknown&quot;</span><span class="p">),</span>
+    <span class="p">(</span><span class="s2">&quot;1.stř.pl. ( Čs. legie v Rusku )&quot;</span><span class="p">,</span> <span class="s2">&quot;Russia&quot;</span><span class="p">),</span>
+    <span class="p">(</span><span class="s2">&quot;Royal Fusiliers (R.F.) ( Britská armáda )&quot;</span><span class="p">,</span> <span class="s2">&quot;Britain/Dominions&quot;</span><span class="p">),</span>
+<span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">theater_selftest</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Behaviours that shipped wrong once; empty list means all hold.&quot;&quot;&quot;</span>
+    <span class="n">fails</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;extract_theater(</span><span class="si">{</span><span class="n">u</span><span class="si">!r}</span><span class="s2">) = </span><span class="si">{</span><span class="n">extract_theater</span><span class="p">(</span><span class="n">u</span><span class="p">)</span><span class="si">!r}</span><span class="s2">, expected </span><span class="si">{</span><span class="n">want</span><span class="si">!r}</span><span class="s2">&quot;</span>
+             <span class="k">for</span> <span class="n">u</span><span class="p">,</span> <span class="n">want</span> <span class="ow">in</span> <span class="n">_SELFTEST</span> <span class="k">if</span> <span class="n">extract_theater</span><span class="p">(</span><span class="n">u</span><span class="p">)</span> <span class="o">!=</span> <span class="n">want</span><span class="p">]</span>
+    <span class="k">for</span> <span class="n">city</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;Chicago&quot;</span><span class="p">,</span> <span class="s2">&quot;Cleveland&quot;</span><span class="p">,</span> <span class="s2">&quot;USA&quot;</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">CITY_THEATER</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">city</span><span class="p">)</span> <span class="o">!=</span> <span class="s2">&quot;France&quot;</span><span class="p">:</span>
+            <span class="n">fails</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;CITY_THEATER[</span><span class="si">{</span><span class="n">city</span><span class="si">!r}</span><span class="s2">] = </span><span class="si">{</span><span class="n">CITY_THEATER</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">city</span><span class="p">)</span><span class="si">!r}</span><span class="s2">, expected &#39;France&#39;&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">fails</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">add_theater_column</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+                       <span class="n">unit_col</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Jednotka v době zařazení&quot;</span><span class="p">,</span>
+                       <span class="n">app_col</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Misto podání přihlášky do legií&quot;</span><span class="p">,</span>
+                       <span class="n">transfer_col</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Převelen k útvaru&quot;</span><span class="p">,</span>
+                       <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Append the four-pass ``theater`` column (not modified in place).</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        df:           input DataFrame (raw Czech columns)</span>
+<span class="sd">        unit_col:     enrolment-unit column (Pass 1 + the regiment key of Pass 2)</span>
+<span class="sd">        app_col:      application-place column (Pass 3)</span>
+<span class="sd">        transfer_col: transfer-unit column (Pass 4)</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        Copy of *df* with a ``theater`` column.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+
+    <span class="c1"># Pass 1 — regex on enrolment unit.</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">unit_col</span><span class="p">]</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="n">extract_theater</span><span class="p">)</span>
+
+    <span class="c1"># Pass 2 — regiment-mate majority vote for residual unknowns.</span>
+    <span class="n">regiment_key</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">unit_col</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">extract</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;^([^(]+)&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="n">regiment_theater</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;Unknown&quot;</span><span class="p">]</span>
+        <span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="n">regiment_key</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;Unknown&quot;</span><span class="p">])[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span>
+        <span class="o">.</span><span class="n">agg</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">index</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="p">)</span>
+    <span class="n">unknown_mask</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;Unknown&quot;</span>
+    <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">unknown_mask</span><span class="p">,</span> <span class="s2">&quot;theater&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">regiment_key</span><span class="p">[</span><span class="n">unknown_mask</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">regiment_theater</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;Unknown&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Pass 3 — application city.</span>
+    <span class="n">unknown_mask</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;Unknown&quot;</span>
+    <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">unknown_mask</span><span class="p">,</span> <span class="s2">&quot;theater&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">unknown_mask</span><span class="p">,</span> <span class="n">app_col</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">CITY_THEATER</span><span class="p">)</span>
+    <span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;Unknown&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Pass 4 — transfer unit (same regex as Pass 1).</span>
+    <span class="n">unknown_mask</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;Unknown&quot;</span>
+    <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">unknown_mask</span><span class="p">,</span> <span class="s2">&quot;theater&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">unknown_mask</span><span class="p">,</span> <span class="n">transfer_col</span><span class="p">]</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="n">extract_theater</span><span class="p">)</span>
+    <span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;Unknown&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">df</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">theater_report</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Print the theatre distribution.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="s2">&quot;theater&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;No theater column. Run add_theater_column() first.&quot;</span><span class="p">)</span>
+        <span class="k">return</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Theatre distribution (</span><span class="si">{</span><span class="n">n</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> records):&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">t</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theater&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">t</span><span class="si">:</span><span class="s2">&lt;18</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">c</span><span class="si">:</span><span class="s2">&gt;7,</span><span class="si">}</span><span class="s2">  (</span><span class="si">{</span><span class="n">c</span><span class="o">/</span><span class="n">n</span><span class="si">:</span><span class="s2">.1%</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>

@@ -1,0 +1,1305 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Reconcile transcribed 1910 register blocks against the okres-level census.</p><p class="tldr-facts"><b>1910 register</b> · v0.2.0 · 361 lines · 8 public functions · 5 constants · used by <code>utils/lexikon_1910/run_lexikon_1910_pilot.py</code> · <code>utils/lexikon_1910/lexikon_1910_census.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_census-is_summary_row">is_summary_row</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_census-Reconciliation">Reconciliation</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_census-register_totals">register_totals</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_census-census_targets">census_targets</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_census-house_candidates">house_candidates</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_census-reconcile">reconcile</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_census-diagnose">diagnose</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_census-lexikon_1910_census_report">lexikon_1910_census_report</a><a class="chip const" href="#c-utils-lexikon_1910-lexikon_1910_census-CONFESSION_MAP">CONFESSION_MAP</a><a class="chip const" href="#c-utils-lexikon_1910-lexikon_1910_census-LANGUAGE_MAP">LANGUAGE_MAP</a><a class="chip const" href="#c-utils-lexikon_1910-lexikon_1910_census-DIRECT_MAP">DIRECT_MAP</a><a class="chip const" href="#c-utils-lexikon_1910-lexikon_1910_census-HOUSE_BANDS">HOUSE_BANDS</a><a class="chip const" href="#c-utils-lexikon_1910-lexikon_1910_census-NOT_IN_CENSUS">NOT_IN_CENSUS</a></div>
+<h2>How it works</h2><p>The register's own identities — sexes to total, confessions to total, languages
+plus foreigners to total, settlements to their municipality — are all <em>internal</em>.
+They are strong, but they share one blind spot: they cannot see a municipality the
+parser never emitted, or a block it invented. An okres that is missing three
+villages satisfies every one of them, because each surviving row is individually
+consistent. Nothing inside the page can detect a row that is not on it.</p>
+<p>This module closes that gap by summing the transcribed municipality rows across a
+whole okres and comparing the totals to <code>census_okres_1910</code>, which reports the
+same 1910 enumeration at okres level from the <a class="cite" data-ref="rumpler_seger_2010" href="#references" onclick="return bibGo(event)">Rumpler-Seger</a> workbooks. Where the
+two disagree, either the transcription lost or duplicated a row, or the confession
+grouping below is wrong — and the two are told apart by <em>how</em> they disagree: a lost
+row is a deficit in every column at once, a bad grouping is an exact offset in one.</p>
+<p><strong>This is not independent evidence about 1910.</strong> Both sides descend from the same
+census, so agreement validates our <em>reading</em> of the register, not the register
+itself. That is exactly what is wanted here, but it means the reconciliation must
+never be cited as corroboration of the census.</p>
+<p>Two things about the comparison need stating rather than assuming:</p>
+<ul>
+<li><strong>Only municipality rows are summed.</strong> Settlements are subdivisions of their
+  municipality and are already counted in it — the same double-count that invariant
+  I4 exists to check. Summing both would inflate every total by roughly a factor of
+  two and would do it <em>consistently</em>, which is the kind of error that looks like a
+  result.</li>
+<li><strong>It needs a complete okres.</strong> A partial okres under-sums by construction, so a
+  run that covers half a district would report a spurious deficit in every column.
+  Coverage is therefore a precondition, checked against the anchoring, not a
+  caveat in the output.</li>
+</ul>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_census-is_summary_row">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">is_summary_row</span><span class="p">(</span><span class="n">row</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span></pre>
+<div class="fndoc"><p>Is this a district aggregate rather than a municipality?</p>
+<p>Delegates to <code>utils.lexikon_1910.lexikon_1910.Row.is_summary</code>, which is where
+the rule now lives: <code>segment_blocks</code> drops these rows before a block is ever
+built, so in the normal pipeline this finds nothing. It stays as a guard for
+callers that assemble blocks some other way — a summary row reaching a sum adds
+a whole district back into itself, which cost a factor of four on okres
+Kraslice before it was caught, and that is worth one cheap check.</p>
+<p>Keeping a second regex here instead would be the more dangerous option: two
+copies of one rule drift, and the copy that stops matching fails silently by
+over-counting rather than by raising.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 41–57 (17 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">41</span>
+<span class="normal">42</span>
+<span class="normal">43</span>
+<span class="normal">44</span>
+<span class="normal">45</span>
+<span class="normal">46</span>
+<span class="normal">47</span>
+<span class="normal">48</span>
+<span class="normal">49</span>
+<span class="normal">50</span>
+<span class="normal">51</span>
+<span class="normal">52</span>
+<span class="normal">53</span>
+<span class="normal">54</span>
+<span class="normal">55</span>
+<span class="normal">56</span>
+<span class="normal">57</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">is_summary_row</span><span class="p">(</span><span class="n">row</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Is this a district aggregate rather than a municipality?</span>
+
+<span class="sd">    Delegates to :attr:`~utils.lexikon_1910.lexikon_1910.Row.is_summary`, which is where</span>
+<span class="sd">    the rule now lives: ``segment_blocks`` drops these rows before a block is ever</span>
+<span class="sd">    built, so in the normal pipeline this finds nothing. It stays as a guard for</span>
+<span class="sd">    callers that assemble blocks some other way — a summary row reaching a sum adds</span>
+<span class="sd">    a whole district back into itself, which cost a factor of four on okres</span>
+<span class="sd">    Kraslice before it was caught, and that is worth one cheap check.</span>
+
+<span class="sd">    Keeping a second regex here instead would be the more dangerous option: two</span>
+<span class="sd">    copies of one rule drift, and the copy that stops matching fails silently by</span>
+<span class="sd">    over-counting rather than by raising.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910</span> <span class="k">as</span> <span class="n">lx</span>
+
+    <span class="k">return</span> <span class="n">row</span><span class="o">.</span><span class="n">is_summary</span> <span class="ow">or</span> <span class="nb">bool</span><span class="p">(</span><span class="n">lx</span><span class="o">.</span><span class="n">TOTAL_ROW_RE</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_census-Reconciliation">
+<pre class="sig"><span class="k">class</span><span class="w"> </span><span class="nc">Reconciliation</span></pre>
+<div class="fndoc"><p>What one okres reconciled to, column by column.</p></div>
+<p class="calls warn">No call site found in the notebooks or <code>utils/</code> — possibly superseded or reserved for interactive use.</p>
+<details><summary>source · lines 127–149 (23 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">Reconciliation</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;What one okres reconciled to, column by column.&quot;&quot;&quot;</span>
+
+    <span class="n">okres_id</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">okres_cs</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">complete</span><span class="p">:</span> <span class="nb">bool</span>
+    <span class="n">n_blocks</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">n_expected</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="c1">#: Distinct known obce actually anchored. This, not ``n_blocks``, is what</span>
+    <span class="c1">#: coverage means: a page can carry more blocks than the okres has obce (a</span>
+    <span class="c1">#: settlement row wrongly promoted) while still being short of real ones, so</span>
+    <span class="c1">#: counting blocks would call an incomplete okres complete.</span>
+    <span class="n">n_found</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="c1">#: District summary rows excluded from the sums. Never zero on a complete</span>
+    <span class="c1">#: okres — the register always opens one — so a zero here on a full district</span>
+    <span class="c1">#: means the detector missed them and the totals are inflated.</span>
+    <span class="n">n_summary</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">findings</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
+    <span class="n">unreadable</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">dict</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">missing</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">max</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_expected</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_found</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_census-register_totals">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">register_totals</span><span class="p">(</span><span class="n">blocks</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="nb">int</span><span class="p">]</span></pre>
+<div class="fndoc"><p>Sum the municipality rows of an okres, column by column.</p>
+<p>Returns <code>(totals, unreadable, n_summary_skipped)</code>. Two kinds of row are
+excluded and both would otherwise double-count: settlements, which are already
+counted inside their municipality, and district summary rows, which are already
+counted across all of them.</p>
+<p>A column with any unreadable cell still reports a total, but the count of cells
+that could not be read travels beside it — a sum that silently skipped nine bad
+cells is not a total, and a reconciliation that treats it as one would report
+the transcription's own gaps as a census disagreement.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 152–182 (31 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">register_totals</span><span class="p">(</span><span class="n">blocks</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="nb">int</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Sum the municipality rows of an okres, column by column.</span>
+
+<span class="sd">    Returns ``(totals, unreadable, n_summary_skipped)``. Two kinds of row are</span>
+<span class="sd">    excluded and both would otherwise double-count: settlements, which are already</span>
+<span class="sd">    counted inside their municipality, and district summary rows, which are already</span>
+<span class="sd">    counted across all of them.</span>
+
+<span class="sd">    A column with any unreadable cell still reports a total, but the count of cells</span>
+<span class="sd">    that could not be read travels beside it — a sum that silently skipped nine bad</span>
+<span class="sd">    cells is not a total, and a reconciliation that treats it as one would report</span>
+<span class="sd">    the transcription&#39;s own gaps as a census disagreement.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910</span> <span class="k">as</span> <span class="n">lx</span>
+
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[</span><span class="n">b</span><span class="o">.</span><span class="n">municipality</span> <span class="k">for</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">blocks</span><span class="p">]</span>
+    <span class="n">kept</span> <span class="o">=</span> <span class="p">[</span><span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">is_summary_row</span><span class="p">(</span><span class="n">r</span><span class="p">)]</span>
+    <span class="n">totals</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">unreadable</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">column</span> <span class="ow">in</span> <span class="n">lx</span><span class="o">.</span><span class="n">INT_COLS</span><span class="p">:</span>
+        <span class="n">running</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">bad</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">kept</span><span class="p">:</span>
+            <span class="n">value</span><span class="p">,</span> <span class="n">status</span> <span class="o">=</span> <span class="n">lx</span><span class="o">.</span><span class="n">parse_int_cell</span><span class="p">(</span><span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">column</span><span class="p">))</span>
+            <span class="k">if</span> <span class="n">status</span> <span class="o">==</span> <span class="s2">&quot;bad&quot;</span><span class="p">:</span>
+                <span class="n">bad</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">elif</span> <span class="n">status</span> <span class="o">==</span> <span class="s2">&quot;ok&quot;</span><span class="p">:</span>
+                <span class="n">running</span> <span class="o">+=</span> <span class="n">value</span>
+        <span class="n">totals</span><span class="p">[</span><span class="n">column</span><span class="p">]</span> <span class="o">=</span> <span class="n">running</span>
+        <span class="n">unreadable</span><span class="p">[</span><span class="n">column</span><span class="p">]</span> <span class="o">=</span> <span class="n">bad</span>
+    <span class="k">return</span> <span class="n">totals</span><span class="p">,</span> <span class="n">unreadable</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">kept</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_census-census_targets">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">census_targets</span><span class="p">(</span><span class="n">row</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span></pre>
+<div class="fndoc"><p>The expected okres totals, in the register's own column names.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 185–194 (10 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">census_targets</span><span class="p">(</span><span class="n">row</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The expected okres totals, in the register&#39;s own column names.&quot;&quot;&quot;</span>
+    <span class="n">targets</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">register_col</span><span class="p">,</span> <span class="n">census_cols</span> <span class="ow">in</span> <span class="p">{</span><span class="o">**</span><span class="n">DIRECT_MAP</span><span class="p">,</span> <span class="o">**</span><span class="n">CONFESSION_MAP</span><span class="p">,</span>
+                                      <span class="o">**</span><span class="n">LANGUAGE_MAP</span><span class="p">}</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">present</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">census_cols</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">row</span> <span class="ow">and</span> <span class="n">_isfinite</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">c</span><span class="p">])]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">present</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">targets</span><span class="p">[</span><span class="n">register_col</span><span class="p">]</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="nb">sum</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">c</span><span class="p">])</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">present</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">targets</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_census-house_candidates">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">house_candidates</span><span class="p">(</span><span class="n">row</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span></pre>
+<div class="fndoc"><p>The two readings of the census house count, both reported, neither graded.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 197–206 (10 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">house_candidates</span><span class="p">(</span><span class="n">row</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The two readings of the census house count, both reported, neither graded.&quot;&quot;&quot;</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">band_sum</span><span class="p">(</span><span class="n">suffix</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+        <span class="n">cols</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;pop_</span><span class="si">{</span><span class="n">b</span><span class="si">}</span><span class="s2">_houses_</span><span class="si">{</span><span class="n">suffix</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">HOUSE_BANDS</span><span class="p">]</span>
+        <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="nb">sum</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">c</span><span class="p">])</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cols</span>
+                       <span class="k">if</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">row</span> <span class="ow">and</span> <span class="n">_isfinite</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">c</span><span class="p">])))</span>
+
+    <span class="n">inhabited</span> <span class="o">=</span> <span class="n">band_sum</span><span class="p">(</span><span class="s2">&quot;inhabited&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;inhabited&quot;</span><span class="p">:</span> <span class="n">inhabited</span><span class="p">,</span>
+            <span class="s2">&quot;inhabited+uninhabited&quot;</span><span class="p">:</span> <span class="n">inhabited</span> <span class="o">+</span> <span class="n">band_sum</span><span class="p">(</span><span class="s2">&quot;uninhabited&quot;</span><span class="p">)}</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_census-reconcile">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">reconcile</span><span class="p">(</span><span class="n">blocks</span><span class="p">,</span> <span class="n">census_row</span><span class="p">,</span> <span class="n">okres_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">okres_cs</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">n_expected</span><span class="p">:</span> <span class="nb">int</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">n_found</span><span class="p">:</span> <span class="nb">int</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">complete</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">|</span> <span class="kc">None</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">tolerance</span><span class="p">:</span> <span class="nb">int</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Reconciliation</span></pre>
+<div class="fndoc"><p>Compare an okres's transcribed municipality totals to the census.</p>
+<p><code>complete</code> says whether every municipality the okres is known to contain was
+actually found. When it is False the columns are still compared and reported,
+but every one of them is marked <code>incomplete</code> rather than <code>fail</code>: a partial
+okres under-sums by construction, and letting that score as a disagreement
+would bury the real ones under arithmetic that was never going to balance.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/lexikon_1910/run_lexikon_1910_pilot.py</code></p>
+<details><summary>source · lines 220–276 (57 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">reconcile</span><span class="p">(</span><span class="n">blocks</span><span class="p">,</span> <span class="n">census_row</span><span class="p">,</span> <span class="n">okres_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">okres_cs</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+              <span class="n">n_expected</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">n_found</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">complete</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+              <span class="n">tolerance</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Reconciliation</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Compare an okres&#39;s transcribed municipality totals to the census.</span>
+
+<span class="sd">    ``complete`` says whether every municipality the okres is known to contain was</span>
+<span class="sd">    actually found. When it is False the columns are still compared and reported,</span>
+<span class="sd">    but every one of them is marked ``incomplete`` rather than ``fail``: a partial</span>
+<span class="sd">    okres under-sums by construction, and letting that score as a disagreement</span>
+<span class="sd">    would bury the real ones under arithmetic that was never going to balance.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">totals</span><span class="p">,</span> <span class="n">unreadable</span><span class="p">,</span> <span class="n">n_summary</span> <span class="o">=</span> <span class="n">register_totals</span><span class="p">(</span><span class="n">blocks</span><span class="p">)</span>
+    <span class="n">targets</span> <span class="o">=</span> <span class="n">census_targets</span><span class="p">(</span><span class="n">census_row</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">complete</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">complete</span> <span class="o">=</span> <span class="nb">bool</span><span class="p">(</span><span class="n">n_expected</span><span class="p">)</span> <span class="ow">and</span> <span class="n">n_found</span> <span class="o">&gt;=</span> <span class="n">n_expected</span>
+
+    <span class="n">findings</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">column</span><span class="p">,</span> <span class="n">expected</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">targets</span><span class="o">.</span><span class="n">items</span><span class="p">()):</span>
+        <span class="n">got</span> <span class="o">=</span> <span class="n">totals</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">column</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="n">delta</span> <span class="o">=</span> <span class="n">got</span> <span class="o">-</span> <span class="n">expected</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">complete</span><span class="p">:</span>
+            <span class="n">verdict</span> <span class="o">=</span> <span class="s2">&quot;incomplete&quot;</span>
+        <span class="k">elif</span> <span class="n">unreadable</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">column</span><span class="p">):</span>
+            <span class="c1"># An unreadable cell means the sum is missing a term of unknown size,</span>
+            <span class="c1"># so the comparison cannot distinguish a census disagreement from the</span>
+            <span class="c1"># transcription&#39;s own hole. Say so instead of guessing which.</span>
+            <span class="n">verdict</span> <span class="o">=</span> <span class="s2">&quot;unparseable&quot;</span>
+        <span class="k">elif</span> <span class="nb">abs</span><span class="p">(</span><span class="n">delta</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="n">tolerance</span><span class="p">:</span>
+            <span class="n">verdict</span> <span class="o">=</span> <span class="s2">&quot;pass&quot;</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">verdict</span> <span class="o">=</span> <span class="s2">&quot;fail&quot;</span>
+        <span class="n">findings</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
+            <span class="s2">&quot;okres_id&quot;</span><span class="p">:</span> <span class="n">okres_id</span><span class="p">,</span> <span class="s2">&quot;okres_cs&quot;</span><span class="p">:</span> <span class="n">okres_cs</span><span class="p">,</span> <span class="s2">&quot;column&quot;</span><span class="p">:</span> <span class="n">column</span><span class="p">,</span>
+            <span class="s2">&quot;check&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;I6_okres:</span><span class="si">{</span><span class="n">column</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;verdict&quot;</span><span class="p">:</span> <span class="n">verdict</span><span class="p">,</span>
+            <span class="s2">&quot;register&quot;</span><span class="p">:</span> <span class="n">got</span><span class="p">,</span> <span class="s2">&quot;census&quot;</span><span class="p">:</span> <span class="n">expected</span><span class="p">,</span> <span class="s2">&quot;delta&quot;</span><span class="p">:</span> <span class="n">delta</span><span class="p">,</span>
+            <span class="s2">&quot;unreadable_cells&quot;</span><span class="p">:</span> <span class="n">unreadable</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">column</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+            <span class="s2">&quot;detail&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">verdict</span> <span class="o">==</span> <span class="s2">&quot;pass&quot;</span> <span class="k">else</span>
+                      <span class="sa">f</span><span class="s2">&quot;register </span><span class="si">{</span><span class="n">got</span><span class="si">}</span><span class="s2"> vs census </span><span class="si">{</span><span class="n">expected</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">delta</span><span class="si">:</span><span class="s2">+d</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">,</span>
+        <span class="p">})</span>
+
+    <span class="c1"># Houses: reported against both candidate definitions, graded against neither.</span>
+    <span class="n">houses</span> <span class="o">=</span> <span class="n">house_candidates</span><span class="p">(</span><span class="n">census_row</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">expected</span> <span class="ow">in</span> <span class="n">houses</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">got</span> <span class="o">=</span> <span class="n">totals</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;houses&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="n">findings</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
+            <span class="s2">&quot;okres_id&quot;</span><span class="p">:</span> <span class="n">okres_id</span><span class="p">,</span> <span class="s2">&quot;okres_cs&quot;</span><span class="p">:</span> <span class="n">okres_cs</span><span class="p">,</span> <span class="s2">&quot;column&quot;</span><span class="p">:</span> <span class="s2">&quot;houses&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;check&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;I6_okres:houses[</span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">]&quot;</span><span class="p">,</span> <span class="s2">&quot;verdict&quot;</span><span class="p">:</span> <span class="s2">&quot;ungraded&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;register&quot;</span><span class="p">:</span> <span class="n">got</span><span class="p">,</span> <span class="s2">&quot;census&quot;</span><span class="p">:</span> <span class="n">expected</span><span class="p">,</span> <span class="s2">&quot;delta&quot;</span><span class="p">:</span> <span class="n">got</span> <span class="o">-</span> <span class="n">expected</span><span class="p">,</span>
+            <span class="s2">&quot;unreadable_cells&quot;</span><span class="p">:</span> <span class="n">unreadable</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;houses&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+            <span class="s2">&quot;detail&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;register </span><span class="si">{</span><span class="n">got</span><span class="si">}</span><span class="s2"> vs census </span><span class="si">{</span><span class="n">expected</span><span class="si">}</span><span class="s2"> &quot;</span>
+                      <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">got</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">expected</span><span class="si">:</span><span class="s2">+d</span><span class="si">}</span><span class="s2">) — definition unsettled&quot;</span><span class="p">,</span>
+        <span class="p">})</span>
+
+    <span class="k">return</span> <span class="n">Reconciliation</span><span class="p">(</span><span class="n">okres_id</span><span class="o">=</span><span class="n">okres_id</span><span class="p">,</span> <span class="n">okres_cs</span><span class="o">=</span><span class="n">okres_cs</span><span class="p">,</span> <span class="n">complete</span><span class="o">=</span><span class="n">complete</span><span class="p">,</span>
+                          <span class="n">n_blocks</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">blocks</span><span class="p">),</span> <span class="n">n_expected</span><span class="o">=</span><span class="n">n_expected</span><span class="p">,</span>
+                          <span class="n">n_found</span><span class="o">=</span><span class="n">n_found</span><span class="p">,</span> <span class="n">n_summary</span><span class="o">=</span><span class="n">n_summary</span><span class="p">,</span>
+                          <span class="n">findings</span><span class="o">=</span><span class="n">findings</span><span class="p">,</span> <span class="n">unreadable</span><span class="o">=</span><span class="n">unreadable</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_census-diagnose">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">diagnose</span><span class="p">(</span><span class="n">reconciliation</span><span class="p">:</span> <span class="n">Reconciliation</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<div class="fndoc"><p>Name the shape of a failure, where the shape is unambiguous.</p>
+<p>A lost or duplicated row moves <em>every</em> column in the same direction at once; a
+wrong confession grouping moves one column by an exact amount and leaves the
+rest untouched. Distinguishing them is the whole reason for comparing column by
+column rather than on population alone.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 279–303 (25 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">diagnose</span><span class="p">(</span><span class="n">reconciliation</span><span class="p">:</span> <span class="n">Reconciliation</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Name the shape of a failure, where the shape is unambiguous.</span>
+
+<span class="sd">    A lost or duplicated row moves *every* column in the same direction at once; a</span>
+<span class="sd">    wrong confession grouping moves one column by an exact amount and leaves the</span>
+<span class="sd">    rest untouched. Distinguishing them is the whole reason for comparing column by</span>
+<span class="sd">    column rather than on population alone.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">graded</span> <span class="o">=</span> <span class="p">[</span><span class="n">f</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">reconciliation</span><span class="o">.</span><span class="n">findings</span> <span class="k">if</span> <span class="n">f</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;pass&quot;</span><span class="p">,</span> <span class="s2">&quot;fail&quot;</span><span class="p">)]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">graded</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">&quot;not graded&quot;</span>
+    <span class="n">failed</span> <span class="o">=</span> <span class="p">[</span><span class="n">f</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">graded</span> <span class="k">if</span> <span class="n">f</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;fail&quot;</span><span class="p">]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">failed</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">&quot;all graded columns reconcile exactly&quot;</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">failed</span><span class="p">)</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">graded</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">({</span><span class="n">f</span><span class="p">[</span><span class="s2">&quot;delta&quot;</span><span class="p">]</span> <span class="o">&lt;</span> <span class="mi">0</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">failed</span><span class="p">})</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="n">direction</span> <span class="o">=</span> <span class="s2">&quot;short of&quot;</span> <span class="k">if</span> <span class="n">failed</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;delta&quot;</span><span class="p">]</span> <span class="o">&lt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="s2">&quot;over&quot;</span>
+        <span class="k">return</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot;every column is </span><span class="si">{</span><span class="n">direction</span><span class="si">}</span><span class="s2"> the census — consistent with &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="s1">&#39;missing&#39;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">failed</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">&#39;delta&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;duplicated&#39;</span><span class="si">}</span><span class="s2"> rows, &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;not with a column mapping error&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">failed</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="n">f</span> <span class="o">=</span> <span class="n">failed</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">return</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot;only </span><span class="si">{</span><span class="n">f</span><span class="p">[</span><span class="s1">&#39;column&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> disagrees (</span><span class="si">{</span><span class="n">f</span><span class="p">[</span><span class="s1">&#39;delta&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">+d</span><span class="si">}</span><span class="s2">) — consistent with &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;a grouping error in that column, not with a lost row&quot;</span><span class="p">)</span>
+    <span class="n">names</span> <span class="o">=</span> <span class="s2">&quot;, &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">f</span><span class="p">[</span><span class="s2">&quot;column&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">failed</span><span class="p">)</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">failed</span><span class="p">)</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">graded</span><span class="p">)</span><span class="si">}</span><span class="s2"> columns disagree: </span><span class="si">{</span><span class="n">names</span><span class="si">}</span><span class="s2">&quot;</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_census-lexikon_1910_census_report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">lexikon_1910_census_report</span><span class="p">(</span><span class="n">reconciliations</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<div class="fndoc"><p>Ledger over one or more okresy.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/lexikon_1910/run_lexikon_1910_pilot.py</code></p>
+<details><summary>source · lines 306–361 (56 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span>
+<span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span>
+<span class="normal">337</span>
+<span class="normal">338</span>
+<span class="normal">339</span>
+<span class="normal">340</span>
+<span class="normal">341</span>
+<span class="normal">342</span>
+<span class="normal">343</span>
+<span class="normal">344</span>
+<span class="normal">345</span>
+<span class="normal">346</span>
+<span class="normal">347</span>
+<span class="normal">348</span>
+<span class="normal">349</span>
+<span class="normal">350</span>
+<span class="normal">351</span>
+<span class="normal">352</span>
+<span class="normal">353</span>
+<span class="normal">354</span>
+<span class="normal">355</span>
+<span class="normal">356</span>
+<span class="normal">357</span>
+<span class="normal">358</span>
+<span class="normal">359</span>
+<span class="normal">360</span>
+<span class="normal">361</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">lexikon_1910_census_report</span><span class="p">(</span><span class="n">reconciliations</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Ledger over one or more okresy.&quot;&quot;&quot;</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;lexikon_1910_census v</span><span class="si">{</span><span class="n">__version__</span><span class="si">}</span><span class="s2"> — okres reconciliation&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">reconciliations</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span> <span class="o">+</span> <span class="p">[</span><span class="s2">&quot;  no okres was complete enough to reconcile&quot;</span><span class="p">])</span>
+
+    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="s1">&#39;okres&#39;</span><span class="si">:</span><span class="s2">22s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;blocks&#39;</span><span class="si">:</span><span class="s2">&gt;12s</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="s1">&#39;pass&#39;</span><span class="si">:</span><span class="s2">&gt;5s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;fail&#39;</span><span class="si">:</span><span class="s2">&gt;5s</span><span class="si">}</span><span class="s2"> &quot;</span>
+                 <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="s1">&#39;unrd&#39;</span><span class="si">:</span><span class="s2">&gt;5s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;incm&#39;</span><span class="si">:</span><span class="s2">&gt;5s</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;  &quot;</span> <span class="o">+</span> <span class="s2">&quot;-&quot;</span> <span class="o">*</span> <span class="mi">62</span><span class="p">)</span>
+    <span class="n">graded_total</span> <span class="o">=</span> <span class="n">passed_total</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">rec</span> <span class="ow">in</span> <span class="n">reconciliations</span><span class="p">:</span>
+        <span class="n">counts</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">rec</span><span class="o">.</span><span class="n">findings</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">f</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;ungraded&quot;</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">counts</span><span class="p">[</span><span class="n">f</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]]</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">f</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">],</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="n">coverage</span> <span class="o">=</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">rec</span><span class="o">.</span><span class="n">n_found</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">rec</span><span class="o">.</span><span class="n">n_expected</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">if</span> <span class="n">rec</span><span class="o">.</span><span class="n">n_expected</span>
+                    <span class="k">else</span> <span class="nb">str</span><span class="p">(</span><span class="n">rec</span><span class="o">.</span><span class="n">n_blocks</span><span class="p">))</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="p">(</span><span class="n">rec</span><span class="o">.</span><span class="n">okres_cs</span><span class="w"> </span><span class="ow">or</span><span class="w"> </span><span class="n">rec</span><span class="o">.</span><span class="n">okres_id</span><span class="p">)</span><span class="si">!s:</span><span class="s2">22.22s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">coverage</span><span class="si">:</span><span class="s2">&gt;12s</span><span class="si">}</span><span class="s2">  &quot;</span>
+                     <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;pass&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="si">:</span><span class="s2">5d</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;fail&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="si">:</span><span class="s2">5d</span><span class="si">}</span><span class="s2"> &quot;</span>
+                     <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;unparseable&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="si">:</span><span class="s2">5d</span><span class="si">}</span><span class="s2"> &quot;</span>
+                     <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;incomplete&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="si">:</span><span class="s2">5d</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">graded_total</span> <span class="o">+=</span> <span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;pass&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;fail&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="n">passed_total</span> <span class="o">+=</span> <span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;pass&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="n">note</span> <span class="o">=</span> <span class="n">diagnose</span><span class="p">(</span><span class="n">rec</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">rec</span><span class="o">.</span><span class="n">complete</span><span class="p">:</span>
+            <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;      </span><span class="si">{</span><span class="n">note</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;      incomplete — </span><span class="si">{</span><span class="n">rec</span><span class="o">.</span><span class="n">missing</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="n">rec</span><span class="o">.</span><span class="n">n_expected</span><span class="si">}</span><span class="s2"> &quot;</span>
+                         <span class="sa">f</span><span class="s2">&quot;known obce not anchored on these pages &quot;</span>
+                         <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">rec</span><span class="o">.</span><span class="n">n_blocks</span><span class="si">}</span><span class="s2"> blocks read); columns reported, &quot;</span>
+                         <span class="sa">f</span><span class="s2">&quot;none graded&quot;</span><span class="p">)</span>
+            <span class="c1"># A near-complete okres is still worth reading: the shortfall in</span>
+            <span class="c1"># pop_total is an estimate of how big the missing municipalities are,</span>
+            <span class="c1"># which is what you search for to find them. A shortfall that is</span>
+            <span class="c1"># implausible for that many villages says the gap is not coverage.</span>
+            <span class="k">if</span> <span class="mi">0</span> <span class="o">&lt;</span> <span class="n">rec</span><span class="o">.</span><span class="n">missing</span> <span class="o">&lt;=</span> <span class="mi">3</span><span class="p">:</span>
+                <span class="n">deficit</span> <span class="o">=</span> <span class="nb">next</span><span class="p">((</span><span class="n">f</span><span class="p">[</span><span class="s2">&quot;delta&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">rec</span><span class="o">.</span><span class="n">findings</span>
+                                <span class="k">if</span> <span class="n">f</span><span class="p">[</span><span class="s2">&quot;column&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;pop_total&quot;</span><span class="p">),</span> <span class="kc">None</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">deficit</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">deficit</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">average</span> <span class="o">=</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot;, </span><span class="si">{</span><span class="o">-</span><span class="n">deficit</span><span class="w"> </span><span class="o">//</span><span class="w"> </span><span class="n">rec</span><span class="o">.</span><span class="n">missing</span><span class="si">}</span><span class="s2"> each on average&quot;</span>
+                               <span class="k">if</span> <span class="n">rec</span><span class="o">.</span><span class="n">missing</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+                    <span class="n">noun</span> <span class="o">=</span> <span class="s2">&quot;obec&quot;</span> <span class="k">if</span> <span class="n">rec</span><span class="o">.</span><span class="n">missing</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="s2">&quot;obce&quot;</span>
+                    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;      the </span><span class="si">{</span><span class="n">rec</span><span class="o">.</span><span class="n">missing</span><span class="si">}</span><span class="s2"> missing </span><span class="si">{</span><span class="n">noun</span><span class="si">}</span><span class="s2"> account &quot;</span>
+                                 <span class="sa">f</span><span class="s2">&quot;for </span><span class="si">{</span><span class="o">-</span><span class="n">deficit</span><span class="si">}</span><span class="s2"> inhabitants</span><span class="si">{</span><span class="n">average</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;  &quot;</span> <span class="o">+</span> <span class="s2">&quot;-&quot;</span> <span class="o">*</span> <span class="mi">62</span><span class="p">)</span>
+    <span class="n">rate</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">passed_total</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">graded_total</span><span class="si">:</span><span class="s2">.1%</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">if</span> <span class="n">graded_total</span> <span class="k">else</span> <span class="s2">&quot;--&quot;</span>
+    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">passed_total</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">graded_total</span><span class="si">}</span><span class="s2"> graded columns reconcile  </span><span class="si">{</span><span class="n">rate</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;  houses is reported against both census definitions and graded &quot;</span>
+                 <span class="s2">&quot;against neither;&quot;</span><span class="p">)</span>
+    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">NOT_IN_CENSUS</span><span class="p">)</span><span class="si">}</span><span class="s2"> are not carried at okres level at all.&quot;</span><span class="p">)</span>
+    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;  incomplete okresy under-sum by construction — coverage, not a &quot;</span>
+                 <span class="s2">&quot;disagreement.&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-lexikon_1910-lexikon_1910_census-CONFESSION_MAP"><pre class="sig">CONFESSION_MAP<span class="kind">dict · 4 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;conf_catholic&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;rel_roman_catholic&#39;</span><span class="p">,</span> <span class="s1">&#39;rel_greek_catholic&#39;</span><span class="p">,</span> <span class="s1">&#39;rel_armenian_catholic&#39;</span><span class="p">),</span> <span class="s1">&#39;conf_evangelical&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;rel_lutheran&#39;</span><span class="p">,</span> <span class="s1">&#39;rel_calvinist&#39;</span><span class="p">),</span> <span class="s1">&#39;conf_israelite&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;rel_jewish&#39;</span><span class="p">,),</span> <span class="s1">&#39;conf_other&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;rel_old_catholic&#39;</span><span class="p">,</span> <span class="s1">&#39;rel_greek_orthodox&#39;</span><span class="p">,</span> <span class="s1">&#39;rel_armenian_orthodox&#39;</span><span class="p">,</span> <span class="s1">&#39;rel_moravian&#39;</span><span class="p">,</span> <span class="s1">&#39;rel_anglican&#39;</span><span class="p">,</span> <span class="s1">&#39;rel_mennonite&#39;</span><span class="p">,</span> <span class="s1">&#39;rel_unitarian&#39;</span><span class="p">,</span> <span class="s1">&#39;rel_lipovan&#39;</span><span class="p">,</span> <span class="s1">&#39;rel_muslim&#39;</span><span class="p">,</span> <span class="s1">&#39;rel_other&#39;</span><span class="p">,</span> <span class="s1">&#39;rel_none&#39;</span><span class="p">)}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-lexikon_1910_census-LANGUAGE_MAP"><pre class="sig">LANGUAGE_MAP<span class="kind">dict · 3 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;lang_german&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;lang_german&#39;</span><span class="p">,),</span> <span class="s1">&#39;lang_czech&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;lang_czech&#39;</span><span class="p">,),</span> <span class="s1">&#39;lang_other&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;lang_polish&#39;</span><span class="p">,</span> <span class="s1">&#39;lang_ruthenian&#39;</span><span class="p">,</span> <span class="s1">&#39;lang_slovene&#39;</span><span class="p">,</span> <span class="s1">&#39;lang_serbocroat&#39;</span><span class="p">,</span> <span class="s1">&#39;lang_italian_ladin&#39;</span><span class="p">,</span> <span class="s1">&#39;lang_romanian&#39;</span><span class="p">,</span> <span class="s1">&#39;lang_magyar&#39;</span><span class="p">)}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-lexikon_1910_census-DIRECT_MAP"><pre class="sig">DIRECT_MAP<span class="kind">dict · 2 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;pop_total&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;pop_total&#39;</span><span class="p">,),</span> <span class="s1">&#39;foreigners&#39;</span><span class="p">:</span> <span class="p">(</span><span class="s1">&#39;foreign_nationals_present&#39;</span><span class="p">,)}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-lexikon_1910_census-HOUSE_BANDS"><pre class="sig">HOUSE_BANDS<span class="kind">tuple · 6 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">(</span><span class="s1">&#39;lt500&#39;</span><span class="p">,</span> <span class="s1">&#39;500_2000&#39;</span><span class="p">,</span> <span class="s1">&#39;2001_5000&#39;</span><span class="p">,</span> <span class="s1">&#39;5001_10000&#39;</span><span class="p">,</span> <span class="s1">&#39;10001_20000&#39;</span><span class="p">,</span> <span class="s1">&#39;gt20000&#39;</span><span class="p">)</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-lexikon_1910_census-NOT_IN_CENSUS"><pre class="sig">NOT_IN_CENSUS<span class="kind">tuple · 3 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">(</span><span class="s1">&#39;area_ha&#39;</span><span class="p">,</span> <span class="s1">&#39;pop_male&#39;</span><span class="p">,</span> <span class="s1">&#39;pop_female&#39;</span><span class="p">)</span>
+</pre></div>
+</details></div>
+<h2>Used by</h2><p><code>utils/lexikon_1910/run_lexikon_1910_pilot.py</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/lexikon_1910/lexikon_1910_census.py · 361 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span>
+<span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span>
+<span class="normal">337</span>
+<span class="normal">338</span>
+<span class="normal">339</span>
+<span class="normal">340</span>
+<span class="normal">341</span>
+<span class="normal">342</span>
+<span class="normal">343</span>
+<span class="normal">344</span>
+<span class="normal">345</span>
+<span class="normal">346</span>
+<span class="normal">347</span>
+<span class="normal">348</span>
+<span class="normal">349</span>
+<span class="normal">350</span>
+<span class="normal">351</span>
+<span class="normal">352</span>
+<span class="normal">353</span>
+<span class="normal">354</span>
+<span class="normal">355</span>
+<span class="normal">356</span>
+<span class="normal">357</span>
+<span class="normal">358</span>
+<span class="normal">359</span>
+<span class="normal">360</span>
+<span class="normal">361</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;Reconcile transcribed 1910 register blocks against the okres-level census.</span>
+
+<span class="sd">The register&#39;s own identities — sexes to total, confessions to total, languages</span>
+<span class="sd">plus foreigners to total, settlements to their municipality — are all *internal*.</span>
+<span class="sd">They are strong, but they share one blind spot: they cannot see a municipality the</span>
+<span class="sd">parser never emitted, or a block it invented. An okres that is missing three</span>
+<span class="sd">villages satisfies every one of them, because each surviving row is individually</span>
+<span class="sd">consistent. Nothing inside the page can detect a row that is not on it.</span>
+
+<span class="sd">This module closes that gap by summing the transcribed municipality rows across a</span>
+<span class="sd">whole okres and comparing the totals to ``census_okres_1910``, which reports the</span>
+<span class="sd">same 1910 enumeration at okres level from the Rumpler-Seger workbooks. Where the</span>
+<span class="sd">two disagree, either the transcription lost or duplicated a row, or the confession</span>
+<span class="sd">grouping below is wrong — and the two are told apart by *how* they disagree: a lost</span>
+<span class="sd">row is a deficit in every column at once, a bad grouping is an exact offset in one.</span>
+
+<span class="sd">**This is not independent evidence about 1910.** Both sides descend from the same</span>
+<span class="sd">census, so agreement validates our *reading* of the register, not the register</span>
+<span class="sd">itself. That is exactly what is wanted here, but it means the reconciliation must</span>
+<span class="sd">never be cited as corroboration of the census.</span>
+
+<span class="sd">Two things about the comparison need stating rather than assuming:</span>
+
+<span class="sd">* **Only municipality rows are summed.** Settlements are subdivisions of their</span>
+<span class="sd">  municipality and are already counted in it — the same double-count that invariant</span>
+<span class="sd">  I4 exists to check. Summing both would inflate every total by roughly a factor of</span>
+<span class="sd">  two and would do it *consistently*, which is the kind of error that looks like a</span>
+<span class="sd">  result.</span>
+<span class="sd">* **It needs a complete okres.** A partial okres under-sums by construction, so a</span>
+<span class="sd">  run that covers half a district would report a spurious deficit in every column.</span>
+<span class="sd">  Coverage is therefore a precondition, checked against the anchoring, not a</span>
+<span class="sd">  caveat in the output.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">dataclass</span><span class="p">,</span> <span class="n">field</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;0.2.0&quot;</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">is_summary_row</span><span class="p">(</span><span class="n">row</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Is this a district aggregate rather than a municipality?</span>
+
+<span class="sd">    Delegates to :attr:`~utils.lexikon_1910.lexikon_1910.Row.is_summary`, which is where</span>
+<span class="sd">    the rule now lives: ``segment_blocks`` drops these rows before a block is ever</span>
+<span class="sd">    built, so in the normal pipeline this finds nothing. It stays as a guard for</span>
+<span class="sd">    callers that assemble blocks some other way — a summary row reaching a sum adds</span>
+<span class="sd">    a whole district back into itself, which cost a factor of four on okres</span>
+<span class="sd">    Kraslice before it was caught, and that is worth one cheap check.</span>
+
+<span class="sd">    Keeping a second regex here instead would be the more dangerous option: two</span>
+<span class="sd">    copies of one rule drift, and the copy that stops matching fails silently by</span>
+<span class="sd">    over-counting rather than by raising.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910</span> <span class="k">as</span> <span class="n">lx</span>
+
+    <span class="k">return</span> <span class="n">row</span><span class="o">.</span><span class="n">is_summary</span> <span class="ow">or</span> <span class="nb">bool</span><span class="p">(</span><span class="n">lx</span><span class="o">.</span><span class="n">TOTAL_ROW_RE</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+
+<span class="c1"># --------------------------------------------------------------------------- #</span>
+<span class="c1"># Register column -&gt; census column</span>
+<span class="c1"># --------------------------------------------------------------------------- #</span>
+<span class="c1">#</span>
+<span class="c1"># The register prints four confession columns; the census reports seventeen. The</span>
+<span class="c1"># grouping below is the standard Austrian one, and the two marginal calls are</span>
+<span class="c1"># named here rather than buried, because each is a decision that shifts a column:</span>
+<span class="c1">#</span>
+<span class="c1">#   * **Greek and Armenian Catholics count as Catholic.** They are Catholic</span>
+<span class="c1">#     *rites*, which is what the register&#39;s &quot;katolické&quot; names. In Bohemia they are</span>
+<span class="c1">#     numerically negligible, so this choice is nearly free here — but it would not</span>
+<span class="c1">#     be in Galicia or the Bukovina, and this module is written to be moved.</span>
+<span class="c1">#   * **Old Catholics do NOT.** Altkatholiken are a separate denomination that</span>
+<span class="c1">#     broke with Rome in 1870, not a rite, so they fall to &quot;other&quot;. Bohemia is</span>
+<span class="c1">#     where they are least negligible, which is exactly why the call is explicit.</span>
+<span class="c1">#</span>
+<span class="c1"># If either is wrong the reconciliation shows it in the cleanest possible form: a</span>
+<span class="c1"># constant offset in one column, equal to that group&#39;s own count, with every other</span>
+<span class="c1"># column exact.</span>
+
+<span class="n">CONFESSION_MAP</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;conf_catholic&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;rel_roman_catholic&quot;</span><span class="p">,</span> <span class="s2">&quot;rel_greek_catholic&quot;</span><span class="p">,</span>
+                      <span class="s2">&quot;rel_armenian_catholic&quot;</span><span class="p">),</span>
+    <span class="c1"># Augsburger + Helvetischer Bekenntnis — together the census&#39;s &quot;evangelisch&quot;,</span>
+    <span class="c1"># confirmed against census_codebook.csv.</span>
+    <span class="s2">&quot;conf_evangelical&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;rel_lutheran&quot;</span><span class="p">,</span> <span class="s2">&quot;rel_calvinist&quot;</span><span class="p">),</span>
+    <span class="s2">&quot;conf_israelite&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;rel_jewish&quot;</span><span class="p">,),</span>
+    <span class="s2">&quot;conf_other&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;rel_old_catholic&quot;</span><span class="p">,</span> <span class="s2">&quot;rel_greek_orthodox&quot;</span><span class="p">,</span> <span class="s2">&quot;rel_armenian_orthodox&quot;</span><span class="p">,</span>
+                   <span class="s2">&quot;rel_moravian&quot;</span><span class="p">,</span> <span class="s2">&quot;rel_anglican&quot;</span><span class="p">,</span> <span class="s2">&quot;rel_mennonite&quot;</span><span class="p">,</span> <span class="s2">&quot;rel_unitarian&quot;</span><span class="p">,</span>
+                   <span class="s2">&quot;rel_lipovan&quot;</span><span class="p">,</span> <span class="s2">&quot;rel_muslim&quot;</span><span class="p">,</span> <span class="s2">&quot;rel_other&quot;</span><span class="p">,</span> <span class="s2">&quot;rel_none&quot;</span><span class="p">),</span>
+<span class="p">}</span>
+
+<span class="c1">#: The register&#39;s ``lang_czech`` is &quot;česko-moravsko-slovácké&quot;, which the census</span>
+<span class="c1">#: carries as the single category &quot;böhmisch-mährisch-slowakisch&quot; — a one-to-one</span>
+<span class="c1">#: match, not a grouping. Everything other than German and Czech falls to</span>
+<span class="c1">#: ``lang_other``.</span>
+<span class="n">LANGUAGE_MAP</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;lang_german&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;lang_german&quot;</span><span class="p">,),</span>
+    <span class="s2">&quot;lang_czech&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;lang_czech&quot;</span><span class="p">,),</span>
+    <span class="s2">&quot;lang_other&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;lang_polish&quot;</span><span class="p">,</span> <span class="s2">&quot;lang_ruthenian&quot;</span><span class="p">,</span> <span class="s2">&quot;lang_slovene&quot;</span><span class="p">,</span>
+                   <span class="s2">&quot;lang_serbocroat&quot;</span><span class="p">,</span> <span class="s2">&quot;lang_italian_ladin&quot;</span><span class="p">,</span> <span class="s2">&quot;lang_romanian&quot;</span><span class="p">,</span>
+                   <span class="s2">&quot;lang_magyar&quot;</span><span class="p">),</span>
+<span class="p">}</span>
+
+<span class="c1">#: Straight one-to-one columns.</span>
+<span class="n">DIRECT_MAP</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;pop_total&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;pop_total&quot;</span><span class="p">,),</span>
+    <span class="s2">&quot;foreigners&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;foreign_nationals_present&quot;</span><span class="p">,),</span>
+<span class="p">}</span>
+
+<span class="c1">#: The census splits houses by locality-size band and by whether they were</span>
+<span class="c1">#: inhabited; the register prints one number. Which of the two candidate totals it</span>
+<span class="c1">#: is, is a definitional question this module does not pretend to have settled — so</span>
+<span class="c1">#: both are computed and reported side by side, and ``houses`` is graded against</span>
+<span class="c1">#: neither until the volume&#39;s preface says which. See ``report`` below.</span>
+<span class="n">HOUSE_BANDS</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;lt500&quot;</span><span class="p">,</span> <span class="s2">&quot;500_2000&quot;</span><span class="p">,</span> <span class="s2">&quot;2001_5000&quot;</span><span class="p">,</span> <span class="s2">&quot;5001_10000&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;10001_20000&quot;</span><span class="p">,</span> <span class="s2">&quot;gt20000&quot;</span><span class="p">)</span>
+
+<span class="c1">#: Columns the register prints that the okres census does not carry at all. Listed</span>
+<span class="c1">#: so their absence is visible in the ledger rather than looking like a pass.</span>
+<span class="n">NOT_IN_CENSUS</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;area_ha&quot;</span><span class="p">,</span> <span class="s2">&quot;pop_male&quot;</span><span class="p">,</span> <span class="s2">&quot;pop_female&quot;</span><span class="p">)</span>
+
+
+<span class="c1"># --------------------------------------------------------------------------- #</span>
+<span class="c1"># Totals</span>
+<span class="c1"># --------------------------------------------------------------------------- #</span>
+
+<span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">Reconciliation</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;What one okres reconciled to, column by column.&quot;&quot;&quot;</span>
+
+    <span class="n">okres_id</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">okres_cs</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">complete</span><span class="p">:</span> <span class="nb">bool</span>
+    <span class="n">n_blocks</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">n_expected</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="c1">#: Distinct known obce actually anchored. This, not ``n_blocks``, is what</span>
+    <span class="c1">#: coverage means: a page can carry more blocks than the okres has obce (a</span>
+    <span class="c1">#: settlement row wrongly promoted) while still being short of real ones, so</span>
+    <span class="c1">#: counting blocks would call an incomplete okres complete.</span>
+    <span class="n">n_found</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="c1">#: District summary rows excluded from the sums. Never zero on a complete</span>
+    <span class="c1">#: okres — the register always opens one — so a zero here on a full district</span>
+    <span class="c1">#: means the detector missed them and the totals are inflated.</span>
+    <span class="n">n_summary</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">findings</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
+    <span class="n">unreadable</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">dict</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">missing</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">max</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_expected</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_found</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">register_totals</span><span class="p">(</span><span class="n">blocks</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="nb">int</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Sum the municipality rows of an okres, column by column.</span>
+
+<span class="sd">    Returns ``(totals, unreadable, n_summary_skipped)``. Two kinds of row are</span>
+<span class="sd">    excluded and both would otherwise double-count: settlements, which are already</span>
+<span class="sd">    counted inside their municipality, and district summary rows, which are already</span>
+<span class="sd">    counted across all of them.</span>
+
+<span class="sd">    A column with any unreadable cell still reports a total, but the count of cells</span>
+<span class="sd">    that could not be read travels beside it — a sum that silently skipped nine bad</span>
+<span class="sd">    cells is not a total, and a reconciliation that treats it as one would report</span>
+<span class="sd">    the transcription&#39;s own gaps as a census disagreement.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910</span> <span class="k">as</span> <span class="n">lx</span>
+
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[</span><span class="n">b</span><span class="o">.</span><span class="n">municipality</span> <span class="k">for</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">blocks</span><span class="p">]</span>
+    <span class="n">kept</span> <span class="o">=</span> <span class="p">[</span><span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">is_summary_row</span><span class="p">(</span><span class="n">r</span><span class="p">)]</span>
+    <span class="n">totals</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">unreadable</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">column</span> <span class="ow">in</span> <span class="n">lx</span><span class="o">.</span><span class="n">INT_COLS</span><span class="p">:</span>
+        <span class="n">running</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">bad</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">kept</span><span class="p">:</span>
+            <span class="n">value</span><span class="p">,</span> <span class="n">status</span> <span class="o">=</span> <span class="n">lx</span><span class="o">.</span><span class="n">parse_int_cell</span><span class="p">(</span><span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">column</span><span class="p">))</span>
+            <span class="k">if</span> <span class="n">status</span> <span class="o">==</span> <span class="s2">&quot;bad&quot;</span><span class="p">:</span>
+                <span class="n">bad</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">elif</span> <span class="n">status</span> <span class="o">==</span> <span class="s2">&quot;ok&quot;</span><span class="p">:</span>
+                <span class="n">running</span> <span class="o">+=</span> <span class="n">value</span>
+        <span class="n">totals</span><span class="p">[</span><span class="n">column</span><span class="p">]</span> <span class="o">=</span> <span class="n">running</span>
+        <span class="n">unreadable</span><span class="p">[</span><span class="n">column</span><span class="p">]</span> <span class="o">=</span> <span class="n">bad</span>
+    <span class="k">return</span> <span class="n">totals</span><span class="p">,</span> <span class="n">unreadable</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">kept</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">census_targets</span><span class="p">(</span><span class="n">row</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The expected okres totals, in the register&#39;s own column names.&quot;&quot;&quot;</span>
+    <span class="n">targets</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">register_col</span><span class="p">,</span> <span class="n">census_cols</span> <span class="ow">in</span> <span class="p">{</span><span class="o">**</span><span class="n">DIRECT_MAP</span><span class="p">,</span> <span class="o">**</span><span class="n">CONFESSION_MAP</span><span class="p">,</span>
+                                      <span class="o">**</span><span class="n">LANGUAGE_MAP</span><span class="p">}</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">present</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">census_cols</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">row</span> <span class="ow">and</span> <span class="n">_isfinite</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">c</span><span class="p">])]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">present</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">targets</span><span class="p">[</span><span class="n">register_col</span><span class="p">]</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="nb">sum</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">c</span><span class="p">])</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">present</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">targets</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">house_candidates</span><span class="p">(</span><span class="n">row</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The two readings of the census house count, both reported, neither graded.&quot;&quot;&quot;</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">band_sum</span><span class="p">(</span><span class="n">suffix</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+        <span class="n">cols</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;pop_</span><span class="si">{</span><span class="n">b</span><span class="si">}</span><span class="s2">_houses_</span><span class="si">{</span><span class="n">suffix</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">HOUSE_BANDS</span><span class="p">]</span>
+        <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="nb">sum</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">c</span><span class="p">])</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cols</span>
+                       <span class="k">if</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">row</span> <span class="ow">and</span> <span class="n">_isfinite</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">c</span><span class="p">])))</span>
+
+    <span class="n">inhabited</span> <span class="o">=</span> <span class="n">band_sum</span><span class="p">(</span><span class="s2">&quot;inhabited&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;inhabited&quot;</span><span class="p">:</span> <span class="n">inhabited</span><span class="p">,</span>
+            <span class="s2">&quot;inhabited+uninhabited&quot;</span><span class="p">:</span> <span class="n">inhabited</span> <span class="o">+</span> <span class="n">band_sum</span><span class="p">(</span><span class="s2">&quot;uninhabited&quot;</span><span class="p">)}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_isfinite</span><span class="p">(</span><span class="n">value</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">value</span> <span class="o">==</span> <span class="n">value</span> <span class="ow">and</span> <span class="n">value</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>   <span class="c1"># NaN-safe</span>
+    <span class="k">except</span> <span class="ne">TypeError</span><span class="p">:</span>                                       <span class="c1"># pragma: no cover</span>
+        <span class="k">return</span> <span class="kc">False</span>
+
+
+<span class="c1"># --------------------------------------------------------------------------- #</span>
+<span class="c1"># The comparison</span>
+<span class="c1"># --------------------------------------------------------------------------- #</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">reconcile</span><span class="p">(</span><span class="n">blocks</span><span class="p">,</span> <span class="n">census_row</span><span class="p">,</span> <span class="n">okres_id</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">okres_cs</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+              <span class="n">n_expected</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">n_found</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">complete</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+              <span class="n">tolerance</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Reconciliation</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Compare an okres&#39;s transcribed municipality totals to the census.</span>
+
+<span class="sd">    ``complete`` says whether every municipality the okres is known to contain was</span>
+<span class="sd">    actually found. When it is False the columns are still compared and reported,</span>
+<span class="sd">    but every one of them is marked ``incomplete`` rather than ``fail``: a partial</span>
+<span class="sd">    okres under-sums by construction, and letting that score as a disagreement</span>
+<span class="sd">    would bury the real ones under arithmetic that was never going to balance.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">totals</span><span class="p">,</span> <span class="n">unreadable</span><span class="p">,</span> <span class="n">n_summary</span> <span class="o">=</span> <span class="n">register_totals</span><span class="p">(</span><span class="n">blocks</span><span class="p">)</span>
+    <span class="n">targets</span> <span class="o">=</span> <span class="n">census_targets</span><span class="p">(</span><span class="n">census_row</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">complete</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">complete</span> <span class="o">=</span> <span class="nb">bool</span><span class="p">(</span><span class="n">n_expected</span><span class="p">)</span> <span class="ow">and</span> <span class="n">n_found</span> <span class="o">&gt;=</span> <span class="n">n_expected</span>
+
+    <span class="n">findings</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">column</span><span class="p">,</span> <span class="n">expected</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">targets</span><span class="o">.</span><span class="n">items</span><span class="p">()):</span>
+        <span class="n">got</span> <span class="o">=</span> <span class="n">totals</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">column</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="n">delta</span> <span class="o">=</span> <span class="n">got</span> <span class="o">-</span> <span class="n">expected</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">complete</span><span class="p">:</span>
+            <span class="n">verdict</span> <span class="o">=</span> <span class="s2">&quot;incomplete&quot;</span>
+        <span class="k">elif</span> <span class="n">unreadable</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">column</span><span class="p">):</span>
+            <span class="c1"># An unreadable cell means the sum is missing a term of unknown size,</span>
+            <span class="c1"># so the comparison cannot distinguish a census disagreement from the</span>
+            <span class="c1"># transcription&#39;s own hole. Say so instead of guessing which.</span>
+            <span class="n">verdict</span> <span class="o">=</span> <span class="s2">&quot;unparseable&quot;</span>
+        <span class="k">elif</span> <span class="nb">abs</span><span class="p">(</span><span class="n">delta</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="n">tolerance</span><span class="p">:</span>
+            <span class="n">verdict</span> <span class="o">=</span> <span class="s2">&quot;pass&quot;</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">verdict</span> <span class="o">=</span> <span class="s2">&quot;fail&quot;</span>
+        <span class="n">findings</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
+            <span class="s2">&quot;okres_id&quot;</span><span class="p">:</span> <span class="n">okres_id</span><span class="p">,</span> <span class="s2">&quot;okres_cs&quot;</span><span class="p">:</span> <span class="n">okres_cs</span><span class="p">,</span> <span class="s2">&quot;column&quot;</span><span class="p">:</span> <span class="n">column</span><span class="p">,</span>
+            <span class="s2">&quot;check&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;I6_okres:</span><span class="si">{</span><span class="n">column</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;verdict&quot;</span><span class="p">:</span> <span class="n">verdict</span><span class="p">,</span>
+            <span class="s2">&quot;register&quot;</span><span class="p">:</span> <span class="n">got</span><span class="p">,</span> <span class="s2">&quot;census&quot;</span><span class="p">:</span> <span class="n">expected</span><span class="p">,</span> <span class="s2">&quot;delta&quot;</span><span class="p">:</span> <span class="n">delta</span><span class="p">,</span>
+            <span class="s2">&quot;unreadable_cells&quot;</span><span class="p">:</span> <span class="n">unreadable</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">column</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+            <span class="s2">&quot;detail&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">verdict</span> <span class="o">==</span> <span class="s2">&quot;pass&quot;</span> <span class="k">else</span>
+                      <span class="sa">f</span><span class="s2">&quot;register </span><span class="si">{</span><span class="n">got</span><span class="si">}</span><span class="s2"> vs census </span><span class="si">{</span><span class="n">expected</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">delta</span><span class="si">:</span><span class="s2">+d</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">,</span>
+        <span class="p">})</span>
+
+    <span class="c1"># Houses: reported against both candidate definitions, graded against neither.</span>
+    <span class="n">houses</span> <span class="o">=</span> <span class="n">house_candidates</span><span class="p">(</span><span class="n">census_row</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">expected</span> <span class="ow">in</span> <span class="n">houses</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">got</span> <span class="o">=</span> <span class="n">totals</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;houses&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="n">findings</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
+            <span class="s2">&quot;okres_id&quot;</span><span class="p">:</span> <span class="n">okres_id</span><span class="p">,</span> <span class="s2">&quot;okres_cs&quot;</span><span class="p">:</span> <span class="n">okres_cs</span><span class="p">,</span> <span class="s2">&quot;column&quot;</span><span class="p">:</span> <span class="s2">&quot;houses&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;check&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;I6_okres:houses[</span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">]&quot;</span><span class="p">,</span> <span class="s2">&quot;verdict&quot;</span><span class="p">:</span> <span class="s2">&quot;ungraded&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;register&quot;</span><span class="p">:</span> <span class="n">got</span><span class="p">,</span> <span class="s2">&quot;census&quot;</span><span class="p">:</span> <span class="n">expected</span><span class="p">,</span> <span class="s2">&quot;delta&quot;</span><span class="p">:</span> <span class="n">got</span> <span class="o">-</span> <span class="n">expected</span><span class="p">,</span>
+            <span class="s2">&quot;unreadable_cells&quot;</span><span class="p">:</span> <span class="n">unreadable</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;houses&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+            <span class="s2">&quot;detail&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;register </span><span class="si">{</span><span class="n">got</span><span class="si">}</span><span class="s2"> vs census </span><span class="si">{</span><span class="n">expected</span><span class="si">}</span><span class="s2"> &quot;</span>
+                      <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">got</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">expected</span><span class="si">:</span><span class="s2">+d</span><span class="si">}</span><span class="s2">) — definition unsettled&quot;</span><span class="p">,</span>
+        <span class="p">})</span>
+
+    <span class="k">return</span> <span class="n">Reconciliation</span><span class="p">(</span><span class="n">okres_id</span><span class="o">=</span><span class="n">okres_id</span><span class="p">,</span> <span class="n">okres_cs</span><span class="o">=</span><span class="n">okres_cs</span><span class="p">,</span> <span class="n">complete</span><span class="o">=</span><span class="n">complete</span><span class="p">,</span>
+                          <span class="n">n_blocks</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">blocks</span><span class="p">),</span> <span class="n">n_expected</span><span class="o">=</span><span class="n">n_expected</span><span class="p">,</span>
+                          <span class="n">n_found</span><span class="o">=</span><span class="n">n_found</span><span class="p">,</span> <span class="n">n_summary</span><span class="o">=</span><span class="n">n_summary</span><span class="p">,</span>
+                          <span class="n">findings</span><span class="o">=</span><span class="n">findings</span><span class="p">,</span> <span class="n">unreadable</span><span class="o">=</span><span class="n">unreadable</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">diagnose</span><span class="p">(</span><span class="n">reconciliation</span><span class="p">:</span> <span class="n">Reconciliation</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Name the shape of a failure, where the shape is unambiguous.</span>
+
+<span class="sd">    A lost or duplicated row moves *every* column in the same direction at once; a</span>
+<span class="sd">    wrong confession grouping moves one column by an exact amount and leaves the</span>
+<span class="sd">    rest untouched. Distinguishing them is the whole reason for comparing column by</span>
+<span class="sd">    column rather than on population alone.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">graded</span> <span class="o">=</span> <span class="p">[</span><span class="n">f</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">reconciliation</span><span class="o">.</span><span class="n">findings</span> <span class="k">if</span> <span class="n">f</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;pass&quot;</span><span class="p">,</span> <span class="s2">&quot;fail&quot;</span><span class="p">)]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">graded</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">&quot;not graded&quot;</span>
+    <span class="n">failed</span> <span class="o">=</span> <span class="p">[</span><span class="n">f</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">graded</span> <span class="k">if</span> <span class="n">f</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;fail&quot;</span><span class="p">]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">failed</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">&quot;all graded columns reconcile exactly&quot;</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">failed</span><span class="p">)</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">graded</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">({</span><span class="n">f</span><span class="p">[</span><span class="s2">&quot;delta&quot;</span><span class="p">]</span> <span class="o">&lt;</span> <span class="mi">0</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">failed</span><span class="p">})</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="n">direction</span> <span class="o">=</span> <span class="s2">&quot;short of&quot;</span> <span class="k">if</span> <span class="n">failed</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;delta&quot;</span><span class="p">]</span> <span class="o">&lt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="s2">&quot;over&quot;</span>
+        <span class="k">return</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot;every column is </span><span class="si">{</span><span class="n">direction</span><span class="si">}</span><span class="s2"> the census — consistent with &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="s1">&#39;missing&#39;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">failed</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">&#39;delta&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;duplicated&#39;</span><span class="si">}</span><span class="s2"> rows, &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;not with a column mapping error&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">failed</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="n">f</span> <span class="o">=</span> <span class="n">failed</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">return</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot;only </span><span class="si">{</span><span class="n">f</span><span class="p">[</span><span class="s1">&#39;column&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> disagrees (</span><span class="si">{</span><span class="n">f</span><span class="p">[</span><span class="s1">&#39;delta&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">+d</span><span class="si">}</span><span class="s2">) — consistent with &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;a grouping error in that column, not with a lost row&quot;</span><span class="p">)</span>
+    <span class="n">names</span> <span class="o">=</span> <span class="s2">&quot;, &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">f</span><span class="p">[</span><span class="s2">&quot;column&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">failed</span><span class="p">)</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">failed</span><span class="p">)</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">graded</span><span class="p">)</span><span class="si">}</span><span class="s2"> columns disagree: </span><span class="si">{</span><span class="n">names</span><span class="si">}</span><span class="s2">&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">lexikon_1910_census_report</span><span class="p">(</span><span class="n">reconciliations</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Ledger over one or more okresy.&quot;&quot;&quot;</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;lexikon_1910_census v</span><span class="si">{</span><span class="n">__version__</span><span class="si">}</span><span class="s2"> — okres reconciliation&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">reconciliations</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span> <span class="o">+</span> <span class="p">[</span><span class="s2">&quot;  no okres was complete enough to reconcile&quot;</span><span class="p">])</span>
+
+    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="s1">&#39;okres&#39;</span><span class="si">:</span><span class="s2">22s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;blocks&#39;</span><span class="si">:</span><span class="s2">&gt;12s</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="s1">&#39;pass&#39;</span><span class="si">:</span><span class="s2">&gt;5s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;fail&#39;</span><span class="si">:</span><span class="s2">&gt;5s</span><span class="si">}</span><span class="s2"> &quot;</span>
+                 <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="s1">&#39;unrd&#39;</span><span class="si">:</span><span class="s2">&gt;5s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;incm&#39;</span><span class="si">:</span><span class="s2">&gt;5s</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;  &quot;</span> <span class="o">+</span> <span class="s2">&quot;-&quot;</span> <span class="o">*</span> <span class="mi">62</span><span class="p">)</span>
+    <span class="n">graded_total</span> <span class="o">=</span> <span class="n">passed_total</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">rec</span> <span class="ow">in</span> <span class="n">reconciliations</span><span class="p">:</span>
+        <span class="n">counts</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">rec</span><span class="o">.</span><span class="n">findings</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">f</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;ungraded&quot;</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">counts</span><span class="p">[</span><span class="n">f</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]]</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">f</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">],</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="n">coverage</span> <span class="o">=</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">rec</span><span class="o">.</span><span class="n">n_found</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">rec</span><span class="o">.</span><span class="n">n_expected</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">if</span> <span class="n">rec</span><span class="o">.</span><span class="n">n_expected</span>
+                    <span class="k">else</span> <span class="nb">str</span><span class="p">(</span><span class="n">rec</span><span class="o">.</span><span class="n">n_blocks</span><span class="p">))</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="p">(</span><span class="n">rec</span><span class="o">.</span><span class="n">okres_cs</span><span class="w"> </span><span class="ow">or</span><span class="w"> </span><span class="n">rec</span><span class="o">.</span><span class="n">okres_id</span><span class="p">)</span><span class="si">!s:</span><span class="s2">22.22s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">coverage</span><span class="si">:</span><span class="s2">&gt;12s</span><span class="si">}</span><span class="s2">  &quot;</span>
+                     <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;pass&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="si">:</span><span class="s2">5d</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;fail&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="si">:</span><span class="s2">5d</span><span class="si">}</span><span class="s2"> &quot;</span>
+                     <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;unparseable&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="si">:</span><span class="s2">5d</span><span class="si">}</span><span class="s2"> &quot;</span>
+                     <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;incomplete&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="si">:</span><span class="s2">5d</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">graded_total</span> <span class="o">+=</span> <span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;pass&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;fail&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="n">passed_total</span> <span class="o">+=</span> <span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;pass&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="n">note</span> <span class="o">=</span> <span class="n">diagnose</span><span class="p">(</span><span class="n">rec</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">rec</span><span class="o">.</span><span class="n">complete</span><span class="p">:</span>
+            <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;      </span><span class="si">{</span><span class="n">note</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;      incomplete — </span><span class="si">{</span><span class="n">rec</span><span class="o">.</span><span class="n">missing</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="n">rec</span><span class="o">.</span><span class="n">n_expected</span><span class="si">}</span><span class="s2"> &quot;</span>
+                         <span class="sa">f</span><span class="s2">&quot;known obce not anchored on these pages &quot;</span>
+                         <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">rec</span><span class="o">.</span><span class="n">n_blocks</span><span class="si">}</span><span class="s2"> blocks read); columns reported, &quot;</span>
+                         <span class="sa">f</span><span class="s2">&quot;none graded&quot;</span><span class="p">)</span>
+            <span class="c1"># A near-complete okres is still worth reading: the shortfall in</span>
+            <span class="c1"># pop_total is an estimate of how big the missing municipalities are,</span>
+            <span class="c1"># which is what you search for to find them. A shortfall that is</span>
+            <span class="c1"># implausible for that many villages says the gap is not coverage.</span>
+            <span class="k">if</span> <span class="mi">0</span> <span class="o">&lt;</span> <span class="n">rec</span><span class="o">.</span><span class="n">missing</span> <span class="o">&lt;=</span> <span class="mi">3</span><span class="p">:</span>
+                <span class="n">deficit</span> <span class="o">=</span> <span class="nb">next</span><span class="p">((</span><span class="n">f</span><span class="p">[</span><span class="s2">&quot;delta&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">rec</span><span class="o">.</span><span class="n">findings</span>
+                                <span class="k">if</span> <span class="n">f</span><span class="p">[</span><span class="s2">&quot;column&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;pop_total&quot;</span><span class="p">),</span> <span class="kc">None</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">deficit</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">deficit</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">average</span> <span class="o">=</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot;, </span><span class="si">{</span><span class="o">-</span><span class="n">deficit</span><span class="w"> </span><span class="o">//</span><span class="w"> </span><span class="n">rec</span><span class="o">.</span><span class="n">missing</span><span class="si">}</span><span class="s2"> each on average&quot;</span>
+                               <span class="k">if</span> <span class="n">rec</span><span class="o">.</span><span class="n">missing</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+                    <span class="n">noun</span> <span class="o">=</span> <span class="s2">&quot;obec&quot;</span> <span class="k">if</span> <span class="n">rec</span><span class="o">.</span><span class="n">missing</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="s2">&quot;obce&quot;</span>
+                    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;      the </span><span class="si">{</span><span class="n">rec</span><span class="o">.</span><span class="n">missing</span><span class="si">}</span><span class="s2"> missing </span><span class="si">{</span><span class="n">noun</span><span class="si">}</span><span class="s2"> account &quot;</span>
+                                 <span class="sa">f</span><span class="s2">&quot;for </span><span class="si">{</span><span class="o">-</span><span class="n">deficit</span><span class="si">}</span><span class="s2"> inhabitants</span><span class="si">{</span><span class="n">average</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;  &quot;</span> <span class="o">+</span> <span class="s2">&quot;-&quot;</span> <span class="o">*</span> <span class="mi">62</span><span class="p">)</span>
+    <span class="n">rate</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">passed_total</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">graded_total</span><span class="si">:</span><span class="s2">.1%</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">if</span> <span class="n">graded_total</span> <span class="k">else</span> <span class="s2">&quot;--&quot;</span>
+    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">passed_total</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">graded_total</span><span class="si">}</span><span class="s2"> graded columns reconcile  </span><span class="si">{</span><span class="n">rate</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;  houses is reported against both census definitions and graded &quot;</span>
+                 <span class="s2">&quot;against neither;&quot;</span><span class="p">)</span>
+    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">NOT_IN_CENSUS</span><span class="p">)</span><span class="si">}</span><span class="s2"> are not carried at okres level at all.&quot;</span><span class="p">)</span>
+    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;  incomplete okresy under-sum by construction — coverage, not a &quot;</span>
+                 <span class="s2">&quot;disagreement.&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>

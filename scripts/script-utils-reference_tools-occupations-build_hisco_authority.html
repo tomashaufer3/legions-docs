@@ -1,0 +1,1236 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>One row per <strong>(hisco, status, relation, product)</strong>, carrying the English label, the
+position in the HISCO hierarchy, and the derived stratification scales.</p><p class="tldr-facts"><b>Reference tools</b> · v1.1.0 · 370 lines · 6 public functions · 11 constants · used by nothing else · <code>utils/reference_tools/occupations/build_hisco_authority.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-reference_tools-occupations-build_hisco_authority-load_hierarchy">load_hierarchy</a><a class="chip" href="#fn-utils-reference_tools-occupations-build_hisco_authority-load_code_lists">load_code_lists</a><a class="chip" href="#fn-utils-reference_tools-occupations-build_hisco_authority-load_hsn_scales">load_hsn_scales</a><a class="chip" href="#fn-utils-reference_tools-occupations-build_hisco_authority-build_authority">build_authority</a><a class="chip" href="#fn-utils-reference_tools-occupations-build_hisco_authority-authority_report">authority_report</a><a class="chip" href="#fn-utils-reference_tools-occupations-build_hisco_authority-main">main</a><a class="chip const" href="#c-utils-reference_tools-occupations-build_hisco_authority-ROOT">ROOT</a><a class="chip const" href="#c-utils-reference_tools-occupations-build_hisco_authority-RAW">RAW</a><a class="chip const" href="#c-utils-reference_tools-occupations-build_hisco_authority-OUT">OUT</a><a class="chip const" href="#c-utils-reference_tools-occupations-build_hisco_authority-HIER">HIER</a><a class="chip const" href="#c-utils-reference_tools-occupations-build_hisco_authority-HSN">HSN</a><a class="chip const" href="#c-utils-reference_tools-occupations-build_hisco_authority-CODE_LISTS">CODE_LISTS</a><a class="chip const" href="#c-utils-reference_tools-occupations-build_hisco_authority-SCALE_SENTINELS">SCALE_SENTINELS</a><a class="chip const" href="#c-utils-reference_tools-occupations-build_hisco_authority-HISCLASS_LABELS">HISCLASS_LABELS</a><a class="chip const" href="#c-utils-reference_tools-occupations-build_hisco_authority-HISCLASS_5_LABELS">HISCLASS_5_LABELS</a><a class="chip const" href="#c-utils-reference_tools-occupations-build_hisco_authority-HISCLASS_5_FROM_12">HISCLASS_5_FROM_12</a><a class="chip const" href="#c-utils-reference_tools-occupations-build_hisco_authority-SOCPO_LABELS">SOCPO_LABELS</a></div>
+<h2>How it works</h2><p>Why that key and not the HISCO code alone: in the HSN release the four-field key
+determines HISCLASS, HISCLASS_5, HISCAM and SOCPO exactly — 5,762 keys, <strong>zero</strong>
+conflicts — whereas the HISCO code on its own does not: 806 of 1,346 codes (59.9 %) take
+more than one HISCLASS depending on the modifiers. The release documentation says why:
+status can move an occupation to another class, any value on <em>relation</em> excludes it from
+HISCLASS entirely, and status 41 (student) is likewise excluded. Keying on the code alone
+would silently pick one of several classes. The script asserts the dependency rather than
+trusting it, so a future release that breaks it fails loudly.</p>
+<p>Two sources, both under data/raw/hisco/ (see reference/DATA_SOURCES.md §3a):
+  - History of Work (druid, CC-BY-SA 4.0) — the hierarchy and the modifier code lists.
+  - HSN release 2020.02 — the HISCO -&gt; HISCLASS / HISCLASS_5 / HISCAM / SOCPO crosswalk.
+    Its Dutch title strings are not read; only the code columns are.</p>
+<p>Codes present in the hierarchy but never coded by HSN are kept with default modifiers and
+empty scales, so a Czech string can still resolve to a HISCO code and an English label
+even where no class exists for it.</p>
+<p>Run:  python utils/reference_tools/occupations/build_hisco_authority.py
+Emits: reference/occupations/hisco_authority.csv
+Prerequisite: python utils/reference_tools/occupations/download_hisco_sources.py
+Consumed by utils.parsing.occupations.load_hisco_authority.</p>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-reference_tools-occupations-build_hisco_authority-load_hierarchy">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">load_hierarchy</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>HISCO micro code -&gt; English label + its major/minor/unit ancestry.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 143–161 (19 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">load_hierarchy</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;HISCO micro code -&gt; English label + its major/minor/unit ancestry.&quot;&quot;&quot;</span>
+    <span class="n">h</span> <span class="o">=</span> <span class="n">_read_csv_any</span><span class="p">(</span><span class="n">HIER</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">({</span>
+        <span class="s2">&quot;hisco&quot;</span><span class="p">:</span> <span class="n">h</span><span class="p">[</span><span class="s2">&quot;hisco_full_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_pad</span><span class="p">),</span>
+        <span class="s2">&quot;hisco_pretty&quot;</span><span class="p">:</span> <span class="n">h</span><span class="p">[</span><span class="s2">&quot;hisco_full_id_pretty&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+        <span class="s2">&quot;label_en&quot;</span><span class="p">:</span> <span class="n">h</span><span class="p">[</span><span class="s2">&quot;label45&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+        <span class="s2">&quot;major&quot;</span><span class="p">:</span> <span class="n">h</span><span class="p">[</span><span class="s2">&quot;hisco_1_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+        <span class="s2">&quot;major_label&quot;</span><span class="p">:</span> <span class="n">h</span><span class="p">[</span><span class="s2">&quot;label1&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+        <span class="s2">&quot;minor&quot;</span><span class="p">:</span> <span class="n">h</span><span class="p">[</span><span class="s2">&quot;hisco_2_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+        <span class="s2">&quot;minor_label&quot;</span><span class="p">:</span> <span class="n">h</span><span class="p">[</span><span class="s2">&quot;label2&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+        <span class="s2">&quot;unit&quot;</span><span class="p">:</span> <span class="n">h</span><span class="p">[</span><span class="s2">&quot;hisco_3_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+        <span class="s2">&quot;unit_label&quot;</span><span class="p">:</span> <span class="n">h</span><span class="p">[</span><span class="s2">&quot;label3&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+    <span class="p">})</span>
+    <span class="n">dupes</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">duplicated</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">dupes</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  note: </span><span class="si">{</span><span class="n">dupes</span><span class="si">}</span><span class="s2"> duplicate hisco rows in the hierarchy — keeping the first&quot;</span><span class="p">)</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;hisco&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-build_hisco_authority-load_code_lists">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">load_code_lists</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span></pre>
+<div class="fndoc"><p>status/relation/product code -&gt; label, from the druid modifier code lists
+(<code>&amp;lt;name&amp;gt;_id, label, country_code, preferred</code>).</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 178–191 (14 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">load_code_lists</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;status/relation/product code -&gt; label, from the druid modifier code lists</span>
+<span class="sd">    (``&lt;name&gt;_id, label, country_code, preferred``).&quot;&quot;&quot;</span>
+    <span class="n">lists</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">path</span> <span class="ow">in</span> <span class="n">CODE_LISTS</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">df</span> <span class="o">=</span> <span class="n">_read_csv_any</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+        <span class="n">code_col</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">_id&quot;</span> <span class="k">if</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">_id&quot;</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span> <span class="k">else</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">label_col</span> <span class="o">=</span> <span class="s2">&quot;label&quot;</span> <span class="k">if</span> <span class="s2">&quot;label&quot;</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span> <span class="k">else</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+        <span class="k">if</span> <span class="s2">&quot;preferred&quot;</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>      <span class="c1"># one preferred label per code</span>
+            <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;preferred&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">==</span> <span class="s2">&quot;1&quot;</span><span class="p">]</span>
+        <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="n">code_col</span><span class="p">)</span>
+        <span class="n">lists</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="n">code_col</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span> <span class="n">df</span><span class="p">[</span><span class="n">label_col</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()))</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">name</span><span class="si">:</span><span class="s2">&lt;9</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">lists</span><span class="p">[</span><span class="n">name</span><span class="p">])</span><span class="si">:</span><span class="s2">&gt;3</span><span class="si">}</span><span class="s2"> codes (</span><span class="si">{</span><span class="n">code_col</span><span class="si">}</span><span class="s2"> -&gt; </span><span class="si">{</span><span class="n">label_col</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">lists</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-build_hisco_authority-load_hsn_scales">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">load_hsn_scales</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>(hisco, status, relation, product) -&gt; HISCLASS / HISCLASS_5 / HISCAM / SOCPO.</p>
+<p>Asserts the functional dependency instead of assuming it: if a future release makes
+the key ambiguous, this raises rather than silently picking a class.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 194–234 (41 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">load_hsn_scales</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;(hisco, status, relation, product) -&gt; HISCLASS / HISCLASS_5 / HISCAM / SOCPO.</span>
+
+<span class="sd">    Asserts the functional dependency instead of assuming it: if a future release makes</span>
+<span class="sd">    the key ambiguous, this raises rather than silently picking a class.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">cols</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;HISCO&quot;</span><span class="p">,</span> <span class="s2">&quot;STATUS&quot;</span><span class="p">,</span> <span class="s2">&quot;RELATION&quot;</span><span class="p">,</span> <span class="s2">&quot;PRODUCT&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;HISCLASS&quot;</span><span class="p">,</span> <span class="s2">&quot;HISCLASS_5&quot;</span><span class="p">,</span> <span class="s2">&quot;HISCAM_U1&quot;</span><span class="p">,</span> <span class="s2">&quot;SOCPO&quot;</span><span class="p">]</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">HSN</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">usecols</span><span class="o">=</span><span class="n">cols</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;HISCO&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;HISCO&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_pad</span><span class="p">)</span>
+
+    <span class="n">key</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;HISCO&quot;</span><span class="p">,</span> <span class="s2">&quot;STATUS&quot;</span><span class="p">,</span> <span class="s2">&quot;RELATION&quot;</span><span class="p">,</span> <span class="s2">&quot;PRODUCT&quot;</span><span class="p">]</span>
+    <span class="n">scales</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;HISCLASS&quot;</span><span class="p">,</span> <span class="s2">&quot;HISCLASS_5&quot;</span><span class="p">,</span> <span class="s2">&quot;HISCAM_U1&quot;</span><span class="p">,</span> <span class="s2">&quot;SOCPO&quot;</span><span class="p">]</span>
+    <span class="n">ambiguous</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="n">key</span><span class="p">)[</span><span class="n">scales</span><span class="p">]</span><span class="o">.</span><span class="n">nunique</span><span class="p">()</span><span class="o">.</span><span class="n">gt</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">ambiguous</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+        <span class="n">bad</span> <span class="o">=</span> <span class="n">ambiguous</span><span class="p">[</span><span class="n">ambiguous</span><span class="p">]</span><span class="o">.</span><span class="n">index</span><span class="o">.</span><span class="n">tolist</span><span class="p">()[:</span><span class="mi">10</span><span class="p">]</span>
+        <span class="k">raise</span> <span class="ne">AssertionError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">ambiguous</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">}</span><span class="s2"> (hisco,status,relation,product) keys carry more than &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;one scale value — the crosswalk is no longer a function. First: </span><span class="si">{</span><span class="n">bad</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="p">)</span>
+
+    <span class="n">n_titles</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">size</span><span class="p">()</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="s2">&quot;n_hsn&quot;</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">n_titles</span><span class="p">)</span><span class="o">.</span><span class="n">reset_index</span><span class="p">()</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">{</span>
+        <span class="s2">&quot;HISCO&quot;</span><span class="p">:</span> <span class="s2">&quot;hisco&quot;</span><span class="p">,</span> <span class="s2">&quot;STATUS&quot;</span><span class="p">:</span> <span class="s2">&quot;status&quot;</span><span class="p">,</span> <span class="s2">&quot;RELATION&quot;</span><span class="p">:</span> <span class="s2">&quot;relation&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;PRODUCT&quot;</span><span class="p">:</span> <span class="s2">&quot;product&quot;</span><span class="p">,</span> <span class="s2">&quot;HISCLASS&quot;</span><span class="p">:</span> <span class="s2">&quot;hisclass&quot;</span><span class="p">,</span> <span class="s2">&quot;HISCLASS_5&quot;</span><span class="p">:</span> <span class="s2">&quot;hisclass_5&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;HISCAM_U1&quot;</span><span class="p">:</span> <span class="s2">&quot;hiscam_u1&quot;</span><span class="p">,</span> <span class="s2">&quot;SOCPO&quot;</span><span class="p">:</span> <span class="s2">&quot;socpo&quot;</span><span class="p">,</span>
+    <span class="p">})</span>
+    <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;hisclass&quot;</span><span class="p">,</span> <span class="s2">&quot;hisclass_5&quot;</span><span class="p">,</span> <span class="s2">&quot;hiscam_u1&quot;</span><span class="p">,</span> <span class="s2">&quot;socpo&quot;</span><span class="p">]:</span>
+        <span class="n">out</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">_to_num</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="n">c</span><span class="p">])</span>
+
+    <span class="c1"># The 12-&gt;5 aggregation is documented; check the file agrees with the documentation.</span>
+    <span class="n">both</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">dropna</span><span class="p">(</span><span class="n">subset</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;hisclass&quot;</span><span class="p">,</span> <span class="s2">&quot;hisclass_5&quot;</span><span class="p">])</span>
+    <span class="n">expected</span> <span class="o">=</span> <span class="n">both</span><span class="p">[</span><span class="s2">&quot;hisclass&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">HISCLASS_5_FROM_12</span><span class="p">)</span>
+    <span class="n">mismatch</span> <span class="o">=</span> <span class="nb">int</span><span class="p">((</span><span class="n">expected</span> <span class="o">!=</span> <span class="n">both</span><span class="p">[</span><span class="s2">&quot;hisclass_5&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">))</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
+    <span class="k">if</span> <span class="n">mismatch</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">AssertionError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">mismatch</span><span class="si">}</span><span class="s2"> rows where HISCLASS_5 disagrees with the documented &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;12-&gt;5 aggregation (§4.1)&quot;</span>
+        <span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-build_hisco_authority-build_authority">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">build_authority</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<p class="calls"><b>Called by</b> <code>utils/lexikon_1910/lexikon_1910_names.py</code> <code>utils/lexikon_1910/run_frozen.py</code> <code>utils/lexikon_1910/run_lexikon_1910_pilot.py</code></p>
+<details><summary>source · lines 237–333 (97 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">build_authority</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Reading inputs …&quot;</span><span class="p">)</span>
+    <span class="n">hier</span> <span class="o">=</span> <span class="n">load_hierarchy</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  hierarchy </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">hier</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> HISCO micro codes&quot;</span><span class="p">)</span>
+    <span class="n">lists</span> <span class="o">=</span> <span class="n">load_code_lists</span><span class="p">()</span>
+    <span class="n">hsn</span> <span class="o">=</span> <span class="n">load_hsn_scales</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  HSN       </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">hsn</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> (hisco,status,relation,product) keys &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;from </span><span class="si">{</span><span class="n">hsn</span><span class="p">[</span><span class="s1">&#39;n_hsn&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> titles&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Codes the hierarchy knows but HSN never coded: keep them with default modifiers so</span>
+    <span class="c1"># a Czech string can still reach a code + label (scales stay &lt;NA&gt;, honestly empty).</span>
+    <span class="n">coded</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">hsn</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">])</span>
+    <span class="n">uncoded</span> <span class="o">=</span> <span class="n">hier</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="o">~</span><span class="n">hier</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">coded</span><span class="p">),</span> <span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">c</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="p">[(</span><span class="s2">&quot;status&quot;</span><span class="p">,</span> <span class="s2">&quot;-9&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;relation&quot;</span><span class="p">,</span> <span class="s2">&quot;-9&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;product&quot;</span><span class="p">,</span> <span class="s2">&quot;-9&quot;</span><span class="p">)]:</span>
+        <span class="n">uncoded</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">v</span>
+    <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;hisclass&quot;</span><span class="p">,</span> <span class="s2">&quot;hisclass_5&quot;</span><span class="p">,</span> <span class="s2">&quot;socpo&quot;</span><span class="p">]:</span>
+        <span class="n">uncoded</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="n">uncoded</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+    <span class="n">uncoded</span><span class="p">[</span><span class="s2">&quot;hiscam_u1&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="n">uncoded</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;Float64&quot;</span><span class="p">)</span>
+    <span class="n">uncoded</span><span class="p">[</span><span class="s2">&quot;n_hsn&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">uncoded</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> hierarchy codes carry no HSN class (kept, scales empty)&quot;</span><span class="p">)</span>
+
+    <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">hsn</span><span class="p">,</span> <span class="n">uncoded</span><span class="p">],</span> <span class="n">ignore_index</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;in_hsn&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;n_hsn&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">gt</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span><span class="n">hier</span><span class="p">,</span> <span class="n">on</span><span class="o">=</span><span class="s2">&quot;hisco&quot;</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;left&quot;</span><span class="p">)</span>
+
+    <span class="c1"># HSN codes with no micro-hierarchy row: the sentinels (-1/-2/-3) plus codes HSN</span>
+    <span class="c1"># placed at a coarser level. Label those from their ancestor rather than shipping a</span>
+    <span class="c1"># blank, and record which level the label came from.</span>
+    <span class="n">anc</span> <span class="o">=</span> <span class="n">_ancestor_labels</span><span class="p">(</span><span class="n">hier</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;label_level&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span>
+    <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;label_en&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;label_en&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span><span class="p">),</span> <span class="s2">&quot;label_level&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;micro&quot;</span>
+    <span class="k">for</span> <span class="n">level</span><span class="p">,</span> <span class="n">width</span><span class="p">,</span> <span class="n">label_col</span> <span class="ow">in</span> <span class="p">[(</span><span class="s2">&quot;unit&quot;</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="s2">&quot;unit_label&quot;</span><span class="p">),</span>
+                                    <span class="p">(</span><span class="s2">&quot;minor&quot;</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="s2">&quot;minor_label&quot;</span><span class="p">),</span>
+                                    <span class="p">(</span><span class="s2">&quot;major&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;major_label&quot;</span><span class="p">)]:</span>
+        <span class="n">gap</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;label_level&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isna</span><span class="p">()</span> <span class="o">&amp;</span> <span class="o">~</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;-&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">gap</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+            <span class="k">break</span>
+        <span class="n">fill</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">gap</span><span class="p">,</span> <span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="p">[:</span><span class="n">width</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">anc</span><span class="p">[</span><span class="n">level</span><span class="p">])</span>
+        <span class="n">hit</span> <span class="o">=</span> <span class="n">fill</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span>
+        <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">gap</span> <span class="o">&amp;</span> <span class="n">hit</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="n">fill_value</span><span class="o">=</span><span class="kc">False</span><span class="p">),</span> <span class="s2">&quot;label_en&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">fill</span><span class="p">[</span><span class="n">hit</span><span class="p">]</span>
+        <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">gap</span> <span class="o">&amp;</span> <span class="n">hit</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="n">fill_value</span><span class="o">=</span><span class="kc">False</span><span class="p">),</span> <span class="n">label_col</span><span class="p">]</span> <span class="o">=</span> <span class="n">fill</span><span class="p">[</span><span class="n">hit</span><span class="p">]</span>
+        <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">gap</span> <span class="o">&amp;</span> <span class="n">hit</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="n">fill_value</span><span class="o">=</span><span class="kc">False</span><span class="p">),</span> <span class="s2">&quot;label_level&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">level</span>
+
+    <span class="c1"># The label is only half of what the ancestor supplies. Those same codes had blank</span>
+    <span class="c1"># `major`/`minor`/`unit` because they carry no micro-hierarchy row to merge, which left</span>
+    <span class="c1"># `occupation_hisco_major` &lt;NA&gt; for 553 records that do carry a HISCO code *and* a</span>
+    <span class="c1"># HISCLASS — `brusič skla` -&gt; 89125 alone is 304 of them. HISCO is positional: across</span>
+    <span class="c1"># all 1,675 micro rows `major == hisco[0]`, `minor == hisco[1]` and `unit == hisco[2]`</span>
+    <span class="c1"># exactly, so the ancestry is derivable from the code itself. Fill every level, not</span>
+    <span class="c1"># just the one the label came from; sentinels (-1/-2/-3) are left alone.</span>
+    <span class="n">real</span> <span class="o">=</span> <span class="o">~</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;-&quot;</span><span class="p">)</span>
+    <span class="n">blank</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">c</span><span class="p">:</span> <span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">isna</span><span class="p">()</span> <span class="o">|</span> <span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;string&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">eq</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">n_filled</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">level</span><span class="p">,</span> <span class="n">pos</span><span class="p">,</span> <span class="n">width</span><span class="p">,</span> <span class="n">code_col</span><span class="p">,</span> <span class="n">label_col</span> <span class="ow">in</span> <span class="p">[</span>
+        <span class="p">(</span><span class="s2">&quot;major&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;major&quot;</span><span class="p">,</span> <span class="s2">&quot;major_label&quot;</span><span class="p">),</span>
+        <span class="p">(</span><span class="s2">&quot;minor&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="s2">&quot;minor&quot;</span><span class="p">,</span> <span class="s2">&quot;minor_label&quot;</span><span class="p">),</span>
+        <span class="p">(</span><span class="s2">&quot;unit&quot;</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="s2">&quot;unit&quot;</span><span class="p">,</span> <span class="s2">&quot;unit_label&quot;</span><span class="p">),</span>
+    <span class="p">]:</span>
+        <span class="n">gap</span> <span class="o">=</span> <span class="n">real</span> <span class="o">&amp;</span> <span class="n">blank</span><span class="p">(</span><span class="n">code_col</span><span class="p">)</span>
+        <span class="n">n_filled</span> <span class="o">+=</span> <span class="nb">int</span><span class="p">(</span><span class="n">gap</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
+        <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">gap</span><span class="p">,</span> <span class="n">code_col</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">gap</span><span class="p">,</span> <span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="p">[</span><span class="n">pos</span><span class="p">]</span>
+        <span class="n">lab_gap</span> <span class="o">=</span> <span class="n">real</span> <span class="o">&amp;</span> <span class="n">blank</span><span class="p">(</span><span class="n">label_col</span><span class="p">)</span>
+        <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">lab_gap</span><span class="p">,</span> <span class="n">label_col</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">lab_gap</span><span class="p">,</span> <span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="p">[:</span><span class="n">width</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">anc</span><span class="p">[</span><span class="n">level</span><span class="p">])</span>
+    <span class="k">if</span> <span class="n">n_filled</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">n_filled</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> ancestry cells derived from the code&#39;s own digits&quot;</span><span class="p">)</span>
+
+    <span class="n">coarse</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;label_level&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">([</span><span class="s2">&quot;unit&quot;</span><span class="p">,</span> <span class="s2">&quot;minor&quot;</span><span class="p">,</span> <span class="s2">&quot;major&quot;</span><span class="p">]),</span> <span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">unique</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">coarse</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">coarse</span><span class="p">)</span><span class="si">}</span><span class="s2"> codes labelled from an ancestor group &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;(coarser than micro): </span><span class="si">{</span><span class="nb">sorted</span><span class="p">(</span><span class="n">coarse</span><span class="p">)[:</span><span class="mi">12</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">blank</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;label_level&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isna</span><span class="p">(),</span> <span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">unique</span><span class="p">())</span>
+    <span class="k">if</span> <span class="n">blank</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">blank</span><span class="p">)</span><span class="si">}</span><span class="s2"> codes with no label at all: </span><span class="si">{</span><span class="n">blank</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Labels</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisclass_label&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisclass&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span>
+        <span class="k">lambda</span> <span class="n">v</span><span class="p">:</span> <span class="n">HISCLASS_LABELS</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">v</span><span class="p">))</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">else</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;string&quot;</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisclass_5_label&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisclass_5&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span>
+        <span class="k">lambda</span> <span class="n">v</span><span class="p">:</span> <span class="n">HISCLASS_5_LABELS</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">v</span><span class="p">))</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">else</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;string&quot;</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;socpo_label&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;socpo&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span>
+        <span class="k">lambda</span> <span class="n">v</span><span class="p">:</span> <span class="n">SOCPO_LABELS</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">v</span><span class="p">))</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">else</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;string&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">CODE_LISTS</span><span class="p">:</span>
+        <span class="n">df</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">_label&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">name</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">lists</span><span class="p">[</span><span class="n">name</span><span class="p">])</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;string&quot;</span><span class="p">)</span>
+
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisclass&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisclass&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisclass_5&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisclass_5&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;socpo&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;socpo&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+
+    <span class="n">order</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">,</span> <span class="s2">&quot;status&quot;</span><span class="p">,</span> <span class="s2">&quot;relation&quot;</span><span class="p">,</span> <span class="s2">&quot;product&quot;</span><span class="p">,</span>
+             <span class="s2">&quot;label_en&quot;</span><span class="p">,</span> <span class="s2">&quot;label_level&quot;</span><span class="p">,</span> <span class="s2">&quot;hisco_pretty&quot;</span><span class="p">,</span>
+             <span class="s2">&quot;major&quot;</span><span class="p">,</span> <span class="s2">&quot;major_label&quot;</span><span class="p">,</span> <span class="s2">&quot;minor&quot;</span><span class="p">,</span> <span class="s2">&quot;minor_label&quot;</span><span class="p">,</span> <span class="s2">&quot;unit&quot;</span><span class="p">,</span> <span class="s2">&quot;unit_label&quot;</span><span class="p">,</span>
+             <span class="s2">&quot;hisclass&quot;</span><span class="p">,</span> <span class="s2">&quot;hisclass_label&quot;</span><span class="p">,</span> <span class="s2">&quot;hisclass_5&quot;</span><span class="p">,</span> <span class="s2">&quot;hisclass_5_label&quot;</span><span class="p">,</span>
+             <span class="s2">&quot;hiscam_u1&quot;</span><span class="p">,</span> <span class="s2">&quot;socpo&quot;</span><span class="p">,</span> <span class="s2">&quot;socpo_label&quot;</span><span class="p">,</span>
+             <span class="s2">&quot;status_label&quot;</span><span class="p">,</span> <span class="s2">&quot;relation_label&quot;</span><span class="p">,</span> <span class="s2">&quot;product_label&quot;</span><span class="p">,</span>
+             <span class="s2">&quot;n_hsn&quot;</span><span class="p">,</span> <span class="s2">&quot;in_hsn&quot;</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">df</span><span class="p">[</span><span class="n">order</span><span class="p">]</span><span class="o">.</span><span class="n">sort_values</span><span class="p">([</span><span class="s2">&quot;hisco&quot;</span><span class="p">,</span> <span class="s2">&quot;status&quot;</span><span class="p">,</span> <span class="s2">&quot;relation&quot;</span><span class="p">,</span> <span class="s2">&quot;product&quot;</span><span class="p">],</span>
+                                 <span class="n">ignore_index</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-build_hisco_authority-authority_report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">authority_report</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 336–356 (21 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">336</span>
+<span class="normal">337</span>
+<span class="normal">338</span>
+<span class="normal">339</span>
+<span class="normal">340</span>
+<span class="normal">341</span>
+<span class="normal">342</span>
+<span class="normal">343</span>
+<span class="normal">344</span>
+<span class="normal">345</span>
+<span class="normal">346</span>
+<span class="normal">347</span>
+<span class="normal">348</span>
+<span class="normal">349</span>
+<span class="normal">350</span>
+<span class="normal">351</span>
+<span class="normal">352</span>
+<span class="normal">353</span>
+<span class="normal">354</span>
+<span class="normal">355</span>
+<span class="normal">356</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">authority_report</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Authority table&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  rows                    </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  distinct HISCO codes    </span><span class="si">{</span><span class="n">df</span><span class="p">[</span><span class="s1">&#39;hisco&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">nunique</span><span class="p">()</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  default-modifier rows   </span><span class="si">{</span><span class="nb">int</span><span class="p">(((</span><span class="n">df</span><span class="p">[[</span><span class="s1">&#39;status&#39;</span><span class="p">,</span><span class="s1">&#39;relation&#39;</span><span class="p">,</span><span class="s1">&#39;product&#39;</span><span class="p">]]</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s1">&#39;-9&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  with an English label   </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">&#39;label_en&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="nb">int</span><span class="p">((</span><span class="n">df</span><span class="p">[</span><span class="s1">&#39;label_level&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s1">&#39;micro&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> at micro level)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  with a HISCLASS         </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">&#39;hisclass&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  with a HISCAM           </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">&#39;hiscam_u1&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  HISCLASS distribution (rows, not people):&quot;</span><span class="p">)</span>
+    <span class="n">vc</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisclass&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">sort_index</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">vc</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">k</span><span class="p">)</span><span class="si">:</span><span class="s2">&gt;3</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">v</span><span class="si">:</span><span class="s2">&gt;6,</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">HISCLASS_LABELS</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">k</span><span class="p">),</span><span class="w"> </span><span class="s1">&#39;?&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">bad</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisclass&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">dropna</span><span class="p">()</span>
+    <span class="k">assert</span> <span class="n">bad</span><span class="o">.</span><span class="n">between</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">13</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">(),</span> <span class="s2">&quot;HISCLASS outside 1..13&quot;</span>
+    <span class="n">h5</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisclass_5&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">dropna</span><span class="p">()</span>
+    <span class="k">assert</span> <span class="n">h5</span><span class="o">.</span><span class="n">between</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">5</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">(),</span> <span class="s2">&quot;HISCLASS_5 outside 1..5&quot;</span>
+    <span class="k">assert</span> <span class="ow">not</span> <span class="n">df</span><span class="o">.</span><span class="n">duplicated</span><span class="p">([</span><span class="s2">&quot;hisco&quot;</span><span class="p">,</span> <span class="s2">&quot;status&quot;</span><span class="p">,</span> <span class="s2">&quot;relation&quot;</span><span class="p">,</span> <span class="s2">&quot;product&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">any</span><span class="p">(),</span> \
+        <span class="s2">&quot;duplicate (hisco,status,relation,product) rows&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  assertions passed: HISCLASS 1..13, HISCLASS_5 1..5, key unique&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-build_hisco_authority-main">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 359–366 (8 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">359</span>
+<span class="normal">360</span>
+<span class="normal">361</span>
+<span class="normal">362</span>
+<span class="normal">363</span>
+<span class="normal">364</span>
+<span class="normal">365</span>
+<span class="normal">366</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">_require_inputs</span><span class="p">()</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">build_authority</span><span class="p">()</span>
+    <span class="n">authority_report</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="n">OUT</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">df</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">OUT</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Wrote </span><span class="si">{</span><span class="n">OUT</span><span class="o">.</span><span class="n">relative_to</span><span class="p">(</span><span class="n">ROOT</span><span class="p">)</span><span class="si">}</span><span class="s2">  (</span><span class="si">{</span><span class="n">OUT</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> B)&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-reference_tools-occupations-build_hisco_authority-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-build_hisco_authority-RAW"><pre class="sig">RAW<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;data&#39;</span> <span class="o">/</span> <span class="s1">&#39;raw&#39;</span> <span class="o">/</span> <span class="s1">&#39;hisco&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-build_hisco_authority-OUT"><pre class="sig">OUT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;reference&#39;</span> <span class="o">/</span> <span class="s1">&#39;occupations&#39;</span> <span class="o">/</span> <span class="s1">&#39;hisco_authority.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-build_hisco_authority-HIER"><pre class="sig">HIER<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">RAW</span> <span class="o">/</span> <span class="s1">&#39;hisco_45_full_03.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-build_hisco_authority-HSN"><pre class="sig">HSN<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">RAW</span> <span class="o">/</span> <span class="s1">&#39;HSN_HISCO_release_2020_02.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-build_hisco_authority-CODE_LISTS"><pre class="sig">CODE_LISTS<span class="kind">dict · 3 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;status&#39;</span><span class="p">:</span> <span class="n">RAW</span> <span class="o">/</span> <span class="s1">&#39;status.csv&#39;</span><span class="p">,</span> <span class="s1">&#39;relation&#39;</span><span class="p">:</span> <span class="n">RAW</span> <span class="o">/</span> <span class="s1">&#39;relation.csv&#39;</span><span class="p">,</span> <span class="s1">&#39;product&#39;</span><span class="p">:</span> <span class="n">RAW</span> <span class="o">/</span> <span class="s1">&#39;product.csv&#39;</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-build_hisco_authority-SCALE_SENTINELS"><pre class="sig">SCALE_SENTINELS<span class="kind">set · 5 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;-1&#39;</span><span class="p">,</span> <span class="s1">&#39;-9&#39;</span><span class="p">,</span> <span class="s1">&#39;-9.00&#39;</span><span class="p">,</span> <span class="s1">&#39;999&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-build_hisco_authority-HISCLASS_LABELS"><pre class="sig">HISCLASS_LABELS<span class="kind">dict · 13 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="mi">1</span><span class="p">:</span> <span class="s1">&#39;Higher managers&#39;</span><span class="p">,</span> <span class="mi">2</span><span class="p">:</span> <span class="s1">&#39;Higher professionals&#39;</span><span class="p">,</span> <span class="mi">3</span><span class="p">:</span> <span class="s1">&#39;Lower managers&#39;</span><span class="p">,</span> <span class="mi">4</span><span class="p">:</span> <span class="s1">&#39;Lower professionals, higher and middle clerical and sales personnel&#39;</span><span class="p">,</span> <span class="mi">5</span><span class="p">:</span> <span class="s1">&#39;Lower clerical and sales personnel&#39;</span><span class="p">,</span> <span class="mi">6</span><span class="p">:</span> <span class="s1">&#39;Foremen&#39;</span><span class="p">,</span> <span class="mi">7</span><span class="p">:</span> <span class="s1">&#39;Medium skilled workers&#39;</span><span class="p">,</span> <span class="mi">8</span><span class="p">:</span> <span class="s1">&#39;Farmers and fishermen&#39;</span><span class="p">,</span> <span class="mi">9</span><span class="p">:</span> <span class="s1">&#39;Lower skilled workers&#39;</span><span class="p">,</span> <span class="mi">10</span><span class="p">:</span> <span class="s1">&#39;Lower skilled farm workers&#39;</span><span class="p">,</span> <span class="mi">11</span><span class="p">:</span> <span class="s1">&#39;Unskilled workers&#39;</span><span class="p">,</span> <span class="mi">12</span><span class="p">:</span> <span class="s1">&#39;Unskilled farm workers&#39;</span><span class="p">,</span> <span class="mi">13</span><span class="p">:</span> <span class="s1">&#39;Unskilled workers not specified&#39;</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-build_hisco_authority-HISCLASS_5_LABELS"><pre class="sig">HISCLASS_5_LABELS<span class="kind">dict · 5 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="mi">1</span><span class="p">:</span> <span class="s1">&#39;Elite&#39;</span><span class="p">,</span> <span class="mi">2</span><span class="p">:</span> <span class="s1">&#39;Lower middle class&#39;</span><span class="p">,</span> <span class="mi">3</span><span class="p">:</span> <span class="s1">&#39;Skilled workers&#39;</span><span class="p">,</span> <span class="mi">4</span><span class="p">:</span> <span class="s1">&#39;Self-employed farmers and fishermen&#39;</span><span class="p">,</span> <span class="mi">5</span><span class="p">:</span> <span class="s1">&#39;Unskilled workers and farm workers&#39;</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-build_hisco_authority-HISCLASS_5_FROM_12"><pre class="sig">HISCLASS_5_FROM_12<span class="kind">dict · 13 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="mi">1</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">5</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">6</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">7</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">9</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">8</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">10</span><span class="p">:</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">11</span><span class="p">:</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">12</span><span class="p">:</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">13</span><span class="p">:</span> <span class="mi">5</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-build_hisco_authority-SOCPO_LABELS"><pre class="sig">SOCPO_LABELS<span class="kind">dict · 6 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="mi">1</span><span class="p">:</span> <span class="s1">&#39;Unskilled workers&#39;</span><span class="p">,</span> <span class="mi">2</span><span class="p">:</span> <span class="s1">&#39;Semi-skilled workers&#39;</span><span class="p">,</span> <span class="mi">3</span><span class="p">:</span> <span class="s1">&#39;Skilled workers&#39;</span><span class="p">,</span> <span class="mi">41</span><span class="p">:</span> <span class="s1">&#39;Middle class — farmers&#39;</span><span class="p">,</span> <span class="mi">42</span><span class="p">:</span> <span class="s1">&#39;Middle class — supervisors of skilled workers&#39;</span><span class="p">,</span> <span class="mi">5</span><span class="p">:</span> <span class="s1">&#39;Elite&#39;</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/reference_tools/occupations/build_hisco_authority.py · 370 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span>
+<span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span>
+<span class="normal">337</span>
+<span class="normal">338</span>
+<span class="normal">339</span>
+<span class="normal">340</span>
+<span class="normal">341</span>
+<span class="normal">342</span>
+<span class="normal">343</span>
+<span class="normal">344</span>
+<span class="normal">345</span>
+<span class="normal">346</span>
+<span class="normal">347</span>
+<span class="normal">348</span>
+<span class="normal">349</span>
+<span class="normal">350</span>
+<span class="normal">351</span>
+<span class="normal">352</span>
+<span class="normal">353</span>
+<span class="normal">354</span>
+<span class="normal">355</span>
+<span class="normal">356</span>
+<span class="normal">357</span>
+<span class="normal">358</span>
+<span class="normal">359</span>
+<span class="normal">360</span>
+<span class="normal">361</span>
+<span class="normal">362</span>
+<span class="normal">363</span>
+<span class="normal">364</span>
+<span class="normal">365</span>
+<span class="normal">366</span>
+<span class="normal">367</span>
+<span class="normal">368</span>
+<span class="normal">369</span>
+<span class="normal">370</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">build_hisco_authority.py — generate reference/occupations/hisco_authority.csv</span>
+<span class="sd">=============================================================================</span>
+<span class="sd">One row per **(hisco, status, relation, product)**, carrying the English label, the</span>
+<span class="sd">position in the HISCO hierarchy, and the derived stratification scales.</span>
+
+<span class="sd">Why that key and not the HISCO code alone: in the HSN release the four-field key</span>
+<span class="sd">determines HISCLASS, HISCLASS_5, HISCAM and SOCPO exactly — 5,762 keys, **zero**</span>
+<span class="sd">conflicts — whereas the HISCO code on its own does not: 806 of 1,346 codes (59.9 %) take</span>
+<span class="sd">more than one HISCLASS depending on the modifiers. The release documentation says why:</span>
+<span class="sd">status can move an occupation to another class, any value on *relation* excludes it from</span>
+<span class="sd">HISCLASS entirely, and status 41 (student) is likewise excluded. Keying on the code alone</span>
+<span class="sd">would silently pick one of several classes. The script asserts the dependency rather than</span>
+<span class="sd">trusting it, so a future release that breaks it fails loudly.</span>
+
+<span class="sd">Two sources, both under data/raw/hisco/ (see reference/DATA_SOURCES.md §3a):</span>
+<span class="sd">  * History of Work (druid, CC-BY-SA 4.0) — the hierarchy and the modifier code lists.</span>
+<span class="sd">  * HSN release 2020.02 — the HISCO -&gt; HISCLASS / HISCLASS_5 / HISCAM / SOCPO crosswalk.</span>
+<span class="sd">    Its Dutch title strings are not read; only the code columns are.</span>
+
+<span class="sd">Codes present in the hierarchy but never coded by HSN are kept with default modifiers and</span>
+<span class="sd">empty scales, so a Czech string can still resolve to a HISCO code and an English label</span>
+<span class="sd">even where no class exists for it.</span>
+
+<span class="sd">Run:  python utils/reference_tools/occupations/build_hisco_authority.py</span>
+<span class="sd">Emits: reference/occupations/hisco_authority.csv</span>
+<span class="sd">Prerequisite: python utils/reference_tools/occupations/download_hisco_sources.py</span>
+<span class="sd">Consumed by utils.parsing.occupations.load_hisco_authority.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">))</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.1.0&quot;</span>   <span class="c1"># + ancestry codes backfilled for codes labelled above micro level</span>
+
+<span class="n">RAW</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;data&quot;</span> <span class="o">/</span> <span class="s2">&quot;raw&quot;</span> <span class="o">/</span> <span class="s2">&quot;hisco&quot;</span>
+<span class="n">OUT</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;occupations&quot;</span> <span class="o">/</span> <span class="s2">&quot;hisco_authority.csv&quot;</span>
+
+<span class="n">HIER</span> <span class="o">=</span> <span class="n">RAW</span> <span class="o">/</span> <span class="s2">&quot;hisco_45_full_03.csv&quot;</span>
+<span class="n">HSN</span> <span class="o">=</span> <span class="n">RAW</span> <span class="o">/</span> <span class="s2">&quot;HSN_HISCO_release_2020_02.csv&quot;</span>
+<span class="n">CODE_LISTS</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="n">RAW</span> <span class="o">/</span> <span class="s2">&quot;status.csv&quot;</span><span class="p">,</span>
+              <span class="s2">&quot;relation&quot;</span><span class="p">:</span> <span class="n">RAW</span> <span class="o">/</span> <span class="s2">&quot;relation.csv&quot;</span><span class="p">,</span>
+              <span class="s2">&quot;product&quot;</span><span class="p">:</span> <span class="n">RAW</span> <span class="o">/</span> <span class="s2">&quot;product.csv&quot;</span><span class="p">}</span>
+
+<span class="c1"># Sentinels, per the HSN release documentation (§2, §4.1–4.3). Note that -9 on the three</span>
+<span class="c1"># modifier fields means &quot;no modifier&quot;, which is the *normal* case and part of the key —</span>
+<span class="c1"># it is kept as-is; only the scale sentinels below become &lt;NA&gt;.</span>
+<span class="n">SCALE_SENTINELS</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;-1&quot;</span><span class="p">,</span> <span class="s2">&quot;-9&quot;</span><span class="p">,</span> <span class="s2">&quot;-9.00&quot;</span><span class="p">,</span> <span class="s2">&quot;999&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">}</span>
+
+<span class="c1"># HISCLASS, verbatim from HSN release 2020.02 §4.1. Class 13 is an HSN addition for</span>
+<span class="c1"># HISCO 99900/99920, whose split into 11 vs 12 is context-dependent.</span>
+<span class="n">HISCLASS_LABELS</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="mi">1</span><span class="p">:</span> <span class="s2">&quot;Higher managers&quot;</span><span class="p">,</span>
+    <span class="mi">2</span><span class="p">:</span> <span class="s2">&quot;Higher professionals&quot;</span><span class="p">,</span>
+    <span class="mi">3</span><span class="p">:</span> <span class="s2">&quot;Lower managers&quot;</span><span class="p">,</span>
+    <span class="mi">4</span><span class="p">:</span> <span class="s2">&quot;Lower professionals, higher and middle clerical and sales personnel&quot;</span><span class="p">,</span>
+    <span class="mi">5</span><span class="p">:</span> <span class="s2">&quot;Lower clerical and sales personnel&quot;</span><span class="p">,</span>
+    <span class="mi">6</span><span class="p">:</span> <span class="s2">&quot;Foremen&quot;</span><span class="p">,</span>
+    <span class="mi">7</span><span class="p">:</span> <span class="s2">&quot;Medium skilled workers&quot;</span><span class="p">,</span>
+    <span class="mi">8</span><span class="p">:</span> <span class="s2">&quot;Farmers and fishermen&quot;</span><span class="p">,</span>
+    <span class="mi">9</span><span class="p">:</span> <span class="s2">&quot;Lower skilled workers&quot;</span><span class="p">,</span>
+    <span class="mi">10</span><span class="p">:</span> <span class="s2">&quot;Lower skilled farm workers&quot;</span><span class="p">,</span>
+    <span class="mi">11</span><span class="p">:</span> <span class="s2">&quot;Unskilled workers&quot;</span><span class="p">,</span>
+    <span class="mi">12</span><span class="p">:</span> <span class="s2">&quot;Unskilled farm workers&quot;</span><span class="p">,</span>
+    <span class="mi">13</span><span class="p">:</span> <span class="s2">&quot;Unskilled workers not specified&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="c1"># HISCLASS_5, verbatim from §4.1. Also the aggregation the file itself uses — asserted</span>
+<span class="c1"># below against the observed HISCLASS x HISCLASS_5 crosstab.</span>
+<span class="n">HISCLASS_5_LABELS</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="mi">1</span><span class="p">:</span> <span class="s2">&quot;Elite&quot;</span><span class="p">,</span>
+    <span class="mi">2</span><span class="p">:</span> <span class="s2">&quot;Lower middle class&quot;</span><span class="p">,</span>
+    <span class="mi">3</span><span class="p">:</span> <span class="s2">&quot;Skilled workers&quot;</span><span class="p">,</span>
+    <span class="mi">4</span><span class="p">:</span> <span class="s2">&quot;Self-employed farmers and fishermen&quot;</span><span class="p">,</span>
+    <span class="mi">5</span><span class="p">:</span> <span class="s2">&quot;Unskilled workers and farm workers&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="n">HISCLASS_5_FROM_12</span> <span class="o">=</span> <span class="p">{</span><span class="mi">1</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">5</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">6</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">7</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">9</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">8</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span>
+                      <span class="mi">10</span><span class="p">:</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">11</span><span class="p">:</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">12</span><span class="p">:</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">13</span><span class="p">:</span> <span class="mi">5</span><span class="p">}</span>
+
+<span class="c1"># SOCPO, §4.3. Levels 5 / 41 / 42 / 2 / 1 are verbatim; level 3 is the &quot;Skilled workers&quot;</span>
+<span class="c1"># rung of the same five-level ladder (the page break in the release PDF drops the line).</span>
+<span class="n">SOCPO_LABELS</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="mi">1</span><span class="p">:</span> <span class="s2">&quot;Unskilled workers&quot;</span><span class="p">,</span>
+    <span class="mi">2</span><span class="p">:</span> <span class="s2">&quot;Semi-skilled workers&quot;</span><span class="p">,</span>
+    <span class="mi">3</span><span class="p">:</span> <span class="s2">&quot;Skilled workers&quot;</span><span class="p">,</span>
+    <span class="mi">41</span><span class="p">:</span> <span class="s2">&quot;Middle class — farmers&quot;</span><span class="p">,</span>
+    <span class="mi">42</span><span class="p">:</span> <span class="s2">&quot;Middle class — supervisors of skilled workers&quot;</span><span class="p">,</span>
+    <span class="mi">5</span><span class="p">:</span> <span class="s2">&quot;Elite&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_require_inputs</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">missing</span> <span class="o">=</span> <span class="p">[</span><span class="n">p</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="p">[</span><span class="n">HIER</span><span class="p">,</span> <span class="n">HSN</span><span class="p">,</span> <span class="o">*</span><span class="n">CODE_LISTS</span><span class="o">.</span><span class="n">values</span><span class="p">()]</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">p</span><span class="o">.</span><span class="n">exists</span><span class="p">()]</span>
+    <span class="k">if</span> <span class="n">missing</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Missing input files:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">missing</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">p</span><span class="o">.</span><span class="n">relative_to</span><span class="p">(</span><span class="n">ROOT</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Run:  python utils/reference_tools/occupations/download_hisco_sources.py&quot;</span><span class="p">)</span>
+        <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_read_csv_any</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Read a druid CSV. The separator is not consistent across the assets — the</span>
+<span class="sd">    hierarchy is semicolon-separated, the modifier code lists are comma-separated and</span>
+<span class="sd">    fully quoted — and the encoding is not declared, so sniff both.&quot;&quot;&quot;</span>
+    <span class="n">last</span><span class="p">:</span> <span class="ne">Exception</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="k">for</span> <span class="n">enc</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">,</span> <span class="s2">&quot;cp1252&quot;</span><span class="p">,</span> <span class="s2">&quot;latin-1&quot;</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">sep</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;;&quot;</span><span class="p">,</span> <span class="s2">&quot;,&quot;</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="n">sep</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="n">enc</span><span class="p">,</span>
+                                 <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">UnicodeDecodeError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="n">last</span> <span class="o">=</span> <span class="n">e</span>
+                <span class="k">break</span>                       <span class="c1"># encoding is wrong; try the next one</span>
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>          <span class="c1"># noqa: BLE001 — parser errors mean wrong sep</span>
+                <span class="n">last</span> <span class="o">=</span> <span class="n">e</span>
+                <span class="k">continue</span>
+            <span class="k">if</span> <span class="n">df</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">df</span>
+    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;could not parse </span><span class="si">{</span><span class="n">path</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2"> as CSV (</span><span class="si">{</span><span class="n">last</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_pad</span><span class="p">(</span><span class="n">code</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;HISCO codes are 5 digits; HSN stores them numerically, so 0-11.10 arrives as</span>
+<span class="sd">    &#39;1110&#39;. Sentinels (-1/-2/-3) are left alone.&quot;&quot;&quot;</span>
+    <span class="n">code</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">code</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">code</span> <span class="ow">or</span> <span class="n">code</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;-&quot;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">code</span>
+    <span class="k">return</span> <span class="n">code</span><span class="o">.</span><span class="n">zfill</span><span class="p">(</span><span class="mi">5</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_to_num</span><span class="p">(</span><span class="n">s</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Scale column -&gt; nullable numeric, sentinels to &lt;NA&gt;.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_numeric</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="o">~</span><span class="n">s</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">SCALE_SENTINELS</span><span class="p">)),</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;coerce&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;Float64&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">load_hierarchy</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;HISCO micro code -&gt; English label + its major/minor/unit ancestry.&quot;&quot;&quot;</span>
+    <span class="n">h</span> <span class="o">=</span> <span class="n">_read_csv_any</span><span class="p">(</span><span class="n">HIER</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">({</span>
+        <span class="s2">&quot;hisco&quot;</span><span class="p">:</span> <span class="n">h</span><span class="p">[</span><span class="s2">&quot;hisco_full_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_pad</span><span class="p">),</span>
+        <span class="s2">&quot;hisco_pretty&quot;</span><span class="p">:</span> <span class="n">h</span><span class="p">[</span><span class="s2">&quot;hisco_full_id_pretty&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+        <span class="s2">&quot;label_en&quot;</span><span class="p">:</span> <span class="n">h</span><span class="p">[</span><span class="s2">&quot;label45&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+        <span class="s2">&quot;major&quot;</span><span class="p">:</span> <span class="n">h</span><span class="p">[</span><span class="s2">&quot;hisco_1_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+        <span class="s2">&quot;major_label&quot;</span><span class="p">:</span> <span class="n">h</span><span class="p">[</span><span class="s2">&quot;label1&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+        <span class="s2">&quot;minor&quot;</span><span class="p">:</span> <span class="n">h</span><span class="p">[</span><span class="s2">&quot;hisco_2_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+        <span class="s2">&quot;minor_label&quot;</span><span class="p">:</span> <span class="n">h</span><span class="p">[</span><span class="s2">&quot;label2&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+        <span class="s2">&quot;unit&quot;</span><span class="p">:</span> <span class="n">h</span><span class="p">[</span><span class="s2">&quot;hisco_3_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+        <span class="s2">&quot;unit_label&quot;</span><span class="p">:</span> <span class="n">h</span><span class="p">[</span><span class="s2">&quot;label3&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+    <span class="p">})</span>
+    <span class="n">dupes</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">duplicated</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">dupes</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  note: </span><span class="si">{</span><span class="n">dupes</span><span class="si">}</span><span class="s2"> duplicate hisco rows in the hierarchy — keeping the first&quot;</span><span class="p">)</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;hisco&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_ancestor_labels</span><span class="p">(</span><span class="n">hier</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Prefix -&gt; label at the unit / minor / major level.</span>
+
+<span class="sd">    HSN sometimes codes at a level coarser than the micro group — ``39000`` (minor group</span>
+<span class="sd">    3-90), ``02800`` (unit group 0-28), ``99999``. Those codes are valid HISCO but have no</span>
+<span class="sd">    row in the 1,675-line micro hierarchy, so their label has to come from the ancestor.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s2">&quot;unit&quot;</span><span class="p">:</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">hier</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="p">[:</span><span class="mi">3</span><span class="p">],</span> <span class="n">hier</span><span class="p">[</span><span class="s2">&quot;unit_label&quot;</span><span class="p">])),</span>
+        <span class="s2">&quot;minor&quot;</span><span class="p">:</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">hier</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="p">[:</span><span class="mi">2</span><span class="p">],</span> <span class="n">hier</span><span class="p">[</span><span class="s2">&quot;minor_label&quot;</span><span class="p">])),</span>
+        <span class="s2">&quot;major&quot;</span><span class="p">:</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">hier</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="p">[:</span><span class="mi">1</span><span class="p">],</span> <span class="n">hier</span><span class="p">[</span><span class="s2">&quot;major_label&quot;</span><span class="p">])),</span>
+    <span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">load_code_lists</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;status/relation/product code -&gt; label, from the druid modifier code lists</span>
+<span class="sd">    (``&lt;name&gt;_id, label, country_code, preferred``).&quot;&quot;&quot;</span>
+    <span class="n">lists</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">path</span> <span class="ow">in</span> <span class="n">CODE_LISTS</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">df</span> <span class="o">=</span> <span class="n">_read_csv_any</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+        <span class="n">code_col</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">_id&quot;</span> <span class="k">if</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">_id&quot;</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span> <span class="k">else</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">label_col</span> <span class="o">=</span> <span class="s2">&quot;label&quot;</span> <span class="k">if</span> <span class="s2">&quot;label&quot;</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span> <span class="k">else</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+        <span class="k">if</span> <span class="s2">&quot;preferred&quot;</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>      <span class="c1"># one preferred label per code</span>
+            <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;preferred&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">==</span> <span class="s2">&quot;1&quot;</span><span class="p">]</span>
+        <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="n">code_col</span><span class="p">)</span>
+        <span class="n">lists</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="n">code_col</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span> <span class="n">df</span><span class="p">[</span><span class="n">label_col</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()))</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">name</span><span class="si">:</span><span class="s2">&lt;9</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">lists</span><span class="p">[</span><span class="n">name</span><span class="p">])</span><span class="si">:</span><span class="s2">&gt;3</span><span class="si">}</span><span class="s2"> codes (</span><span class="si">{</span><span class="n">code_col</span><span class="si">}</span><span class="s2"> -&gt; </span><span class="si">{</span><span class="n">label_col</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">lists</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">load_hsn_scales</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;(hisco, status, relation, product) -&gt; HISCLASS / HISCLASS_5 / HISCAM / SOCPO.</span>
+
+<span class="sd">    Asserts the functional dependency instead of assuming it: if a future release makes</span>
+<span class="sd">    the key ambiguous, this raises rather than silently picking a class.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">cols</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;HISCO&quot;</span><span class="p">,</span> <span class="s2">&quot;STATUS&quot;</span><span class="p">,</span> <span class="s2">&quot;RELATION&quot;</span><span class="p">,</span> <span class="s2">&quot;PRODUCT&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;HISCLASS&quot;</span><span class="p">,</span> <span class="s2">&quot;HISCLASS_5&quot;</span><span class="p">,</span> <span class="s2">&quot;HISCAM_U1&quot;</span><span class="p">,</span> <span class="s2">&quot;SOCPO&quot;</span><span class="p">]</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">HSN</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">usecols</span><span class="o">=</span><span class="n">cols</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;HISCO&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;HISCO&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_pad</span><span class="p">)</span>
+
+    <span class="n">key</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;HISCO&quot;</span><span class="p">,</span> <span class="s2">&quot;STATUS&quot;</span><span class="p">,</span> <span class="s2">&quot;RELATION&quot;</span><span class="p">,</span> <span class="s2">&quot;PRODUCT&quot;</span><span class="p">]</span>
+    <span class="n">scales</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;HISCLASS&quot;</span><span class="p">,</span> <span class="s2">&quot;HISCLASS_5&quot;</span><span class="p">,</span> <span class="s2">&quot;HISCAM_U1&quot;</span><span class="p">,</span> <span class="s2">&quot;SOCPO&quot;</span><span class="p">]</span>
+    <span class="n">ambiguous</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="n">key</span><span class="p">)[</span><span class="n">scales</span><span class="p">]</span><span class="o">.</span><span class="n">nunique</span><span class="p">()</span><span class="o">.</span><span class="n">gt</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">ambiguous</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+        <span class="n">bad</span> <span class="o">=</span> <span class="n">ambiguous</span><span class="p">[</span><span class="n">ambiguous</span><span class="p">]</span><span class="o">.</span><span class="n">index</span><span class="o">.</span><span class="n">tolist</span><span class="p">()[:</span><span class="mi">10</span><span class="p">]</span>
+        <span class="k">raise</span> <span class="ne">AssertionError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">ambiguous</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">}</span><span class="s2"> (hisco,status,relation,product) keys carry more than &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;one scale value — the crosswalk is no longer a function. First: </span><span class="si">{</span><span class="n">bad</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="p">)</span>
+
+    <span class="n">n_titles</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">size</span><span class="p">()</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="s2">&quot;n_hsn&quot;</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="n">key</span><span class="p">)</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">n_titles</span><span class="p">)</span><span class="o">.</span><span class="n">reset_index</span><span class="p">()</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">{</span>
+        <span class="s2">&quot;HISCO&quot;</span><span class="p">:</span> <span class="s2">&quot;hisco&quot;</span><span class="p">,</span> <span class="s2">&quot;STATUS&quot;</span><span class="p">:</span> <span class="s2">&quot;status&quot;</span><span class="p">,</span> <span class="s2">&quot;RELATION&quot;</span><span class="p">:</span> <span class="s2">&quot;relation&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;PRODUCT&quot;</span><span class="p">:</span> <span class="s2">&quot;product&quot;</span><span class="p">,</span> <span class="s2">&quot;HISCLASS&quot;</span><span class="p">:</span> <span class="s2">&quot;hisclass&quot;</span><span class="p">,</span> <span class="s2">&quot;HISCLASS_5&quot;</span><span class="p">:</span> <span class="s2">&quot;hisclass_5&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;HISCAM_U1&quot;</span><span class="p">:</span> <span class="s2">&quot;hiscam_u1&quot;</span><span class="p">,</span> <span class="s2">&quot;SOCPO&quot;</span><span class="p">:</span> <span class="s2">&quot;socpo&quot;</span><span class="p">,</span>
+    <span class="p">})</span>
+    <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;hisclass&quot;</span><span class="p">,</span> <span class="s2">&quot;hisclass_5&quot;</span><span class="p">,</span> <span class="s2">&quot;hiscam_u1&quot;</span><span class="p">,</span> <span class="s2">&quot;socpo&quot;</span><span class="p">]:</span>
+        <span class="n">out</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">_to_num</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="n">c</span><span class="p">])</span>
+
+    <span class="c1"># The 12-&gt;5 aggregation is documented; check the file agrees with the documentation.</span>
+    <span class="n">both</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">dropna</span><span class="p">(</span><span class="n">subset</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;hisclass&quot;</span><span class="p">,</span> <span class="s2">&quot;hisclass_5&quot;</span><span class="p">])</span>
+    <span class="n">expected</span> <span class="o">=</span> <span class="n">both</span><span class="p">[</span><span class="s2">&quot;hisclass&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">HISCLASS_5_FROM_12</span><span class="p">)</span>
+    <span class="n">mismatch</span> <span class="o">=</span> <span class="nb">int</span><span class="p">((</span><span class="n">expected</span> <span class="o">!=</span> <span class="n">both</span><span class="p">[</span><span class="s2">&quot;hisclass_5&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">))</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
+    <span class="k">if</span> <span class="n">mismatch</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">AssertionError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">mismatch</span><span class="si">}</span><span class="s2"> rows where HISCLASS_5 disagrees with the documented &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;12-&gt;5 aggregation (§4.1)&quot;</span>
+        <span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">build_authority</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Reading inputs …&quot;</span><span class="p">)</span>
+    <span class="n">hier</span> <span class="o">=</span> <span class="n">load_hierarchy</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  hierarchy </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">hier</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> HISCO micro codes&quot;</span><span class="p">)</span>
+    <span class="n">lists</span> <span class="o">=</span> <span class="n">load_code_lists</span><span class="p">()</span>
+    <span class="n">hsn</span> <span class="o">=</span> <span class="n">load_hsn_scales</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  HSN       </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">hsn</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> (hisco,status,relation,product) keys &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;from </span><span class="si">{</span><span class="n">hsn</span><span class="p">[</span><span class="s1">&#39;n_hsn&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> titles&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Codes the hierarchy knows but HSN never coded: keep them with default modifiers so</span>
+    <span class="c1"># a Czech string can still reach a code + label (scales stay &lt;NA&gt;, honestly empty).</span>
+    <span class="n">coded</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">hsn</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">])</span>
+    <span class="n">uncoded</span> <span class="o">=</span> <span class="n">hier</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="o">~</span><span class="n">hier</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">coded</span><span class="p">),</span> <span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">c</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="p">[(</span><span class="s2">&quot;status&quot;</span><span class="p">,</span> <span class="s2">&quot;-9&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;relation&quot;</span><span class="p">,</span> <span class="s2">&quot;-9&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;product&quot;</span><span class="p">,</span> <span class="s2">&quot;-9&quot;</span><span class="p">)]:</span>
+        <span class="n">uncoded</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">v</span>
+    <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;hisclass&quot;</span><span class="p">,</span> <span class="s2">&quot;hisclass_5&quot;</span><span class="p">,</span> <span class="s2">&quot;socpo&quot;</span><span class="p">]:</span>
+        <span class="n">uncoded</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="n">uncoded</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+    <span class="n">uncoded</span><span class="p">[</span><span class="s2">&quot;hiscam_u1&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="n">uncoded</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;Float64&quot;</span><span class="p">)</span>
+    <span class="n">uncoded</span><span class="p">[</span><span class="s2">&quot;n_hsn&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">uncoded</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> hierarchy codes carry no HSN class (kept, scales empty)&quot;</span><span class="p">)</span>
+
+    <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">hsn</span><span class="p">,</span> <span class="n">uncoded</span><span class="p">],</span> <span class="n">ignore_index</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;in_hsn&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;n_hsn&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">gt</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span><span class="n">hier</span><span class="p">,</span> <span class="n">on</span><span class="o">=</span><span class="s2">&quot;hisco&quot;</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;left&quot;</span><span class="p">)</span>
+
+    <span class="c1"># HSN codes with no micro-hierarchy row: the sentinels (-1/-2/-3) plus codes HSN</span>
+    <span class="c1"># placed at a coarser level. Label those from their ancestor rather than shipping a</span>
+    <span class="c1"># blank, and record which level the label came from.</span>
+    <span class="n">anc</span> <span class="o">=</span> <span class="n">_ancestor_labels</span><span class="p">(</span><span class="n">hier</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;label_level&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span>
+    <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;label_en&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;label_en&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span><span class="p">),</span> <span class="s2">&quot;label_level&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;micro&quot;</span>
+    <span class="k">for</span> <span class="n">level</span><span class="p">,</span> <span class="n">width</span><span class="p">,</span> <span class="n">label_col</span> <span class="ow">in</span> <span class="p">[(</span><span class="s2">&quot;unit&quot;</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="s2">&quot;unit_label&quot;</span><span class="p">),</span>
+                                    <span class="p">(</span><span class="s2">&quot;minor&quot;</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="s2">&quot;minor_label&quot;</span><span class="p">),</span>
+                                    <span class="p">(</span><span class="s2">&quot;major&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;major_label&quot;</span><span class="p">)]:</span>
+        <span class="n">gap</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;label_level&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isna</span><span class="p">()</span> <span class="o">&amp;</span> <span class="o">~</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;-&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">gap</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+            <span class="k">break</span>
+        <span class="n">fill</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">gap</span><span class="p">,</span> <span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="p">[:</span><span class="n">width</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">anc</span><span class="p">[</span><span class="n">level</span><span class="p">])</span>
+        <span class="n">hit</span> <span class="o">=</span> <span class="n">fill</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span>
+        <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">gap</span> <span class="o">&amp;</span> <span class="n">hit</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="n">fill_value</span><span class="o">=</span><span class="kc">False</span><span class="p">),</span> <span class="s2">&quot;label_en&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">fill</span><span class="p">[</span><span class="n">hit</span><span class="p">]</span>
+        <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">gap</span> <span class="o">&amp;</span> <span class="n">hit</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="n">fill_value</span><span class="o">=</span><span class="kc">False</span><span class="p">),</span> <span class="n">label_col</span><span class="p">]</span> <span class="o">=</span> <span class="n">fill</span><span class="p">[</span><span class="n">hit</span><span class="p">]</span>
+        <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">gap</span> <span class="o">&amp;</span> <span class="n">hit</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="n">fill_value</span><span class="o">=</span><span class="kc">False</span><span class="p">),</span> <span class="s2">&quot;label_level&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">level</span>
+
+    <span class="c1"># The label is only half of what the ancestor supplies. Those same codes had blank</span>
+    <span class="c1"># `major`/`minor`/`unit` because they carry no micro-hierarchy row to merge, which left</span>
+    <span class="c1"># `occupation_hisco_major` &lt;NA&gt; for 553 records that do carry a HISCO code *and* a</span>
+    <span class="c1"># HISCLASS — `brusič skla` -&gt; 89125 alone is 304 of them. HISCO is positional: across</span>
+    <span class="c1"># all 1,675 micro rows `major == hisco[0]`, `minor == hisco[1]` and `unit == hisco[2]`</span>
+    <span class="c1"># exactly, so the ancestry is derivable from the code itself. Fill every level, not</span>
+    <span class="c1"># just the one the label came from; sentinels (-1/-2/-3) are left alone.</span>
+    <span class="n">real</span> <span class="o">=</span> <span class="o">~</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;-&quot;</span><span class="p">)</span>
+    <span class="n">blank</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">c</span><span class="p">:</span> <span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">isna</span><span class="p">()</span> <span class="o">|</span> <span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;string&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">eq</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">n_filled</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">level</span><span class="p">,</span> <span class="n">pos</span><span class="p">,</span> <span class="n">width</span><span class="p">,</span> <span class="n">code_col</span><span class="p">,</span> <span class="n">label_col</span> <span class="ow">in</span> <span class="p">[</span>
+        <span class="p">(</span><span class="s2">&quot;major&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;major&quot;</span><span class="p">,</span> <span class="s2">&quot;major_label&quot;</span><span class="p">),</span>
+        <span class="p">(</span><span class="s2">&quot;minor&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="s2">&quot;minor&quot;</span><span class="p">,</span> <span class="s2">&quot;minor_label&quot;</span><span class="p">),</span>
+        <span class="p">(</span><span class="s2">&quot;unit&quot;</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="s2">&quot;unit&quot;</span><span class="p">,</span> <span class="s2">&quot;unit_label&quot;</span><span class="p">),</span>
+    <span class="p">]:</span>
+        <span class="n">gap</span> <span class="o">=</span> <span class="n">real</span> <span class="o">&amp;</span> <span class="n">blank</span><span class="p">(</span><span class="n">code_col</span><span class="p">)</span>
+        <span class="n">n_filled</span> <span class="o">+=</span> <span class="nb">int</span><span class="p">(</span><span class="n">gap</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
+        <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">gap</span><span class="p">,</span> <span class="n">code_col</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">gap</span><span class="p">,</span> <span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="p">[</span><span class="n">pos</span><span class="p">]</span>
+        <span class="n">lab_gap</span> <span class="o">=</span> <span class="n">real</span> <span class="o">&amp;</span> <span class="n">blank</span><span class="p">(</span><span class="n">label_col</span><span class="p">)</span>
+        <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">lab_gap</span><span class="p">,</span> <span class="n">label_col</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">lab_gap</span><span class="p">,</span> <span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="p">[:</span><span class="n">width</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">anc</span><span class="p">[</span><span class="n">level</span><span class="p">])</span>
+    <span class="k">if</span> <span class="n">n_filled</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">n_filled</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> ancestry cells derived from the code&#39;s own digits&quot;</span><span class="p">)</span>
+
+    <span class="n">coarse</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;label_level&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">([</span><span class="s2">&quot;unit&quot;</span><span class="p">,</span> <span class="s2">&quot;minor&quot;</span><span class="p">,</span> <span class="s2">&quot;major&quot;</span><span class="p">]),</span> <span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">unique</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">coarse</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">coarse</span><span class="p">)</span><span class="si">}</span><span class="s2"> codes labelled from an ancestor group &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;(coarser than micro): </span><span class="si">{</span><span class="nb">sorted</span><span class="p">(</span><span class="n">coarse</span><span class="p">)[:</span><span class="mi">12</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">blank</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;label_level&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isna</span><span class="p">(),</span> <span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">unique</span><span class="p">())</span>
+    <span class="k">if</span> <span class="n">blank</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">blank</span><span class="p">)</span><span class="si">}</span><span class="s2"> codes with no label at all: </span><span class="si">{</span><span class="n">blank</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Labels</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisclass_label&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisclass&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span>
+        <span class="k">lambda</span> <span class="n">v</span><span class="p">:</span> <span class="n">HISCLASS_LABELS</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">v</span><span class="p">))</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">else</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;string&quot;</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisclass_5_label&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisclass_5&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span>
+        <span class="k">lambda</span> <span class="n">v</span><span class="p">:</span> <span class="n">HISCLASS_5_LABELS</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">v</span><span class="p">))</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">else</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;string&quot;</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;socpo_label&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;socpo&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span>
+        <span class="k">lambda</span> <span class="n">v</span><span class="p">:</span> <span class="n">SOCPO_LABELS</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">v</span><span class="p">))</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">else</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;string&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">CODE_LISTS</span><span class="p">:</span>
+        <span class="n">df</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">_label&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">name</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">lists</span><span class="p">[</span><span class="n">name</span><span class="p">])</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;string&quot;</span><span class="p">)</span>
+
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisclass&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisclass&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisclass_5&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisclass_5&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;socpo&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;socpo&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+
+    <span class="n">order</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">,</span> <span class="s2">&quot;status&quot;</span><span class="p">,</span> <span class="s2">&quot;relation&quot;</span><span class="p">,</span> <span class="s2">&quot;product&quot;</span><span class="p">,</span>
+             <span class="s2">&quot;label_en&quot;</span><span class="p">,</span> <span class="s2">&quot;label_level&quot;</span><span class="p">,</span> <span class="s2">&quot;hisco_pretty&quot;</span><span class="p">,</span>
+             <span class="s2">&quot;major&quot;</span><span class="p">,</span> <span class="s2">&quot;major_label&quot;</span><span class="p">,</span> <span class="s2">&quot;minor&quot;</span><span class="p">,</span> <span class="s2">&quot;minor_label&quot;</span><span class="p">,</span> <span class="s2">&quot;unit&quot;</span><span class="p">,</span> <span class="s2">&quot;unit_label&quot;</span><span class="p">,</span>
+             <span class="s2">&quot;hisclass&quot;</span><span class="p">,</span> <span class="s2">&quot;hisclass_label&quot;</span><span class="p">,</span> <span class="s2">&quot;hisclass_5&quot;</span><span class="p">,</span> <span class="s2">&quot;hisclass_5_label&quot;</span><span class="p">,</span>
+             <span class="s2">&quot;hiscam_u1&quot;</span><span class="p">,</span> <span class="s2">&quot;socpo&quot;</span><span class="p">,</span> <span class="s2">&quot;socpo_label&quot;</span><span class="p">,</span>
+             <span class="s2">&quot;status_label&quot;</span><span class="p">,</span> <span class="s2">&quot;relation_label&quot;</span><span class="p">,</span> <span class="s2">&quot;product_label&quot;</span><span class="p">,</span>
+             <span class="s2">&quot;n_hsn&quot;</span><span class="p">,</span> <span class="s2">&quot;in_hsn&quot;</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">df</span><span class="p">[</span><span class="n">order</span><span class="p">]</span><span class="o">.</span><span class="n">sort_values</span><span class="p">([</span><span class="s2">&quot;hisco&quot;</span><span class="p">,</span> <span class="s2">&quot;status&quot;</span><span class="p">,</span> <span class="s2">&quot;relation&quot;</span><span class="p">,</span> <span class="s2">&quot;product&quot;</span><span class="p">],</span>
+                                 <span class="n">ignore_index</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">authority_report</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Authority table&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  rows                    </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  distinct HISCO codes    </span><span class="si">{</span><span class="n">df</span><span class="p">[</span><span class="s1">&#39;hisco&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">nunique</span><span class="p">()</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  default-modifier rows   </span><span class="si">{</span><span class="nb">int</span><span class="p">(((</span><span class="n">df</span><span class="p">[[</span><span class="s1">&#39;status&#39;</span><span class="p">,</span><span class="s1">&#39;relation&#39;</span><span class="p">,</span><span class="s1">&#39;product&#39;</span><span class="p">]]</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s1">&#39;-9&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  with an English label   </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">&#39;label_en&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="nb">int</span><span class="p">((</span><span class="n">df</span><span class="p">[</span><span class="s1">&#39;label_level&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s1">&#39;micro&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> at micro level)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  with a HISCLASS         </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">&#39;hisclass&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  with a HISCAM           </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">&#39;hiscam_u1&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  HISCLASS distribution (rows, not people):&quot;</span><span class="p">)</span>
+    <span class="n">vc</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisclass&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">sort_index</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">vc</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">k</span><span class="p">)</span><span class="si">:</span><span class="s2">&gt;3</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">v</span><span class="si">:</span><span class="s2">&gt;6,</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">HISCLASS_LABELS</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">k</span><span class="p">),</span><span class="w"> </span><span class="s1">&#39;?&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">bad</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisclass&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">dropna</span><span class="p">()</span>
+    <span class="k">assert</span> <span class="n">bad</span><span class="o">.</span><span class="n">between</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">13</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">(),</span> <span class="s2">&quot;HISCLASS outside 1..13&quot;</span>
+    <span class="n">h5</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;hisclass_5&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">dropna</span><span class="p">()</span>
+    <span class="k">assert</span> <span class="n">h5</span><span class="o">.</span><span class="n">between</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">5</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">(),</span> <span class="s2">&quot;HISCLASS_5 outside 1..5&quot;</span>
+    <span class="k">assert</span> <span class="ow">not</span> <span class="n">df</span><span class="o">.</span><span class="n">duplicated</span><span class="p">([</span><span class="s2">&quot;hisco&quot;</span><span class="p">,</span> <span class="s2">&quot;status&quot;</span><span class="p">,</span> <span class="s2">&quot;relation&quot;</span><span class="p">,</span> <span class="s2">&quot;product&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">any</span><span class="p">(),</span> \
+        <span class="s2">&quot;duplicate (hisco,status,relation,product) rows&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  assertions passed: HISCLASS 1..13, HISCLASS_5 1..5, key unique&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">_require_inputs</span><span class="p">()</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">build_authority</span><span class="p">()</span>
+    <span class="n">authority_report</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="n">OUT</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">df</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">OUT</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Wrote </span><span class="si">{</span><span class="n">OUT</span><span class="o">.</span><span class="n">relative_to</span><span class="p">(</span><span class="n">ROOT</span><span class="p">)</span><span class="si">}</span><span class="s2">  (</span><span class="si">{</span><span class="n">OUT</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> B)&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>

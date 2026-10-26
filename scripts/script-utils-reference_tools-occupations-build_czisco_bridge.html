@@ -1,0 +1,820 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>CZ-ISCO (ČSÚ classification 80146, 2025) as a <strong>Czech→English occupational bridge</strong>, which
+is the one thing this project's occupation coding has never had.</p><p class="tldr-facts"><b>Reference tools</b> · v1.0.0 · 232 lines · 5 public functions · 5 constants · used by <code>utils/reference_tools/occupations/run_czisco_check.py</code> · <code>utils/reference_tools/occupations/build_czisco_bridge.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-reference_tools-occupations-build_czisco_bridge-head_nouns">head_nouns</a><a class="chip" href="#fn-utils-reference_tools-occupations-build_czisco_bridge-matches_head">matches_head</a><a class="chip" href="#fn-utils-reference_tools-occupations-build_czisco_bridge-build">build</a><a class="chip" href="#fn-utils-reference_tools-occupations-build_czisco_bridge-bridge_report">bridge_report</a><a class="chip" href="#fn-utils-reference_tools-occupations-build_czisco_bridge-main">main</a><a class="chip const" href="#c-utils-reference_tools-occupations-build_czisco_bridge-ROOT">ROOT</a><a class="chip const" href="#c-utils-reference_tools-occupations-build_czisco_bridge-RAW">RAW</a><a class="chip const" href="#c-utils-reference_tools-occupations-build_czisco_bridge-OUT">OUT</a><a class="chip const" href="#c-utils-reference_tools-occupations-build_czisco_bridge-CS">CS</a><a class="chip const" href="#c-utils-reference_tools-occupations-build_czisco_bridge-EN">EN</a></div>
+<h2>How it works</h2><p>Why it matters: every HISCO code here is reached through a German gloss (<code>obuvník</code> →
+<em>Schuhmacher</em>) that this project wrote. Both existing external checks inherit that
+weakness — the History of Work link bridge <em>starts</em> from our gloss, and OccCANINE had to be
+<em>fed</em> our gloss because Czech is not among its 13 training languages. Neither validates the
+claim "this Czech word means that occupation". CZ-ISCO does, because the Czech statistical
+office publishes the Czech and the English label under the same code.</p>
+<p>Two structural facts decide how it can be used, both asserted below:</p>
+<ul>
+<li><code>KLAS80146_CS.csv</code> and <code>KLAS80146_EN.csv</code> join 1:1 on <code>chodnota</code> — 1,991 codes
+    over five levels.</li>
+<li><strong>English labels exist only at levels 1–4</strong> (617 codes). All 1,374 five-digit national
+    codes — the ones carrying actual trade names like <code>Zámečníci strojů</code> — have an empty
+    <code>text</code>. They inherit English from their 4-digit ISCO-08 parent through <code>nadvaz</code>,
+    which resolves for every one of them. So the bridge is <em>Czech trade name → official
+    English at ISCO-08 granularity</em>, not at the Czech national level.</li>
+</ul>
+<p>What this is <strong>not</strong>: a source of HISCO codes. CZ-ISCO is the 2025 classification and the
+historical core of this corpus is simply absent from it — <code>rolník</code>, <code>hajný</code>,
+<code>příručí</code>, <code>tkadlec</code>, <code>mlynář</code>, <code>kolář</code>, <code>bednář</code>, <code>cihlář</code>, <code>havíř</code> and
+<code>soustružník</code> have no label at any level. Nor is there a path to HISCO: <code>ISCO.pdf</code> is
+ILO's ISCO-08 Volume I, whose correspondence tables reach ISCO-<strong>88</strong>, while HISCO is built
+on ISCO-<strong>68</strong>. Chaining two lossy crosswalks across forty years of occupational change,
+into a scheme designed for 1690–1970 data, would manufacture precision the sources do not
+carry. CZ-ISCO corroborates a reading; it never assigns a code.</p>
+<p>Run:  python utils/reference_tools/occupations/build_czisco_bridge.py
+Emits: reference/occupations/czisco_authority.csv
+Consumed by utils/reference_tools/occupations/run_czisco_check.py (a validation script, not a pipeline
+input — the same standing as utils/reference_tools/units/build_unit_authority.py).</p>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-reference_tools-occupations-build_czisco_bridge-head_nouns">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">head_nouns</span><span class="p">(</span><span class="n">label</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">bool</span><span class="p">]]</span></pre>
+<div class="fndoc"><p>(head noun, is phrase-initial) for every coordinate phrase in a CZ-ISCO label.</p>
+<p><code>Stavební zámečníci</code> -&gt; <code>zámečníci</code>   (leading adjective stripped)
+<code>Zámečníci strojů</code>   -&gt; <code>zámečníci</code>   (genitive complement follows the head)
+<code>Obchodní náměstci</code>  -&gt; <code>náměstci</code>    (so <code>obchodník</code> does <em>not</em> match)
+<code>Řídící pracovníci ve studentských ubytovnách</code> -&gt; <code>pracovníci</code>
+    (so <code>student</code> does <em>not</em> match — the failure this rule exists to prevent)
+<code>Kováři, nástrojaři a příbuzní pracovníci</code> -&gt; three heads</p>
+<p>A phrase of adjectives only (<code>Kočí</code> is indeclinable and looks like one) falls back to
+its first token, so a single-word label is always its own head.</p>
+<p>The second element records whether the head <em>opens</em> its phrase, i.e. carries no
+qualifying adjective. That flag is what separates <code>Malíři interiérů</code> from <code>Umělečtí
+malíři</code> — both have head <code>malíři</code>, but only the second is qualified into a different
+trade, and preferring the bare head keeps a house painter out of the fine artists.</p></div>
+<p class="calls warn">No call site found in the notebooks or <code>utils/</code> — possibly superseded or reserved for interactive use.</p>
+<details><summary>source · lines 79–104 (26 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">head_nouns</span><span class="p">(</span><span class="n">label</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">bool</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;(head noun, is phrase-initial) for every coordinate phrase in a CZ-ISCO label.</span>
+
+<span class="sd">    ``Stavební zámečníci`` -&gt; ``zámečníci``   (leading adjective stripped)</span>
+<span class="sd">    ``Zámečníci strojů``   -&gt; ``zámečníci``   (genitive complement follows the head)</span>
+<span class="sd">    ``Obchodní náměstci``  -&gt; ``náměstci``    (so ``obchodník`` does *not* match)</span>
+<span class="sd">    ``Řídící pracovníci ve studentských ubytovnách`` -&gt; ``pracovníci``</span>
+<span class="sd">        (so ``student`` does *not* match — the failure this rule exists to prevent)</span>
+<span class="sd">    ``Kováři, nástrojaři a příbuzní pracovníci`` -&gt; three heads</span>
+
+<span class="sd">    A phrase of adjectives only (``Kočí`` is indeclinable and looks like one) falls back to</span>
+<span class="sd">    its first token, so a single-word label is always its own head.</span>
+
+<span class="sd">    The second element records whether the head *opens* its phrase, i.e. carries no</span>
+<span class="sd">    qualifying adjective. That flag is what separates ``Malíři interiérů`` from ``Umělečtí</span>
+<span class="sd">    malíři`` — both have head ``malíři``, but only the second is qualified into a different</span>
+<span class="sd">    trade, and preferring the bare head keeps a house painter out of the fine artists.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">out</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">bool</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">phrase</span> <span class="ow">in</span> <span class="n">_SPLIT</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="n">_PAREN</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">label</span><span class="p">))):</span>
+        <span class="n">toks</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;[^\W\d_]+&quot;</span><span class="p">,</span> <span class="n">phrase</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">UNICODE</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">toks</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">head</span> <span class="o">=</span> <span class="nb">next</span><span class="p">((</span><span class="n">t</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">toks</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">t</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="n">_ADJ_END</span><span class="p">)),</span> <span class="n">toks</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">head</span><span class="p">,</span> <span class="n">head</span> <span class="o">==</span> <span class="n">toks</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-build_czisco_bridge-matches_head">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">matches_head</span><span class="p">(</span><span class="n">key</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">head</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span></pre>
+<div class="fndoc"><p>Is <code>head</code> an inflected form of <code>key</code>? Inflection only — never derivation.</p>
+<p>The head may be at most two characters longer, and must be either the key itself plus
+an ending, or one of the two regular stem alternations above. That is deliberately
+tight, because near-miss Czech words are a trap this corpus is full of:</p>
+<p><code>zámečník</code> -&gt; <code>zámečníci</code>   accepted (regular plural)
+<code>sedlák</code>   -&gt; <code>sedláci</code>     accepted (palatalised plural)
+<code>sedlák</code>   -&gt; <code>sedláři</code>     <strong>rejected</strong> — a saddler is not a farmer
+<code>lesník</code>   -&gt; <code>lesnictví</code>   <strong>rejected</strong> — forestry is not a forester
+<code>hospodář</code> -&gt; <code>hospodyně</code>   <strong>rejected</strong> — a housekeeper is not a farm steward
+<code>obchodník</code>-&gt; <code>obchodních</code>  <strong>rejected</strong> — an adjective, not the noun's plural
+<code>student</code>  -&gt; <code>studentských</code><strong>rejected</strong> — <code>-sk-</code> is derivational</p>
+<p>Used with the head-noun position from <code>head_nouns</code>; both guards are needed.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/reference_tools/occupations/run_czisco_check.py</code></p>
+<details><summary>source · lines 114–142 (29 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">matches_head</span><span class="p">(</span><span class="n">key</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">head</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Is ``head`` an inflected form of ``key``? Inflection only — never derivation.</span>
+
+<span class="sd">    The head may be at most two characters longer, and must be either the key itself plus</span>
+<span class="sd">    an ending, or one of the two regular stem alternations above. That is deliberately</span>
+<span class="sd">    tight, because near-miss Czech words are a trap this corpus is full of:</span>
+
+<span class="sd">    ``zámečník`` -&gt; ``zámečníci``   accepted (regular plural)</span>
+<span class="sd">    ``sedlák``   -&gt; ``sedláci``     accepted (palatalised plural)</span>
+<span class="sd">    ``sedlák``   -&gt; ``sedláři``     **rejected** — a saddler is not a farmer</span>
+<span class="sd">    ``lesník``   -&gt; ``lesnictví``   **rejected** — forestry is not a forester</span>
+<span class="sd">    ``hospodář`` -&gt; ``hospodyně``   **rejected** — a housekeeper is not a farm steward</span>
+<span class="sd">    ``obchodník``-&gt; ``obchodních``  **rejected** — an adjective, not the noun&#39;s plural</span>
+<span class="sd">    ``student``  -&gt; ``studentských``**rejected** — ``-sk-`` is derivational</span>
+
+<span class="sd">    Used with the head-noun position from :func:`head_nouns`; both guards are needed.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">k</span><span class="p">,</span> <span class="n">h</span> <span class="o">=</span> <span class="n">_fold</span><span class="p">(</span><span class="n">key</span><span class="p">),</span> <span class="n">_fold</span><span class="p">(</span><span class="n">head</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">k</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">h</span> <span class="ow">or</span> <span class="ow">not</span> <span class="mi">0</span> <span class="o">&lt;=</span> <span class="nb">len</span><span class="p">(</span><span class="n">h</span><span class="p">)</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="mi">2</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">if</span> <span class="n">h</span><span class="p">[:</span><span class="nb">len</span><span class="p">(</span><span class="n">k</span><span class="p">)]</span> <span class="o">==</span> <span class="n">k</span><span class="p">:</span>                       <span class="c1"># plain suffixing: kovář -&gt; kováři</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">4</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">if</span> <span class="n">h</span><span class="p">[:</span><span class="nb">len</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span> <span class="o">!=</span> <span class="n">k</span><span class="p">[:</span><span class="nb">len</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]:</span>      <span class="c1"># the stem must survive intact</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">if</span> <span class="n">k</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="ow">in</span> <span class="s2">&quot;kh&quot;</span> <span class="ow">and</span> <span class="n">h</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">:]</span> <span class="ow">in</span> <span class="n">_PALATAL_END</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="k">return</span> <span class="n">k</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;e&quot;</span> <span class="ow">and</span> <span class="n">h</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">:]</span> <span class="o">==</span> <span class="s2">&quot;i&quot;</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-build_czisco_bridge-build">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">build</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 153–195 (43 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">build</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Reading CZ-ISCO …&quot;</span><span class="p">)</span>
+    <span class="n">cs</span><span class="p">,</span> <span class="n">en</span> <span class="o">=</span> <span class="n">_read</span><span class="p">(</span><span class="n">CS</span><span class="p">),</span> <span class="n">_read</span><span class="p">(</span><span class="n">EN</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  CS </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">cs</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> rows   EN </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">en</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> rows&quot;</span><span class="p">)</span>
+
+    <span class="k">assert</span> <span class="ow">not</span> <span class="n">cs</span><span class="p">[</span><span class="s2">&quot;chodnota&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">duplicated</span><span class="p">()</span><span class="o">.</span><span class="n">any</span><span class="p">(),</span> <span class="s2">&quot;duplicate code in KLAS80146_CS&quot;</span>
+    <span class="k">assert</span> <span class="nb">set</span><span class="p">(</span><span class="n">cs</span><span class="p">[</span><span class="s2">&quot;chodnota&quot;</span><span class="p">])</span> <span class="o">==</span> <span class="nb">set</span><span class="p">(</span><span class="n">en</span><span class="p">[</span><span class="s2">&quot;chodnota&quot;</span><span class="p">]),</span> \
+        <span class="s2">&quot;the CS and EN files do not cover the same code set&quot;</span>
+
+    <span class="n">df</span> <span class="o">=</span> <span class="n">cs</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;text&quot;</span><span class="p">:</span> <span class="s2">&quot;cs&quot;</span><span class="p">})[[</span><span class="s2">&quot;chodnota&quot;</span><span class="p">,</span> <span class="s2">&quot;uroven&quot;</span><span class="p">,</span> <span class="s2">&quot;cs&quot;</span><span class="p">,</span> <span class="s2">&quot;nadvaz&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span>
+        <span class="n">en</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;text&quot;</span><span class="p">:</span> <span class="s2">&quot;en_own&quot;</span><span class="p">})[[</span><span class="s2">&quot;chodnota&quot;</span><span class="p">,</span> <span class="s2">&quot;en_own&quot;</span><span class="p">]],</span> <span class="n">on</span><span class="o">=</span><span class="s2">&quot;chodnota&quot;</span><span class="p">)</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;chodnota&quot;</span><span class="p">:</span> <span class="s2">&quot;code&quot;</span><span class="p">,</span> <span class="s2">&quot;uroven&quot;</span><span class="p">:</span> <span class="s2">&quot;level&quot;</span><span class="p">,</span> <span class="s2">&quot;nadvaz&quot;</span><span class="p">:</span> <span class="s2">&quot;parent&quot;</span><span class="p">})</span>
+
+    <span class="c1"># English is published down to the 4-digit ISCO-08 unit group only; the 1,374 national</span>
+    <span class="c1"># 5-digit codes inherit it from their parent. Record which, so an analysis can restrict</span>
+    <span class="c1"># to first-hand labels.</span>
+    <span class="n">own</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;code&quot;</span><span class="p">],</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;en_own&quot;</span><span class="p">]))</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;en&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;en_own&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;parent&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">own</span><span class="p">))</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;en_source&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;en_own&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">map</span><span class="p">({</span><span class="kc">True</span><span class="p">:</span> <span class="s2">&quot;own&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">:</span> <span class="s2">&quot;parent&quot;</span><span class="p">})</span>
+
+    <span class="c1"># The 4-digit ancestor: the level at which CZ-ISCO *is* ISCO-08 and the code is</span>
+    <span class="c1"># internationally comparable.</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;isco08_4d&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="p">[:</span><span class="mi">4</span><span class="p">]</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;level&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">4</span><span class="p">)</span>
+
+    <span class="n">heads</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;cs&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">head_nouns</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;head_cs&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">heads</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">hs</span><span class="p">:</span> <span class="s2">&quot; | &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">h</span> <span class="k">for</span> <span class="n">h</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">hs</span><span class="p">))</span>
+    <span class="c1"># Heads that open their phrase, i.e. carry no qualifying adjective. `run_czisco_check`</span>
+    <span class="c1"># prefers a candidate matched on one of these.</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;head_bare&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">heads</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">hs</span><span class="p">:</span> <span class="s2">&quot; | &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">h</span> <span class="k">for</span> <span class="n">h</span><span class="p">,</span> <span class="n">bare</span> <span class="ow">in</span> <span class="n">hs</span> <span class="k">if</span> <span class="n">bare</span><span class="p">))</span>
+
+    <span class="n">lvl</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;level&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">lvl</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;parent&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">all</span><span class="p">(),</span> <span class="s2">&quot;a non-top-level code has no parent&quot;</span>
+    <span class="k">assert</span> <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">lvl</span> <span class="o">==</span> <span class="mi">5</span><span class="p">,</span> <span class="s2">&quot;en&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">all</span><span class="p">(),</span> \
+        <span class="s2">&quot;a level-5 code did not inherit an English label&quot;</span>
+    <span class="k">assert</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;head_cs&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">ne</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">(),</span> <span class="s2">&quot;a label yielded no head noun&quot;</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> codes; English own </span><span class="si">{</span><span class="nb">int</span><span class="p">((</span><span class="n">df</span><span class="p">[</span><span class="s1">&#39;en_source&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s1">&#39;own&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> / &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;inherited </span><span class="si">{</span><span class="nb">int</span><span class="p">((</span><span class="n">df</span><span class="p">[</span><span class="s1">&#39;en_source&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s1">&#39;parent&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  by level: &quot;</span> <span class="o">+</span> <span class="s2">&quot;  &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+        <span class="sa">f</span><span class="s2">&quot;L</span><span class="si">{</span><span class="n">k</span><span class="si">}</span><span class="s2">=</span><span class="si">{</span><span class="n">v</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;level&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">sort_index</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">()))</span>
+
+    <span class="k">return</span> <span class="n">df</span><span class="p">[[</span><span class="s2">&quot;code&quot;</span><span class="p">,</span> <span class="s2">&quot;level&quot;</span><span class="p">,</span> <span class="s2">&quot;cs&quot;</span><span class="p">,</span> <span class="s2">&quot;en&quot;</span><span class="p">,</span> <span class="s2">&quot;en_source&quot;</span><span class="p">,</span> <span class="s2">&quot;isco08_4d&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;parent&quot;</span><span class="p">,</span> <span class="s2">&quot;head_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;head_bare&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">sort_values</span><span class="p">(</span><span class="s2">&quot;code&quot;</span><span class="p">,</span> <span class="n">ignore_index</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-build_czisco_bridge-bridge_report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">bridge_report</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span></pre>
+<p class="calls"><b>Called by</b> <code>utils/reference_tools/occupations/run_link_bridge.py</code></p>
+<details><summary>source · lines 198–219 (22 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">bridge_report</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Head-noun extraction — the cases this rule exists for:&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">code</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;71266&quot;</span><span class="p">,</span> <span class="s2">&quot;72222&quot;</span><span class="p">,</span> <span class="s2">&quot;14113&quot;</span><span class="p">,</span> <span class="s2">&quot;12211&quot;</span><span class="p">,</span> <span class="s2">&quot;71195&quot;</span><span class="p">,</span> <span class="s2">&quot;93320&quot;</span><span class="p">,</span> <span class="s2">&quot;26512&quot;</span><span class="p">,</span> <span class="s2">&quot;71311&quot;</span><span class="p">):</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;code&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">code</span><span class="p">]</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">r</span><span class="p">):</span>
+            <span class="n">r</span> <span class="o">=</span> <span class="n">r</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">code</span><span class="si">:</span><span class="s2">&lt;6</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;cs&#39;</span><span class="p">][:</span><span class="mi">48</span><span class="p">]</span><span class="si">:</span><span class="s2">&lt;48</span><span class="si">}</span><span class="s2"> -&gt; head </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;head_cs&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span>
+                  <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="s1">&#39;&#39;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;head_bare&#39;</span><span class="p">]</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;   (qualified)&#39;</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Every one of these was a live false positive before the rule was tightened.</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Near-miss Czech words that must NOT match:&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">head</span> <span class="ow">in</span> <span class="p">((</span><span class="s2">&quot;sedlák&quot;</span><span class="p">,</span> <span class="s2">&quot;Sedláři&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;lesník&quot;</span><span class="p">,</span> <span class="s2">&quot;lesnictví&quot;</span><span class="p">),</span>
+                      <span class="p">(</span><span class="s2">&quot;hospodář&quot;</span><span class="p">,</span> <span class="s2">&quot;Hospodyně&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;obchodník&quot;</span><span class="p">,</span> <span class="s2">&quot;obchodních&quot;</span><span class="p">),</span>
+                      <span class="p">(</span><span class="s2">&quot;student&quot;</span><span class="p">,</span> <span class="s2">&quot;studentských&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;myslivec&quot;</span><span class="p">,</span> <span class="s2">&quot;myslivosti&quot;</span><span class="p">)):</span>
+        <span class="n">ok</span> <span class="o">=</span> <span class="n">matches_head</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">head</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">key</span><span class="si">:</span><span class="s2">&lt;10</span><span class="si">}</span><span class="s2"> vs </span><span class="si">{</span><span class="n">head</span><span class="si">:</span><span class="s2">&lt;14</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;** STILL MATCHES **&#39;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">ok</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;rejected&#39;</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Regular inflections that must match:&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">head</span> <span class="ow">in</span> <span class="p">((</span><span class="s2">&quot;zámečník&quot;</span><span class="p">,</span> <span class="s2">&quot;Zámečníci&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;sedlák&quot;</span><span class="p">,</span> <span class="s2">&quot;Sedláci&quot;</span><span class="p">),</span>
+                      <span class="p">(</span><span class="s2">&quot;kovář&quot;</span><span class="p">,</span> <span class="s2">&quot;Kováři&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;řezník&quot;</span><span class="p">,</span> <span class="s2">&quot;Řezníci&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;kočí&quot;</span><span class="p">,</span> <span class="s2">&quot;Kočí&quot;</span><span class="p">)):</span>
+        <span class="n">ok</span> <span class="o">=</span> <span class="n">matches_head</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">head</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">key</span><span class="si">:</span><span class="s2">&lt;10</span><span class="si">}</span><span class="s2"> vs </span><span class="si">{</span><span class="n">head</span><span class="si">:</span><span class="s2">&lt;14</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;accepted&#39;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">ok</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;** REJECTED **&#39;</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-build_czisco_bridge-main">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 222–228 (7 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">build</span><span class="p">()</span>
+    <span class="n">bridge_report</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="n">OUT</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">df</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">OUT</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Wrote </span><span class="si">{</span><span class="n">OUT</span><span class="o">.</span><span class="n">relative_to</span><span class="p">(</span><span class="n">ROOT</span><span class="p">)</span><span class="si">}</span><span class="s2">  (</span><span class="si">{</span><span class="n">OUT</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> B)&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-reference_tools-occupations-build_czisco_bridge-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-build_czisco_bridge-RAW"><pre class="sig">RAW<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;data&#39;</span> <span class="o">/</span> <span class="s1">&#39;raw&#39;</span> <span class="o">/</span> <span class="s1">&#39;czisco&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-build_czisco_bridge-OUT"><pre class="sig">OUT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;reference&#39;</span> <span class="o">/</span> <span class="s1">&#39;occupations&#39;</span> <span class="o">/</span> <span class="s1">&#39;czisco_authority.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-build_czisco_bridge-CS"><pre class="sig">CS<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">RAW</span> <span class="o">/</span> <span class="s1">&#39;KLAS80146_CS.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-build_czisco_bridge-EN"><pre class="sig">EN<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">RAW</span> <span class="o">/</span> <span class="s1">&#39;KLAS80146_EN.csv&#39;</span>
+</pre></div>
+</details></div>
+<h2>Used by</h2><p><code>utils/reference_tools/occupations/run_czisco_check.py</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/reference_tools/occupations/build_czisco_bridge.py · 232 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">build_czisco_bridge.py — generate reference/occupations/czisco_authority.csv</span>
+<span class="sd">===========================================================================</span>
+<span class="sd">CZ-ISCO (ČSÚ classification 80146, 2025) as a **Czech→English occupational bridge**, which</span>
+<span class="sd">is the one thing this project&#39;s occupation coding has never had.</span>
+
+<span class="sd">Why it matters: every HISCO code here is reached through a German gloss (``obuvník`` →</span>
+<span class="sd">*Schuhmacher*) that this project wrote. Both existing external checks inherit that</span>
+<span class="sd">weakness — the History of Work link bridge *starts* from our gloss, and OccCANINE had to be</span>
+<span class="sd">*fed* our gloss because Czech is not among its 13 training languages. Neither validates the</span>
+<span class="sd">claim &quot;this Czech word means that occupation&quot;. CZ-ISCO does, because the Czech statistical</span>
+<span class="sd">office publishes the Czech and the English label under the same code.</span>
+
+<span class="sd">Two structural facts decide how it can be used, both asserted below:</span>
+
+<span class="sd">  * ``KLAS80146_CS.csv`` and ``KLAS80146_EN.csv`` join 1:1 on ``chodnota`` — 1,991 codes</span>
+<span class="sd">    over five levels.</span>
+<span class="sd">  * **English labels exist only at levels 1–4** (617 codes). All 1,374 five-digit national</span>
+<span class="sd">    codes — the ones carrying actual trade names like ``Zámečníci strojů`` — have an empty</span>
+<span class="sd">    ``text``. They inherit English from their 4-digit ISCO-08 parent through ``nadvaz``,</span>
+<span class="sd">    which resolves for every one of them. So the bridge is *Czech trade name → official</span>
+<span class="sd">    English at ISCO-08 granularity*, not at the Czech national level.</span>
+
+<span class="sd">What this is **not**: a source of HISCO codes. CZ-ISCO is the 2025 classification and the</span>
+<span class="sd">historical core of this corpus is simply absent from it — ``rolník``, ``hajný``,</span>
+<span class="sd">``příručí``, ``tkadlec``, ``mlynář``, ``kolář``, ``bednář``, ``cihlář``, ``havíř`` and</span>
+<span class="sd">``soustružník`` have no label at any level. Nor is there a path to HISCO: ``ISCO.pdf`` is</span>
+<span class="sd">ILO&#39;s ISCO-08 Volume I, whose correspondence tables reach ISCO-**88**, while HISCO is built</span>
+<span class="sd">on ISCO-**68**. Chaining two lossy crosswalks across forty years of occupational change,</span>
+<span class="sd">into a scheme designed for 1690–1970 data, would manufacture precision the sources do not</span>
+<span class="sd">carry. CZ-ISCO corroborates a reading; it never assigns a code.</span>
+
+<span class="sd">Run:  python utils/reference_tools/occupations/build_czisco_bridge.py</span>
+<span class="sd">Emits: reference/occupations/czisco_authority.csv</span>
+<span class="sd">Consumed by utils/reference_tools/occupations/run_czisco_check.py (a validation script, not a pipeline</span>
+<span class="sd">input — the same standing as utils/reference_tools/units/build_unit_authority.py).</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">unicodedata</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">))</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.0.0&quot;</span>
+
+<span class="n">RAW</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;data&quot;</span> <span class="o">/</span> <span class="s2">&quot;raw&quot;</span> <span class="o">/</span> <span class="s2">&quot;czisco&quot;</span>
+<span class="n">OUT</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;occupations&quot;</span> <span class="o">/</span> <span class="s2">&quot;czisco_authority.csv&quot;</span>
+<span class="n">CS</span> <span class="o">=</span> <span class="n">RAW</span> <span class="o">/</span> <span class="s2">&quot;KLAS80146_CS.csv&quot;</span>
+<span class="n">EN</span> <span class="o">=</span> <span class="n">RAW</span> <span class="o">/</span> <span class="s2">&quot;KLAS80146_EN.csv&quot;</span>
+
+<span class="c1"># Czech adjectives precede their noun, and in the nominative plural the ČSÚ labels use end</span>
+<span class="c1"># in long -í (``Stavební``, ``Řídící``, ``Kvalifikovaní``, ``Obchodní``, ``příbuzní``)</span>
+<span class="c1"># while the nouns end in short -i or in -é/-ové (``zámečníci``, ``Kováři``, ``Učitelé``,</span>
+<span class="c1"># ``Meteorologové``). That long/short vowel contrast is the whole discriminator.</span>
+<span class="n">_ADJ_END</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;í&quot;</span><span class="p">,</span> <span class="s2">&quot;ý&quot;</span><span class="p">,</span> <span class="s2">&quot;á&quot;</span><span class="p">)</span>
+
+<span class="c1"># Split a label into the coordinate phrases it actually contains: ``Kováři, nástrojaři a</span>
+<span class="c1"># příbuzní pracovníci`` names three occupations, and a key may match any of them.</span>
+<span class="n">_SPLIT</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;,| a | i | nebo &quot;</span><span class="p">)</span>
+
+<span class="c1"># Parenthetical content is a qualifier or an *exclusion* (``Zedníci (kromě zedníků</span>
+<span class="c1"># ohnivzdorného zdiva)``). Taking a head noun out of an exclusion would invert its meaning,</span>
+<span class="c1"># so the parentheses are dropped before any head is looked for.</span>
+<span class="n">_PAREN</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\([^)]*\)&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_fold</span><span class="p">(</span><span class="n">s</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Diacritic-folded lowercase — the comparison form, as everywhere else in this repo.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">unicodedata</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="s2">&quot;NFD&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">s</span><span class="p">)</span><span class="o">.</span><span class="n">lower</span><span class="p">())</span>
+                   <span class="k">if</span> <span class="n">unicodedata</span><span class="o">.</span><span class="n">category</span><span class="p">(</span><span class="n">c</span><span class="p">)</span> <span class="o">!=</span> <span class="s2">&quot;Mn&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">head_nouns</span><span class="p">(</span><span class="n">label</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">bool</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;(head noun, is phrase-initial) for every coordinate phrase in a CZ-ISCO label.</span>
+
+<span class="sd">    ``Stavební zámečníci`` -&gt; ``zámečníci``   (leading adjective stripped)</span>
+<span class="sd">    ``Zámečníci strojů``   -&gt; ``zámečníci``   (genitive complement follows the head)</span>
+<span class="sd">    ``Obchodní náměstci``  -&gt; ``náměstci``    (so ``obchodník`` does *not* match)</span>
+<span class="sd">    ``Řídící pracovníci ve studentských ubytovnách`` -&gt; ``pracovníci``</span>
+<span class="sd">        (so ``student`` does *not* match — the failure this rule exists to prevent)</span>
+<span class="sd">    ``Kováři, nástrojaři a příbuzní pracovníci`` -&gt; three heads</span>
+
+<span class="sd">    A phrase of adjectives only (``Kočí`` is indeclinable and looks like one) falls back to</span>
+<span class="sd">    its first token, so a single-word label is always its own head.</span>
+
+<span class="sd">    The second element records whether the head *opens* its phrase, i.e. carries no</span>
+<span class="sd">    qualifying adjective. That flag is what separates ``Malíři interiérů`` from ``Umělečtí</span>
+<span class="sd">    malíři`` — both have head ``malíři``, but only the second is qualified into a different</span>
+<span class="sd">    trade, and preferring the bare head keeps a house painter out of the fine artists.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">out</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">bool</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">phrase</span> <span class="ow">in</span> <span class="n">_SPLIT</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="n">_PAREN</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">label</span><span class="p">))):</span>
+        <span class="n">toks</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;[^\W\d_]+&quot;</span><span class="p">,</span> <span class="n">phrase</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">UNICODE</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">toks</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">head</span> <span class="o">=</span> <span class="nb">next</span><span class="p">((</span><span class="n">t</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">toks</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">t</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="n">_ADJ_END</span><span class="p">)),</span> <span class="n">toks</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">head</span><span class="p">,</span> <span class="n">head</span> <span class="o">==</span> <span class="n">toks</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="c1"># Czech masculine-animate plurals palatalise a final k/h/ch before the -i ending</span>
+<span class="c1"># (sedlák -&gt; sedláci, řezník -&gt; řezníci, mnich -&gt; mniši), and the soft declension swaps a</span>
+<span class="c1"># final -e for -i (dozorce -&gt; dozorci). Those are the only stem changes allowed; anything</span>
+<span class="c1"># else is a different word.</span>
+<span class="n">_PALATAL_END</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;ci&quot;</span><span class="p">,</span> <span class="s2">&quot;zi&quot;</span><span class="p">,</span> <span class="s2">&quot;si&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">matches_head</span><span class="p">(</span><span class="n">key</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">head</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Is ``head`` an inflected form of ``key``? Inflection only — never derivation.</span>
+
+<span class="sd">    The head may be at most two characters longer, and must be either the key itself plus</span>
+<span class="sd">    an ending, or one of the two regular stem alternations above. That is deliberately</span>
+<span class="sd">    tight, because near-miss Czech words are a trap this corpus is full of:</span>
+
+<span class="sd">    ``zámečník`` -&gt; ``zámečníci``   accepted (regular plural)</span>
+<span class="sd">    ``sedlák``   -&gt; ``sedláci``     accepted (palatalised plural)</span>
+<span class="sd">    ``sedlák``   -&gt; ``sedláři``     **rejected** — a saddler is not a farmer</span>
+<span class="sd">    ``lesník``   -&gt; ``lesnictví``   **rejected** — forestry is not a forester</span>
+<span class="sd">    ``hospodář`` -&gt; ``hospodyně``   **rejected** — a housekeeper is not a farm steward</span>
+<span class="sd">    ``obchodník``-&gt; ``obchodních``  **rejected** — an adjective, not the noun&#39;s plural</span>
+<span class="sd">    ``student``  -&gt; ``studentských``**rejected** — ``-sk-`` is derivational</span>
+
+<span class="sd">    Used with the head-noun position from :func:`head_nouns`; both guards are needed.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">k</span><span class="p">,</span> <span class="n">h</span> <span class="o">=</span> <span class="n">_fold</span><span class="p">(</span><span class="n">key</span><span class="p">),</span> <span class="n">_fold</span><span class="p">(</span><span class="n">head</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">k</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">h</span> <span class="ow">or</span> <span class="ow">not</span> <span class="mi">0</span> <span class="o">&lt;=</span> <span class="nb">len</span><span class="p">(</span><span class="n">h</span><span class="p">)</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="mi">2</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">if</span> <span class="n">h</span><span class="p">[:</span><span class="nb">len</span><span class="p">(</span><span class="n">k</span><span class="p">)]</span> <span class="o">==</span> <span class="n">k</span><span class="p">:</span>                       <span class="c1"># plain suffixing: kovář -&gt; kováři</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">4</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">if</span> <span class="n">h</span><span class="p">[:</span><span class="nb">len</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span> <span class="o">!=</span> <span class="n">k</span><span class="p">[:</span><span class="nb">len</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]:</span>      <span class="c1"># the stem must survive intact</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">if</span> <span class="n">k</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="ow">in</span> <span class="s2">&quot;kh&quot;</span> <span class="ow">and</span> <span class="n">h</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">:]</span> <span class="ow">in</span> <span class="n">_PALATAL_END</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="k">return</span> <span class="n">k</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;e&quot;</span> <span class="ow">and</span> <span class="n">h</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">:]</span> <span class="o">==</span> <span class="s2">&quot;i&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_read</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">path</span><span class="si">}</span><span class="s2"> not found.</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="s2">&quot;  CZ-ISCO (ČSÚ classification 80146) — see reference/DATA_SOURCES.md §3b&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">build</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Reading CZ-ISCO …&quot;</span><span class="p">)</span>
+    <span class="n">cs</span><span class="p">,</span> <span class="n">en</span> <span class="o">=</span> <span class="n">_read</span><span class="p">(</span><span class="n">CS</span><span class="p">),</span> <span class="n">_read</span><span class="p">(</span><span class="n">EN</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  CS </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">cs</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> rows   EN </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">en</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> rows&quot;</span><span class="p">)</span>
+
+    <span class="k">assert</span> <span class="ow">not</span> <span class="n">cs</span><span class="p">[</span><span class="s2">&quot;chodnota&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">duplicated</span><span class="p">()</span><span class="o">.</span><span class="n">any</span><span class="p">(),</span> <span class="s2">&quot;duplicate code in KLAS80146_CS&quot;</span>
+    <span class="k">assert</span> <span class="nb">set</span><span class="p">(</span><span class="n">cs</span><span class="p">[</span><span class="s2">&quot;chodnota&quot;</span><span class="p">])</span> <span class="o">==</span> <span class="nb">set</span><span class="p">(</span><span class="n">en</span><span class="p">[</span><span class="s2">&quot;chodnota&quot;</span><span class="p">]),</span> \
+        <span class="s2">&quot;the CS and EN files do not cover the same code set&quot;</span>
+
+    <span class="n">df</span> <span class="o">=</span> <span class="n">cs</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;text&quot;</span><span class="p">:</span> <span class="s2">&quot;cs&quot;</span><span class="p">})[[</span><span class="s2">&quot;chodnota&quot;</span><span class="p">,</span> <span class="s2">&quot;uroven&quot;</span><span class="p">,</span> <span class="s2">&quot;cs&quot;</span><span class="p">,</span> <span class="s2">&quot;nadvaz&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span>
+        <span class="n">en</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;text&quot;</span><span class="p">:</span> <span class="s2">&quot;en_own&quot;</span><span class="p">})[[</span><span class="s2">&quot;chodnota&quot;</span><span class="p">,</span> <span class="s2">&quot;en_own&quot;</span><span class="p">]],</span> <span class="n">on</span><span class="o">=</span><span class="s2">&quot;chodnota&quot;</span><span class="p">)</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;chodnota&quot;</span><span class="p">:</span> <span class="s2">&quot;code&quot;</span><span class="p">,</span> <span class="s2">&quot;uroven&quot;</span><span class="p">:</span> <span class="s2">&quot;level&quot;</span><span class="p">,</span> <span class="s2">&quot;nadvaz&quot;</span><span class="p">:</span> <span class="s2">&quot;parent&quot;</span><span class="p">})</span>
+
+    <span class="c1"># English is published down to the 4-digit ISCO-08 unit group only; the 1,374 national</span>
+    <span class="c1"># 5-digit codes inherit it from their parent. Record which, so an analysis can restrict</span>
+    <span class="c1"># to first-hand labels.</span>
+    <span class="n">own</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;code&quot;</span><span class="p">],</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;en_own&quot;</span><span class="p">]))</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;en&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;en_own&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;parent&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">own</span><span class="p">))</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;en_source&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;en_own&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">map</span><span class="p">({</span><span class="kc">True</span><span class="p">:</span> <span class="s2">&quot;own&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">:</span> <span class="s2">&quot;parent&quot;</span><span class="p">})</span>
+
+    <span class="c1"># The 4-digit ancestor: the level at which CZ-ISCO *is* ISCO-08 and the code is</span>
+    <span class="c1"># internationally comparable.</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;isco08_4d&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="p">[:</span><span class="mi">4</span><span class="p">]</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;level&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">4</span><span class="p">)</span>
+
+    <span class="n">heads</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;cs&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">head_nouns</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;head_cs&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">heads</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">hs</span><span class="p">:</span> <span class="s2">&quot; | &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">h</span> <span class="k">for</span> <span class="n">h</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">hs</span><span class="p">))</span>
+    <span class="c1"># Heads that open their phrase, i.e. carry no qualifying adjective. `run_czisco_check`</span>
+    <span class="c1"># prefers a candidate matched on one of these.</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;head_bare&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">heads</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">hs</span><span class="p">:</span> <span class="s2">&quot; | &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">h</span> <span class="k">for</span> <span class="n">h</span><span class="p">,</span> <span class="n">bare</span> <span class="ow">in</span> <span class="n">hs</span> <span class="k">if</span> <span class="n">bare</span><span class="p">))</span>
+
+    <span class="n">lvl</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;level&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">lvl</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;parent&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">all</span><span class="p">(),</span> <span class="s2">&quot;a non-top-level code has no parent&quot;</span>
+    <span class="k">assert</span> <span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">lvl</span> <span class="o">==</span> <span class="mi">5</span><span class="p">,</span> <span class="s2">&quot;en&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">all</span><span class="p">(),</span> \
+        <span class="s2">&quot;a level-5 code did not inherit an English label&quot;</span>
+    <span class="k">assert</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;head_cs&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">ne</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">(),</span> <span class="s2">&quot;a label yielded no head noun&quot;</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> codes; English own </span><span class="si">{</span><span class="nb">int</span><span class="p">((</span><span class="n">df</span><span class="p">[</span><span class="s1">&#39;en_source&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s1">&#39;own&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> / &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;inherited </span><span class="si">{</span><span class="nb">int</span><span class="p">((</span><span class="n">df</span><span class="p">[</span><span class="s1">&#39;en_source&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="s1">&#39;parent&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  by level: &quot;</span> <span class="o">+</span> <span class="s2">&quot;  &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+        <span class="sa">f</span><span class="s2">&quot;L</span><span class="si">{</span><span class="n">k</span><span class="si">}</span><span class="s2">=</span><span class="si">{</span><span class="n">v</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;level&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">sort_index</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">()))</span>
+
+    <span class="k">return</span> <span class="n">df</span><span class="p">[[</span><span class="s2">&quot;code&quot;</span><span class="p">,</span> <span class="s2">&quot;level&quot;</span><span class="p">,</span> <span class="s2">&quot;cs&quot;</span><span class="p">,</span> <span class="s2">&quot;en&quot;</span><span class="p">,</span> <span class="s2">&quot;en_source&quot;</span><span class="p">,</span> <span class="s2">&quot;isco08_4d&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;parent&quot;</span><span class="p">,</span> <span class="s2">&quot;head_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;head_bare&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">sort_values</span><span class="p">(</span><span class="s2">&quot;code&quot;</span><span class="p">,</span> <span class="n">ignore_index</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">bridge_report</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Head-noun extraction — the cases this rule exists for:&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">code</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;71266&quot;</span><span class="p">,</span> <span class="s2">&quot;72222&quot;</span><span class="p">,</span> <span class="s2">&quot;14113&quot;</span><span class="p">,</span> <span class="s2">&quot;12211&quot;</span><span class="p">,</span> <span class="s2">&quot;71195&quot;</span><span class="p">,</span> <span class="s2">&quot;93320&quot;</span><span class="p">,</span> <span class="s2">&quot;26512&quot;</span><span class="p">,</span> <span class="s2">&quot;71311&quot;</span><span class="p">):</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;code&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">code</span><span class="p">]</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">r</span><span class="p">):</span>
+            <span class="n">r</span> <span class="o">=</span> <span class="n">r</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">code</span><span class="si">:</span><span class="s2">&lt;6</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;cs&#39;</span><span class="p">][:</span><span class="mi">48</span><span class="p">]</span><span class="si">:</span><span class="s2">&lt;48</span><span class="si">}</span><span class="s2"> -&gt; head </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;head_cs&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span>
+                  <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="s1">&#39;&#39;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;head_bare&#39;</span><span class="p">]</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;   (qualified)&#39;</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Every one of these was a live false positive before the rule was tightened.</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Near-miss Czech words that must NOT match:&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">head</span> <span class="ow">in</span> <span class="p">((</span><span class="s2">&quot;sedlák&quot;</span><span class="p">,</span> <span class="s2">&quot;Sedláři&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;lesník&quot;</span><span class="p">,</span> <span class="s2">&quot;lesnictví&quot;</span><span class="p">),</span>
+                      <span class="p">(</span><span class="s2">&quot;hospodář&quot;</span><span class="p">,</span> <span class="s2">&quot;Hospodyně&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;obchodník&quot;</span><span class="p">,</span> <span class="s2">&quot;obchodních&quot;</span><span class="p">),</span>
+                      <span class="p">(</span><span class="s2">&quot;student&quot;</span><span class="p">,</span> <span class="s2">&quot;studentských&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;myslivec&quot;</span><span class="p">,</span> <span class="s2">&quot;myslivosti&quot;</span><span class="p">)):</span>
+        <span class="n">ok</span> <span class="o">=</span> <span class="n">matches_head</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">head</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">key</span><span class="si">:</span><span class="s2">&lt;10</span><span class="si">}</span><span class="s2"> vs </span><span class="si">{</span><span class="n">head</span><span class="si">:</span><span class="s2">&lt;14</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;** STILL MATCHES **&#39;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">ok</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;rejected&#39;</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Regular inflections that must match:&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">head</span> <span class="ow">in</span> <span class="p">((</span><span class="s2">&quot;zámečník&quot;</span><span class="p">,</span> <span class="s2">&quot;Zámečníci&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;sedlák&quot;</span><span class="p">,</span> <span class="s2">&quot;Sedláci&quot;</span><span class="p">),</span>
+                      <span class="p">(</span><span class="s2">&quot;kovář&quot;</span><span class="p">,</span> <span class="s2">&quot;Kováři&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;řezník&quot;</span><span class="p">,</span> <span class="s2">&quot;Řezníci&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;kočí&quot;</span><span class="p">,</span> <span class="s2">&quot;Kočí&quot;</span><span class="p">)):</span>
+        <span class="n">ok</span> <span class="o">=</span> <span class="n">matches_head</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">head</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">key</span><span class="si">:</span><span class="s2">&lt;10</span><span class="si">}</span><span class="s2"> vs </span><span class="si">{</span><span class="n">head</span><span class="si">:</span><span class="s2">&lt;14</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;accepted&#39;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">ok</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;** REJECTED **&#39;</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">build</span><span class="p">()</span>
+    <span class="n">bridge_report</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="n">OUT</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">df</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">OUT</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Wrote </span><span class="si">{</span><span class="n">OUT</span><span class="o">.</span><span class="n">relative_to</span><span class="p">(</span><span class="n">ROOT</span><span class="p">)</span><span class="si">}</span><span class="s2">  (</span><span class="si">{</span><span class="n">OUT</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> B)&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>

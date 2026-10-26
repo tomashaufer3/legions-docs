@@ -1,0 +1,848 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>run_census_berufsstellung_check.py — is a <code>rolník</code> a farm <em>owner</em> or a farm <em>worker</em>?</p><p class="tldr-facts"><b>Reference tools</b> · v1.0.0 · 229 lines · 2 public functions · 8 constants · used by nothing else · <code>utils/reference_tools/occupations/run_census_berufsstellung_check.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-reference_tools-occupations-run_census_berufsstellung_check-run">run</a><a class="chip" href="#fn-utils-reference_tools-occupations-run_census_berufsstellung_check-run_composition">run_composition</a><a class="chip const" href="#c-utils-reference_tools-occupations-run_census_berufsstellung_check-ROOT">ROOT</a><a class="chip const" href="#c-utils-reference_tools-occupations-run_census_berufsstellung_check-FIN">FIN</a><a class="chip const" href="#c-utils-reference_tools-occupations-run_census_berufsstellung_check-A">A</a><a class="chip const" href="#c-utils-reference_tools-occupations-run_census_berufsstellung_check-OWNER">OWNER</a><a class="chip const" href="#c-utils-reference_tools-occupations-run_census_berufsstellung_check-LABOUR">LABOUR</a><a class="chip const" href="#c-utils-reference_tools-occupations-run_census_berufsstellung_check-FAMILY">FAMILY</a><a class="chip const" href="#c-utils-reference_tools-occupations-run_census_berufsstellung_check-TOTAL">TOTAL</a><a class="chip const" href="#c-utils-reference_tools-occupations-run_census_berufsstellung_check-MIN_BIRTHS">MIN_BIRTHS</a></div>
+<h2>How it works</h2><p>The single largest judgement call in the Czech→HISCO dictionary. <code>rolník</code> is 18 % of the
+sample and is coded <strong>61110 General Farmer, HISCLASS 8</strong> (the self-employed reading). The
+live alternative, <strong>62105 Farm Worker, HISCLASS 12</strong>, would move a fifth of the Legion
+between social classes.</p>
+<p>Neither of the project's other three checks can settle it. The German bridge confirms only
+that <em>Landwirt</em> → 61110, not that a Czech <code>rolník</code> is a <em>Landwirt</em>. OccCANINE is fed that
+same German gloss. CZ-ISCO does not contain the word. And education does not discriminate —
+<code>rolník</code> and <code>domkář</code> both sit at ~1.0–1.1 on the 0–4 scale, because schooling did not track
+landholding.</p>
+<p><strong>This check uses a primary source instead.</strong> The 1910 <em>Volkszählung</em> records, for every
+politický okres, the agricultural workforce split by <strong>Berufsstellung</strong> — <code>permanent</code>
+(Selbständige, working on their own account), <code>tenants</code> (Pächter), <code>employees</code>, <code>workers</code>
+(Arbeiter), <code>day_laborers</code> (Taglöhner), <code>assisting_family_members</code>. Those columns are
+already parsed into <code>census_okres_1910.parquet</code>.</p>
+<p>The test is ecological and simple. If <code>rolník</code> names the self-employed farmer, then across
+okresy the <em>number of legionnaires calling themselves <code>rolník</code></em> should track the okres's
+count of agricultural <strong>Selbständige</strong>, and should not track its count of agricultural
+<strong>Arbeiter / Taglöhner</strong>. If <code>rolník</code> names a hired hand, the opposite.</p>
+<p><code>nádeník</code> (day-labourer, coded 99920) is carried as a <strong>placebo</strong>: whatever the correlation
+structure does for <code>rolník</code>, <code>nádeník</code> must behave like the wage-labour columns, or the
+design is picking up okres size rather than occupational structure.</p>
+<p>Run:  python utils/reference_tools/occupations/run_census_berufsstellung_check.py
+Emits: nothing — prints the result for <code>reference/VALIDATION_OCCUPATIONS.md</code>.
+       This is a validation script, never a pipeline input; it writes no file and touches
+       no code column.</p>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-reference_tools-occupations-run_census_berufsstellung_check-run">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 68–129 (62 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing.occupations</span><span class="w"> </span><span class="kn">import</span> <span class="n">_norm</span>
+
+    <span class="n">L</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">FIN</span> <span class="o">/</span> <span class="s2">&quot;persons&quot;</span> <span class="o">/</span> <span class="s2">&quot;legionnaires_clean.parquet&quot;</span><span class="p">,</span>
+                        <span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;occupation&quot;</span><span class="p">,</span> <span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">])</span>
+    <span class="n">L</span><span class="p">[</span><span class="s2">&quot;key&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">L</span><span class="p">[</span><span class="s2">&quot;occupation&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_norm</span><span class="p">)</span>
+    <span class="n">L</span> <span class="o">=</span> <span class="n">L</span><span class="o">.</span><span class="n">dropna</span><span class="p">(</span><span class="n">subset</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">])</span>
+
+    <span class="n">cen</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">FIN</span> <span class="o">/</span> <span class="s2">&quot;census&quot;</span> <span class="o">/</span> <span class="s2">&quot;census_okres_1910_pooled.parquet&quot;</span><span class="p">)</span>
+    <span class="n">key</span> <span class="o">=</span> <span class="s2">&quot;census_okres_id&quot;</span> <span class="k">if</span> <span class="s2">&quot;census_okres_id&quot;</span> <span class="ow">in</span> <span class="n">cen</span><span class="o">.</span><span class="n">columns</span> <span class="k">else</span> <span class="s2">&quot;okres_id&quot;</span>
+    <span class="n">need</span> <span class="o">=</span> <span class="n">OWNER</span> <span class="o">+</span> <span class="n">LABOUR</span> <span class="o">+</span> <span class="n">FAMILY</span> <span class="o">+</span> <span class="p">[</span><span class="n">TOTAL</span><span class="p">]</span>
+    <span class="n">missing</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">need</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">cen</span><span class="o">.</span><span class="n">columns</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">missing</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;census panel is missing Beruf columns: </span><span class="si">{</span><span class="n">missing</span><span class="p">[:</span><span class="mi">3</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">cen</span> <span class="o">=</span> <span class="n">cen</span><span class="p">[[</span><span class="n">key</span><span class="p">]</span> <span class="o">+</span> <span class="n">need</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">cen</span><span class="p">[</span><span class="s2">&quot;owner_n&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cen</span><span class="p">[</span><span class="n">OWNER</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">min_count</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">cen</span><span class="p">[</span><span class="s2">&quot;labour_n&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cen</span><span class="p">[</span><span class="n">LABOUR</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">min_count</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">cen</span><span class="p">[</span><span class="s2">&quot;family_n&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cen</span><span class="p">[</span><span class="n">FAMILY</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">min_count</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">tot</span> <span class="o">=</span> <span class="n">cen</span><span class="p">[</span><span class="n">TOTAL</span><span class="p">]</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+    <span class="n">cen</span><span class="p">[</span><span class="s2">&quot;owner_share&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cen</span><span class="p">[</span><span class="s2">&quot;owner_n&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="n">tot</span>
+    <span class="n">cen</span><span class="p">[</span><span class="s2">&quot;labour_share&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cen</span><span class="p">[</span><span class="s2">&quot;labour_n&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="n">tot</span>
+
+    <span class="c1"># legionnaire counts per okres</span>
+    <span class="n">births</span> <span class="o">=</span> <span class="n">L</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">size</span><span class="p">()</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="s2">&quot;births&quot;</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">cnt</span><span class="p">(</span><span class="n">k</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">(</span><span class="n">L</span><span class="p">[</span><span class="n">L</span><span class="p">[</span><span class="s2">&quot;key&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">eq</span><span class="p">(</span><span class="n">k</span><span class="p">)]</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">size</span><span class="p">()</span>
+                <span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;n_</span><span class="si">{</span><span class="n">k</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39; &#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;_&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">))</span>
+
+    <span class="n">d</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">births</span><span class="p">,</span> <span class="n">cnt</span><span class="p">(</span><span class="s2">&quot;rolník&quot;</span><span class="p">),</span> <span class="n">cnt</span><span class="p">(</span><span class="s2">&quot;nádeník&quot;</span><span class="p">),</span> <span class="n">cnt</span><span class="p">(</span><span class="s2">&quot;dělník&quot;</span><span class="p">)],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">d</span><span class="p">[</span><span class="n">d</span><span class="p">[</span><span class="s2">&quot;births&quot;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">MIN_BIRTHS</span><span class="p">]</span>
+    <span class="n">d</span><span class="o">.</span><span class="n">index</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="n">key</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">d</span><span class="o">.</span><span class="n">reset_index</span><span class="p">()</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span><span class="n">cen</span><span class="p">,</span> <span class="n">on</span><span class="o">=</span><span class="n">key</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;inner&quot;</span><span class="p">)</span>
+
+    <span class="n">d</span><span class="p">[</span><span class="s2">&quot;rolnik_share&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">d</span><span class="p">[</span><span class="s2">&quot;n_rolník&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="n">d</span><span class="p">[</span><span class="s2">&quot;births&quot;</span><span class="p">]</span>
+    <span class="n">d</span><span class="p">[</span><span class="s2">&quot;nadenik_share&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">d</span><span class="p">[</span><span class="s2">&quot;n_nádeník&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="n">d</span><span class="p">[</span><span class="s2">&quot;births&quot;</span><span class="p">]</span>
+    <span class="n">d</span><span class="p">[</span><span class="s2">&quot;delnik_share&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">d</span><span class="p">[</span><span class="s2">&quot;n_dělník&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="n">d</span><span class="p">[</span><span class="s2">&quot;births&quot;</span><span class="p">]</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">d</span><span class="p">)</span><span class="si">}</span><span class="s2"> okresy with &gt;= </span><span class="si">{</span><span class="n">MIN_BIRTHS</span><span class="si">}</span><span class="s2"> legionnaire births and census Beruf data&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  agricultural workforce covered: </span><span class="si">{</span><span class="n">d</span><span class="p">[</span><span class="n">TOTAL</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">,.0f</span><span class="si">}</span><span class="s2"> &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">d</span><span class="p">[</span><span class="s1">&#39;owner_n&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">,.0f</span><span class="si">}</span><span class="s2"> self-employed + tenants, &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">d</span><span class="p">[</span><span class="s1">&#39;labour_n&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">,.0f</span><span class="si">}</span><span class="s2"> workers + day-labourers)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">lab</span><span class="p">,</span> <span class="n">col</span> <span class="ow">in</span> <span class="p">((</span><span class="s2">&quot;rolník  share of births&quot;</span><span class="p">,</span> <span class="s2">&quot;rolnik_share&quot;</span><span class="p">),</span>
+                     <span class="p">(</span><span class="s2">&quot;nádeník share  (placebo)&quot;</span><span class="p">,</span> <span class="s2">&quot;nadenik_share&quot;</span><span class="p">),</span>
+                     <span class="p">(</span><span class="s2">&quot;dělník  share  (placebo)&quot;</span><span class="p">,</span> <span class="s2">&quot;delnik_share&quot;</span><span class="p">)):</span>
+        <span class="n">r_own</span><span class="p">,</span> <span class="n">n1</span> <span class="o">=</span> <span class="n">_spearman</span><span class="p">(</span><span class="n">d</span><span class="p">[</span><span class="n">col</span><span class="p">],</span> <span class="n">d</span><span class="p">[</span><span class="s2">&quot;owner_share&quot;</span><span class="p">])</span>
+        <span class="n">r_lab</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">_spearman</span><span class="p">(</span><span class="n">d</span><span class="p">[</span><span class="n">col</span><span class="p">],</span> <span class="n">d</span><span class="p">[</span><span class="s2">&quot;labour_share&quot;</span><span class="p">])</span>
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;legionnaire measure&quot;</span><span class="p">:</span> <span class="n">lab</span><span class="p">,</span>
+                     <span class="s2">&quot;vs census SELF-EMPLOYED share&quot;</span><span class="p">:</span> <span class="nb">round</span><span class="p">(</span><span class="n">r_own</span><span class="p">,</span> <span class="mi">3</span><span class="p">),</span>
+                     <span class="s2">&quot;vs census WAGE-LABOUR share&quot;</span><span class="p">:</span> <span class="nb">round</span><span class="p">(</span><span class="n">r_lab</span><span class="p">,</span> <span class="mi">3</span><span class="p">),</span>
+                     <span class="s2">&quot;n okresy&quot;</span><span class="p">:</span> <span class="n">n1</span><span class="p">})</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">out</span><span class="o">.</span><span class="n">to_string</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
+
+    <span class="c1"># Raw counts are not run as a test. Both census columns scale with how agricultural an</span>
+    <span class="c1"># okres is, so `log n_rolník` correlates with both (beta +1.30 vs +1.22, r +0.59 vs</span>
+    <span class="c1"># +0.53) and discriminates nothing. That is a size effect, not evidence, and it is</span>
+    <span class="c1"># recorded here so nobody re-derives it and mistakes it for one.</span>
+
+    <span class="k">return</span> <span class="n">d</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-run_census_berufsstellung_check-run_composition">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">run_composition</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>The clean test: hold agriculture fixed on <em>both</em> sides.</p>
+<p>The share-of-all-births measure above still carries a confound — an okres that is more
+agricultural produces more <code>rolník</code> whatever the word means. So restrict the
+legionnaire denominator to men already coded into <strong>HISCO major group 6</strong> (agricultural,
+animal husbandry, forestry and fishing) and ask a within-agriculture question:</p>
+<pre><code>of this okres's farm-occupation legionnaires, what fraction are coded as
+*self-employed farmers* (61110/61115) rather than as *hired agricultural labour*
+(62xxx farm workers and servants, plus 99920 day-labourers)?
+</code></pre>
+<p>against the census's own within-agriculture split</p>
+<pre><code>Selbständige + Pächter  /  (Selbständige + Pächter + Arbeiter + Taglöhner).
+</code></pre>
+<p>Both sides are now compositions of the same population, so okres size and agricultural
+intensity cancel. If <code>rolník</code> names an owner the two should move together; if it names
+a hired hand they should move apart, because <code>rolník</code> dominates the numerator either
+way (18 % of the whole sample) and would then be sitting on the wrong side.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/reference_tools/education/run_unterricht_check.py</code></p>
+<details><summary>source · lines 132–223 (92 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">run_composition</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The clean test: hold agriculture fixed on *both* sides.</span>
+
+<span class="sd">    The share-of-all-births measure above still carries a confound — an okres that is more</span>
+<span class="sd">    agricultural produces more `rolník` whatever the word means. So restrict the</span>
+<span class="sd">    legionnaire denominator to men already coded into **HISCO major group 6** (agricultural,</span>
+<span class="sd">    animal husbandry, forestry and fishing) and ask a within-agriculture question:</span>
+
+<span class="sd">        of this okres&#39;s farm-occupation legionnaires, what fraction are coded as</span>
+<span class="sd">        *self-employed farmers* (61110/61115) rather than as *hired agricultural labour*</span>
+<span class="sd">        (62xxx farm workers and servants, plus 99920 day-labourers)?</span>
+
+<span class="sd">    against the census&#39;s own within-agriculture split</span>
+
+<span class="sd">        Selbständige + Pächter  /  (Selbständige + Pächter + Arbeiter + Taglöhner).</span>
+
+<span class="sd">    Both sides are now compositions of the same population, so okres size and agricultural</span>
+<span class="sd">    intensity cancel. If `rolník` names an owner the two should move together; if it names</span>
+<span class="sd">    a hired hand they should move apart, because `rolník` dominates the numerator either</span>
+<span class="sd">    way (18 % of the whole sample) and would then be sitting on the wrong side.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing.occupations</span><span class="w"> </span><span class="kn">import</span> <span class="n">_norm</span>
+
+    <span class="n">L</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">FIN</span> <span class="o">/</span> <span class="s2">&quot;persons&quot;</span> <span class="o">/</span> <span class="s2">&quot;legionnaires_clean.parquet&quot;</span><span class="p">,</span>
+                        <span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;occupation&quot;</span><span class="p">,</span> <span class="s2">&quot;occupation_hisco&quot;</span><span class="p">,</span> <span class="s2">&quot;occupation_hisco_major&quot;</span><span class="p">,</span>
+                                 <span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">])</span>
+    <span class="n">L</span><span class="p">[</span><span class="s2">&quot;key&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">L</span><span class="p">[</span><span class="s2">&quot;occupation&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_norm</span><span class="p">)</span>
+    <span class="n">L</span> <span class="o">=</span> <span class="n">L</span><span class="o">.</span><span class="n">dropna</span><span class="p">(</span><span class="n">subset</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">,</span> <span class="s2">&quot;occupation_hisco&quot;</span><span class="p">])</span>
+
+    <span class="n">ag</span> <span class="o">=</span> <span class="n">L</span><span class="p">[</span><span class="n">L</span><span class="p">[</span><span class="s2">&quot;occupation_hisco_major&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">eq</span><span class="p">(</span><span class="s2">&quot;6&quot;</span><span class="p">)</span> <span class="o">|</span> <span class="n">L</span><span class="p">[</span><span class="s2">&quot;occupation_hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">eq</span><span class="p">(</span><span class="s2">&quot;99920&quot;</span><span class="p">)]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="c1"># owner-side vs hired-side codes, by the coding under test</span>
+    <span class="n">owner_codes</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;61110&quot;</span><span class="p">,</span> <span class="s2">&quot;61115&quot;</span><span class="p">}</span>
+    <span class="n">ag</span><span class="p">[</span><span class="s2">&quot;is_owner&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">ag</span><span class="p">[</span><span class="s2">&quot;occupation_hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">owner_codes</span><span class="p">)</span>
+    <span class="n">ag</span><span class="p">[</span><span class="s2">&quot;is_hired&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="o">~</span><span class="n">ag</span><span class="p">[</span><span class="s2">&quot;is_owner&quot;</span><span class="p">]</span>
+
+    <span class="n">g</span> <span class="o">=</span> <span class="n">ag</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">agg</span><span class="p">(</span>
+        <span class="n">ag_n</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;is_owner&quot;</span><span class="p">,</span> <span class="s2">&quot;size&quot;</span><span class="p">),</span> <span class="n">owner_leg</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;is_owner&quot;</span><span class="p">,</span> <span class="s2">&quot;sum&quot;</span><span class="p">))</span>
+    <span class="n">g</span> <span class="o">=</span> <span class="n">g</span><span class="p">[</span><span class="n">g</span><span class="p">[</span><span class="s2">&quot;ag_n&quot;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">MIN_BIRTHS</span><span class="p">]</span>
+    <span class="n">g</span><span class="p">[</span><span class="s2">&quot;leg_owner_share&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">g</span><span class="p">[</span><span class="s2">&quot;owner_leg&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="n">g</span><span class="p">[</span><span class="s2">&quot;ag_n&quot;</span><span class="p">]</span>
+
+    <span class="n">cen</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">FIN</span> <span class="o">/</span> <span class="s2">&quot;census&quot;</span> <span class="o">/</span> <span class="s2">&quot;census_okres_1910_pooled.parquet&quot;</span><span class="p">)</span>
+    <span class="n">key</span> <span class="o">=</span> <span class="s2">&quot;census_okres_id&quot;</span> <span class="k">if</span> <span class="s2">&quot;census_okres_id&quot;</span> <span class="ow">in</span> <span class="n">cen</span><span class="o">.</span><span class="n">columns</span> <span class="k">else</span> <span class="s2">&quot;okres_id&quot;</span>
+    <span class="n">cen</span> <span class="o">=</span> <span class="n">cen</span><span class="p">[[</span><span class="n">key</span><span class="p">]</span> <span class="o">+</span> <span class="n">OWNER</span> <span class="o">+</span> <span class="n">LABOUR</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">cen</span><span class="p">[</span><span class="s2">&quot;own&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cen</span><span class="p">[</span><span class="n">OWNER</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">min_count</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">cen</span><span class="p">[</span><span class="s2">&quot;lab&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cen</span><span class="p">[</span><span class="n">LABOUR</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">min_count</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">cen</span><span class="p">[</span><span class="s2">&quot;cen_owner_share&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cen</span><span class="p">[</span><span class="s2">&quot;own&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="p">(</span><span class="n">cen</span><span class="p">[</span><span class="s2">&quot;own&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="n">cen</span><span class="p">[</span><span class="s2">&quot;lab&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+
+    <span class="n">g</span><span class="o">.</span><span class="n">index</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="n">key</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">g</span><span class="o">.</span><span class="n">reset_index</span><span class="p">()</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span><span class="n">cen</span><span class="p">[[</span><span class="n">key</span><span class="p">,</span> <span class="s2">&quot;cen_owner_share&quot;</span><span class="p">]],</span> <span class="n">on</span><span class="o">=</span><span class="n">key</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;inner&quot;</span><span class="p">)</span>
+
+    <span class="n">r</span><span class="p">,</span> <span class="n">n</span> <span class="o">=</span> <span class="n">_spearman</span><span class="p">(</span><span class="n">d</span><span class="p">[</span><span class="s2">&quot;leg_owner_share&quot;</span><span class="p">],</span> <span class="n">d</span><span class="p">[</span><span class="s2">&quot;cen_owner_share&quot;</span><span class="p">])</span>
+    <span class="n">pear</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">d</span><span class="p">[</span><span class="s2">&quot;leg_owner_share&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">corr</span><span class="p">(</span><span class="n">d</span><span class="p">[</span><span class="s2">&quot;cen_owner_share&quot;</span><span class="p">]))</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  within-agriculture composition test (</span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s2"> okresy, &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">g</span><span class="p">[</span><span class="s1">&#39;ag_n&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> farm-occupation legionnaires)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    legionnaire self-employed share  vs  census Selbständige share&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    Spearman r = </span><span class="si">{</span><span class="n">r</span><span class="si">:</span><span class="s2">+.3f</span><span class="si">}</span><span class="s2">   Pearson r = </span><span class="si">{</span><span class="n">pear</span><span class="si">:</span><span class="s2">+.3f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    legionnaire mean </span><span class="si">{</span><span class="n">d</span><span class="p">[</span><span class="s1">&#39;leg_owner_share&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;vs census mean </span><span class="si">{</span><span class="n">d</span><span class="p">[</span><span class="s1">&#39;cen_owner_share&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">lo</span> <span class="o">=</span> <span class="n">d</span><span class="o">.</span><span class="n">nsmallest</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="s2">&quot;cen_owner_share&quot;</span><span class="p">)[[</span><span class="s2">&quot;cen_owner_share&quot;</span><span class="p">,</span> <span class="s2">&quot;leg_owner_share&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+    <span class="n">hi</span> <span class="o">=</span> <span class="n">d</span><span class="o">.</span><span class="n">nlargest</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="s2">&quot;cen_owner_share&quot;</span><span class="p">)[[</span><span class="s2">&quot;cen_owner_share&quot;</span><span class="p">,</span> <span class="s2">&quot;leg_owner_share&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">    8 most estate-dominated okresy: census owners </span><span class="si">{</span><span class="n">lo</span><span class="p">[</span><span class="s1">&#39;cen_owner_share&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;-&gt; legionnaire owners </span><span class="si">{</span><span class="n">lo</span><span class="p">[</span><span class="s1">&#39;leg_owner_share&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    8 most smallholder okresy:      census owners </span><span class="si">{</span><span class="n">hi</span><span class="p">[</span><span class="s1">&#39;cen_owner_share&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;-&gt; legionnaire owners </span><span class="si">{</span><span class="n">hi</span><span class="p">[</span><span class="s1">&#39;leg_owner_share&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># ── the level gap, and the one reading that closes it ────────────────────────────</span>
+    <span class="c1"># 0.907 legionnaire vs 0.463 census is far too large to be coding drift alone, and the</span>
+    <span class="c1"># obvious suspect is the census&#39;s own third category. `mithelfende Familienangehörige`</span>
+    <span class="c1"># — sons and brothers working the family holding — are 1910&#39;s largest single group in</span>
+    <span class="c1"># agriculture and are exactly who a 22-year-old volunteer saying `rolník` is likely to</span>
+    <span class="c1"># be. They are neither Selbständige nor wage labour, and were excluded from both sides</span>
+    <span class="c1"># above. Put them on the own-account side, where they economically belong (they work</span>
+    <span class="c1"># their family&#39;s land, not an employer&#39;s, for no wage), and see what the census says.</span>
+    <span class="n">cen2</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">FIN</span> <span class="o">/</span> <span class="s2">&quot;census&quot;</span> <span class="o">/</span> <span class="s2">&quot;census_okres_1910_pooled.parquet&quot;</span><span class="p">)</span>
+    <span class="n">k2</span> <span class="o">=</span> <span class="s2">&quot;census_okres_id&quot;</span> <span class="k">if</span> <span class="s2">&quot;census_okres_id&quot;</span> <span class="ow">in</span> <span class="n">cen2</span><span class="o">.</span><span class="n">columns</span> <span class="k">else</span> <span class="s2">&quot;okres_id&quot;</span>
+    <span class="n">cen2</span> <span class="o">=</span> <span class="n">cen2</span><span class="p">[[</span><span class="n">k2</span><span class="p">]</span> <span class="o">+</span> <span class="n">OWNER</span> <span class="o">+</span> <span class="n">LABOUR</span> <span class="o">+</span> <span class="n">FAMILY</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">cen2</span><span class="p">[</span><span class="s2">&quot;own_fam&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cen2</span><span class="p">[</span><span class="n">OWNER</span> <span class="o">+</span> <span class="n">FAMILY</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">min_count</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">cen2</span><span class="p">[</span><span class="s2">&quot;lab2&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cen2</span><span class="p">[</span><span class="n">LABOUR</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">min_count</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">cen2</span><span class="p">[</span><span class="s2">&quot;cen_ownfam_share&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">cen2</span><span class="p">[</span><span class="s2">&quot;own_fam&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="p">(</span><span class="n">cen2</span><span class="p">[</span><span class="s2">&quot;own_fam&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="n">cen2</span><span class="p">[</span><span class="s2">&quot;lab2&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">))</span>
+    <span class="n">d2</span> <span class="o">=</span> <span class="n">d</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span><span class="n">cen2</span><span class="p">[[</span><span class="n">k2</span><span class="p">,</span> <span class="s2">&quot;cen_ownfam_share&quot;</span><span class="p">]],</span> <span class="n">left_on</span><span class="o">=</span><span class="n">key</span><span class="p">,</span> <span class="n">right_on</span><span class="o">=</span><span class="n">k2</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;inner&quot;</span><span class="p">)</span>
+    <span class="n">r2</span><span class="p">,</span> <span class="n">n2</span> <span class="o">=</span> <span class="n">_spearman</span><span class="p">(</span><span class="n">d2</span><span class="p">[</span><span class="s2">&quot;leg_owner_share&quot;</span><span class="p">],</span> <span class="n">d2</span><span class="p">[</span><span class="s2">&quot;cen_ownfam_share&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">    counting assisting family members as own-account &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(they work family land, not an employer&#39;s):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;      census mean </span><span class="si">{</span><span class="n">d2</span><span class="p">[</span><span class="s1">&#39;cen_ownfam_share&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;vs legionnaire </span><span class="si">{</span><span class="n">d2</span><span class="p">[</span><span class="s1">&#39;leg_owner_share&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">   &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;Spearman r = </span><span class="si">{</span><span class="n">r2</span><span class="si">:</span><span class="s2">+.3f</span><span class="si">}</span><span class="s2">  (n=</span><span class="si">{</span><span class="n">n2</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;      the level gap closes from &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">d2</span><span class="p">[</span><span class="s1">&#39;leg_owner_share&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">d</span><span class="p">[</span><span class="s1">&#39;cen_owner_share&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="si">:</span><span class="s2">+.3f</span><span class="si">}</span><span class="s2"> to &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">d2</span><span class="p">[</span><span class="s1">&#39;leg_owner_share&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">d2</span><span class="p">[</span><span class="s1">&#39;cen_ownfam_share&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="si">:</span><span class="s2">+.3f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">d</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-reference_tools-occupations-run_census_berufsstellung_check-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-run_census_berufsstellung_check-FIN"><pre class="sig">FIN<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;data&#39;</span> <span class="o">/</span> <span class="s1">&#39;final&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-run_census_berufsstellung_check-A"><pre class="sig">A<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;occ_occupation_class_a_land_forestry_byproducts_economically_active_&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-run_census_berufsstellung_check-OWNER"><pre class="sig">OWNER<span class="kind">list · 2 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">[</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">A</span><span class="si">}</span><span class="s1">permanent&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">A</span><span class="si">}</span><span class="s1">tenants&#39;</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-run_census_berufsstellung_check-LABOUR"><pre class="sig">LABOUR<span class="kind">list · 2 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">[</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">A</span><span class="si">}</span><span class="s1">workers&#39;</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">A</span><span class="si">}</span><span class="s1">day_laborers&#39;</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-run_census_berufsstellung_check-FAMILY"><pre class="sig">FAMILY<span class="kind">list · 1 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">[</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">A</span><span class="si">}</span><span class="s1">assisting_family_members&#39;</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-run_census_berufsstellung_check-TOTAL"><pre class="sig">TOTAL<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">A</span><span class="si">}</span><span class="s1">total&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-run_census_berufsstellung_check-MIN_BIRTHS"><pre class="sig">MIN_BIRTHS<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">30</span>
+</pre></div>
+</details></div>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/reference_tools/occupations/run_census_berufsstellung_check.py · 229 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span></pre></div></td><td class="code"><div><pre><span></span><span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;run_census_berufsstellung_check.py — is a `rolník` a farm *owner* or a farm *worker*?</span>
+
+<span class="sd">The single largest judgement call in the Czech→HISCO dictionary. `rolník` is 18 % of the</span>
+<span class="sd">sample and is coded **61110 General Farmer, HISCLASS 8** (the self-employed reading). The</span>
+<span class="sd">live alternative, **62105 Farm Worker, HISCLASS 12**, would move a fifth of the Legion</span>
+<span class="sd">between social classes.</span>
+
+<span class="sd">Neither of the project&#39;s other three checks can settle it. The German bridge confirms only</span>
+<span class="sd">that *Landwirt* → 61110, not that a Czech `rolník` is a *Landwirt*. OccCANINE is fed that</span>
+<span class="sd">same German gloss. CZ-ISCO does not contain the word. And education does not discriminate —</span>
+<span class="sd">`rolník` and `domkář` both sit at ~1.0–1.1 on the 0–4 scale, because schooling did not track</span>
+<span class="sd">landholding.</span>
+
+<span class="sd">**This check uses a primary source instead.** The 1910 *Volkszählung* records, for every</span>
+<span class="sd">politický okres, the agricultural workforce split by **Berufsstellung** — `permanent`</span>
+<span class="sd">(Selbständige, working on their own account), `tenants` (Pächter), `employees`, `workers`</span>
+<span class="sd">(Arbeiter), `day_laborers` (Taglöhner), `assisting_family_members`. Those columns are</span>
+<span class="sd">already parsed into ``census_okres_1910.parquet``.</span>
+
+<span class="sd">The test is ecological and simple. If `rolník` names the self-employed farmer, then across</span>
+<span class="sd">okresy the *number of legionnaires calling themselves `rolník`* should track the okres&#39;s</span>
+<span class="sd">count of agricultural **Selbständige**, and should not track its count of agricultural</span>
+<span class="sd">**Arbeiter / Taglöhner**. If `rolník` names a hired hand, the opposite.</span>
+
+<span class="sd">`nádeník` (day-labourer, coded 99920) is carried as a **placebo**: whatever the correlation</span>
+<span class="sd">structure does for `rolník`, `nádeník` must behave like the wage-labour columns, or the</span>
+<span class="sd">design is picking up okres size rather than occupational structure.</span>
+
+<span class="sd">Run:  python utils/reference_tools/occupations/run_census_berufsstellung_check.py</span>
+<span class="sd">Emits: nothing — prints the result for `reference/VALIDATION_OCCUPATIONS.md`.</span>
+<span class="sd">       This is a validation script, never a pipeline input; it writes no file and touches</span>
+<span class="sd">       no code column.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">))</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.0.0&quot;</span>
+
+<span class="n">FIN</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;data&quot;</span> <span class="o">/</span> <span class="s2">&quot;final&quot;</span>
+<span class="n">A</span> <span class="o">=</span> <span class="s2">&quot;occ_occupation_class_a_land_forestry_byproducts_economically_active_&quot;</span>
+
+<span class="c1"># Berufsstellung columns, split into the two readings the test discriminates between.</span>
+<span class="n">OWNER</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">A</span><span class="si">}</span><span class="s2">permanent&quot;</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">A</span><span class="si">}</span><span class="s2">tenants&quot;</span><span class="p">]</span>                     <span class="c1"># Selbständige + Pächter</span>
+<span class="n">LABOUR</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">A</span><span class="si">}</span><span class="s2">workers&quot;</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">A</span><span class="si">}</span><span class="s2">day_laborers&quot;</span><span class="p">]</span>                 <span class="c1"># Arbeiter + Taglöhner</span>
+<span class="n">FAMILY</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">A</span><span class="si">}</span><span class="s2">assisting_family_members&quot;</span><span class="p">]</span>
+<span class="n">TOTAL</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">A</span><span class="si">}</span><span class="s2">total&quot;</span>
+
+<span class="n">MIN_BIRTHS</span> <span class="o">=</span> <span class="mi">30</span>          <span class="c1"># okresy thinner than this are noise, not evidence</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_spearman</span><span class="p">(</span><span class="n">x</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">,</span> <span class="n">y</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Rank correlation, computed on the rows where both are present.&quot;&quot;&quot;</span>
+    <span class="n">ok</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">y</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">ok</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="o">&lt;</span> <span class="mi">10</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">float</span><span class="p">(</span><span class="s2">&quot;nan&quot;</span><span class="p">),</span> <span class="nb">int</span><span class="p">(</span><span class="n">ok</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
+    <span class="k">return</span> <span class="nb">float</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="n">ok</span><span class="p">]</span><span class="o">.</span><span class="n">rank</span><span class="p">()</span><span class="o">.</span><span class="n">corr</span><span class="p">(</span><span class="n">y</span><span class="p">[</span><span class="n">ok</span><span class="p">]</span><span class="o">.</span><span class="n">rank</span><span class="p">())),</span> <span class="nb">int</span><span class="p">(</span><span class="n">ok</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing.occupations</span><span class="w"> </span><span class="kn">import</span> <span class="n">_norm</span>
+
+    <span class="n">L</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">FIN</span> <span class="o">/</span> <span class="s2">&quot;persons&quot;</span> <span class="o">/</span> <span class="s2">&quot;legionnaires_clean.parquet&quot;</span><span class="p">,</span>
+                        <span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;occupation&quot;</span><span class="p">,</span> <span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">])</span>
+    <span class="n">L</span><span class="p">[</span><span class="s2">&quot;key&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">L</span><span class="p">[</span><span class="s2">&quot;occupation&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_norm</span><span class="p">)</span>
+    <span class="n">L</span> <span class="o">=</span> <span class="n">L</span><span class="o">.</span><span class="n">dropna</span><span class="p">(</span><span class="n">subset</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">])</span>
+
+    <span class="n">cen</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">FIN</span> <span class="o">/</span> <span class="s2">&quot;census&quot;</span> <span class="o">/</span> <span class="s2">&quot;census_okres_1910_pooled.parquet&quot;</span><span class="p">)</span>
+    <span class="n">key</span> <span class="o">=</span> <span class="s2">&quot;census_okres_id&quot;</span> <span class="k">if</span> <span class="s2">&quot;census_okres_id&quot;</span> <span class="ow">in</span> <span class="n">cen</span><span class="o">.</span><span class="n">columns</span> <span class="k">else</span> <span class="s2">&quot;okres_id&quot;</span>
+    <span class="n">need</span> <span class="o">=</span> <span class="n">OWNER</span> <span class="o">+</span> <span class="n">LABOUR</span> <span class="o">+</span> <span class="n">FAMILY</span> <span class="o">+</span> <span class="p">[</span><span class="n">TOTAL</span><span class="p">]</span>
+    <span class="n">missing</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">need</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">cen</span><span class="o">.</span><span class="n">columns</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">missing</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;census panel is missing Beruf columns: </span><span class="si">{</span><span class="n">missing</span><span class="p">[:</span><span class="mi">3</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">cen</span> <span class="o">=</span> <span class="n">cen</span><span class="p">[[</span><span class="n">key</span><span class="p">]</span> <span class="o">+</span> <span class="n">need</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">cen</span><span class="p">[</span><span class="s2">&quot;owner_n&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cen</span><span class="p">[</span><span class="n">OWNER</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">min_count</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">cen</span><span class="p">[</span><span class="s2">&quot;labour_n&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cen</span><span class="p">[</span><span class="n">LABOUR</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">min_count</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">cen</span><span class="p">[</span><span class="s2">&quot;family_n&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cen</span><span class="p">[</span><span class="n">FAMILY</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">min_count</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">tot</span> <span class="o">=</span> <span class="n">cen</span><span class="p">[</span><span class="n">TOTAL</span><span class="p">]</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+    <span class="n">cen</span><span class="p">[</span><span class="s2">&quot;owner_share&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cen</span><span class="p">[</span><span class="s2">&quot;owner_n&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="n">tot</span>
+    <span class="n">cen</span><span class="p">[</span><span class="s2">&quot;labour_share&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cen</span><span class="p">[</span><span class="s2">&quot;labour_n&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="n">tot</span>
+
+    <span class="c1"># legionnaire counts per okres</span>
+    <span class="n">births</span> <span class="o">=</span> <span class="n">L</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">size</span><span class="p">()</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="s2">&quot;births&quot;</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">cnt</span><span class="p">(</span><span class="n">k</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">(</span><span class="n">L</span><span class="p">[</span><span class="n">L</span><span class="p">[</span><span class="s2">&quot;key&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">eq</span><span class="p">(</span><span class="n">k</span><span class="p">)]</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">size</span><span class="p">()</span>
+                <span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;n_</span><span class="si">{</span><span class="n">k</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39; &#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;_&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">))</span>
+
+    <span class="n">d</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">births</span><span class="p">,</span> <span class="n">cnt</span><span class="p">(</span><span class="s2">&quot;rolník&quot;</span><span class="p">),</span> <span class="n">cnt</span><span class="p">(</span><span class="s2">&quot;nádeník&quot;</span><span class="p">),</span> <span class="n">cnt</span><span class="p">(</span><span class="s2">&quot;dělník&quot;</span><span class="p">)],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">d</span><span class="p">[</span><span class="n">d</span><span class="p">[</span><span class="s2">&quot;births&quot;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">MIN_BIRTHS</span><span class="p">]</span>
+    <span class="n">d</span><span class="o">.</span><span class="n">index</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="n">key</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">d</span><span class="o">.</span><span class="n">reset_index</span><span class="p">()</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span><span class="n">cen</span><span class="p">,</span> <span class="n">on</span><span class="o">=</span><span class="n">key</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;inner&quot;</span><span class="p">)</span>
+
+    <span class="n">d</span><span class="p">[</span><span class="s2">&quot;rolnik_share&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">d</span><span class="p">[</span><span class="s2">&quot;n_rolník&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="n">d</span><span class="p">[</span><span class="s2">&quot;births&quot;</span><span class="p">]</span>
+    <span class="n">d</span><span class="p">[</span><span class="s2">&quot;nadenik_share&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">d</span><span class="p">[</span><span class="s2">&quot;n_nádeník&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="n">d</span><span class="p">[</span><span class="s2">&quot;births&quot;</span><span class="p">]</span>
+    <span class="n">d</span><span class="p">[</span><span class="s2">&quot;delnik_share&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">d</span><span class="p">[</span><span class="s2">&quot;n_dělník&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="n">d</span><span class="p">[</span><span class="s2">&quot;births&quot;</span><span class="p">]</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">d</span><span class="p">)</span><span class="si">}</span><span class="s2"> okresy with &gt;= </span><span class="si">{</span><span class="n">MIN_BIRTHS</span><span class="si">}</span><span class="s2"> legionnaire births and census Beruf data&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  agricultural workforce covered: </span><span class="si">{</span><span class="n">d</span><span class="p">[</span><span class="n">TOTAL</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">,.0f</span><span class="si">}</span><span class="s2"> &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">d</span><span class="p">[</span><span class="s1">&#39;owner_n&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">,.0f</span><span class="si">}</span><span class="s2"> self-employed + tenants, &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">d</span><span class="p">[</span><span class="s1">&#39;labour_n&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">,.0f</span><span class="si">}</span><span class="s2"> workers + day-labourers)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">lab</span><span class="p">,</span> <span class="n">col</span> <span class="ow">in</span> <span class="p">((</span><span class="s2">&quot;rolník  share of births&quot;</span><span class="p">,</span> <span class="s2">&quot;rolnik_share&quot;</span><span class="p">),</span>
+                     <span class="p">(</span><span class="s2">&quot;nádeník share  (placebo)&quot;</span><span class="p">,</span> <span class="s2">&quot;nadenik_share&quot;</span><span class="p">),</span>
+                     <span class="p">(</span><span class="s2">&quot;dělník  share  (placebo)&quot;</span><span class="p">,</span> <span class="s2">&quot;delnik_share&quot;</span><span class="p">)):</span>
+        <span class="n">r_own</span><span class="p">,</span> <span class="n">n1</span> <span class="o">=</span> <span class="n">_spearman</span><span class="p">(</span><span class="n">d</span><span class="p">[</span><span class="n">col</span><span class="p">],</span> <span class="n">d</span><span class="p">[</span><span class="s2">&quot;owner_share&quot;</span><span class="p">])</span>
+        <span class="n">r_lab</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">_spearman</span><span class="p">(</span><span class="n">d</span><span class="p">[</span><span class="n">col</span><span class="p">],</span> <span class="n">d</span><span class="p">[</span><span class="s2">&quot;labour_share&quot;</span><span class="p">])</span>
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;legionnaire measure&quot;</span><span class="p">:</span> <span class="n">lab</span><span class="p">,</span>
+                     <span class="s2">&quot;vs census SELF-EMPLOYED share&quot;</span><span class="p">:</span> <span class="nb">round</span><span class="p">(</span><span class="n">r_own</span><span class="p">,</span> <span class="mi">3</span><span class="p">),</span>
+                     <span class="s2">&quot;vs census WAGE-LABOUR share&quot;</span><span class="p">:</span> <span class="nb">round</span><span class="p">(</span><span class="n">r_lab</span><span class="p">,</span> <span class="mi">3</span><span class="p">),</span>
+                     <span class="s2">&quot;n okresy&quot;</span><span class="p">:</span> <span class="n">n1</span><span class="p">})</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">out</span><span class="o">.</span><span class="n">to_string</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
+
+    <span class="c1"># Raw counts are not run as a test. Both census columns scale with how agricultural an</span>
+    <span class="c1"># okres is, so `log n_rolník` correlates with both (beta +1.30 vs +1.22, r +0.59 vs</span>
+    <span class="c1"># +0.53) and discriminates nothing. That is a size effect, not evidence, and it is</span>
+    <span class="c1"># recorded here so nobody re-derives it and mistakes it for one.</span>
+
+    <span class="k">return</span> <span class="n">d</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">run_composition</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The clean test: hold agriculture fixed on *both* sides.</span>
+
+<span class="sd">    The share-of-all-births measure above still carries a confound — an okres that is more</span>
+<span class="sd">    agricultural produces more `rolník` whatever the word means. So restrict the</span>
+<span class="sd">    legionnaire denominator to men already coded into **HISCO major group 6** (agricultural,</span>
+<span class="sd">    animal husbandry, forestry and fishing) and ask a within-agriculture question:</span>
+
+<span class="sd">        of this okres&#39;s farm-occupation legionnaires, what fraction are coded as</span>
+<span class="sd">        *self-employed farmers* (61110/61115) rather than as *hired agricultural labour*</span>
+<span class="sd">        (62xxx farm workers and servants, plus 99920 day-labourers)?</span>
+
+<span class="sd">    against the census&#39;s own within-agriculture split</span>
+
+<span class="sd">        Selbständige + Pächter  /  (Selbständige + Pächter + Arbeiter + Taglöhner).</span>
+
+<span class="sd">    Both sides are now compositions of the same population, so okres size and agricultural</span>
+<span class="sd">    intensity cancel. If `rolník` names an owner the two should move together; if it names</span>
+<span class="sd">    a hired hand they should move apart, because `rolník` dominates the numerator either</span>
+<span class="sd">    way (18 % of the whole sample) and would then be sitting on the wrong side.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing.occupations</span><span class="w"> </span><span class="kn">import</span> <span class="n">_norm</span>
+
+    <span class="n">L</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">FIN</span> <span class="o">/</span> <span class="s2">&quot;persons&quot;</span> <span class="o">/</span> <span class="s2">&quot;legionnaires_clean.parquet&quot;</span><span class="p">,</span>
+                        <span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;occupation&quot;</span><span class="p">,</span> <span class="s2">&quot;occupation_hisco&quot;</span><span class="p">,</span> <span class="s2">&quot;occupation_hisco_major&quot;</span><span class="p">,</span>
+                                 <span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">])</span>
+    <span class="n">L</span><span class="p">[</span><span class="s2">&quot;key&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">L</span><span class="p">[</span><span class="s2">&quot;occupation&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_norm</span><span class="p">)</span>
+    <span class="n">L</span> <span class="o">=</span> <span class="n">L</span><span class="o">.</span><span class="n">dropna</span><span class="p">(</span><span class="n">subset</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">,</span> <span class="s2">&quot;occupation_hisco&quot;</span><span class="p">])</span>
+
+    <span class="n">ag</span> <span class="o">=</span> <span class="n">L</span><span class="p">[</span><span class="n">L</span><span class="p">[</span><span class="s2">&quot;occupation_hisco_major&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">eq</span><span class="p">(</span><span class="s2">&quot;6&quot;</span><span class="p">)</span> <span class="o">|</span> <span class="n">L</span><span class="p">[</span><span class="s2">&quot;occupation_hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">eq</span><span class="p">(</span><span class="s2">&quot;99920&quot;</span><span class="p">)]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="c1"># owner-side vs hired-side codes, by the coding under test</span>
+    <span class="n">owner_codes</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;61110&quot;</span><span class="p">,</span> <span class="s2">&quot;61115&quot;</span><span class="p">}</span>
+    <span class="n">ag</span><span class="p">[</span><span class="s2">&quot;is_owner&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">ag</span><span class="p">[</span><span class="s2">&quot;occupation_hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">owner_codes</span><span class="p">)</span>
+    <span class="n">ag</span><span class="p">[</span><span class="s2">&quot;is_hired&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="o">~</span><span class="n">ag</span><span class="p">[</span><span class="s2">&quot;is_owner&quot;</span><span class="p">]</span>
+
+    <span class="n">g</span> <span class="o">=</span> <span class="n">ag</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">agg</span><span class="p">(</span>
+        <span class="n">ag_n</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;is_owner&quot;</span><span class="p">,</span> <span class="s2">&quot;size&quot;</span><span class="p">),</span> <span class="n">owner_leg</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;is_owner&quot;</span><span class="p">,</span> <span class="s2">&quot;sum&quot;</span><span class="p">))</span>
+    <span class="n">g</span> <span class="o">=</span> <span class="n">g</span><span class="p">[</span><span class="n">g</span><span class="p">[</span><span class="s2">&quot;ag_n&quot;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">MIN_BIRTHS</span><span class="p">]</span>
+    <span class="n">g</span><span class="p">[</span><span class="s2">&quot;leg_owner_share&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">g</span><span class="p">[</span><span class="s2">&quot;owner_leg&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="n">g</span><span class="p">[</span><span class="s2">&quot;ag_n&quot;</span><span class="p">]</span>
+
+    <span class="n">cen</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">FIN</span> <span class="o">/</span> <span class="s2">&quot;census&quot;</span> <span class="o">/</span> <span class="s2">&quot;census_okres_1910_pooled.parquet&quot;</span><span class="p">)</span>
+    <span class="n">key</span> <span class="o">=</span> <span class="s2">&quot;census_okres_id&quot;</span> <span class="k">if</span> <span class="s2">&quot;census_okres_id&quot;</span> <span class="ow">in</span> <span class="n">cen</span><span class="o">.</span><span class="n">columns</span> <span class="k">else</span> <span class="s2">&quot;okres_id&quot;</span>
+    <span class="n">cen</span> <span class="o">=</span> <span class="n">cen</span><span class="p">[[</span><span class="n">key</span><span class="p">]</span> <span class="o">+</span> <span class="n">OWNER</span> <span class="o">+</span> <span class="n">LABOUR</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">cen</span><span class="p">[</span><span class="s2">&quot;own&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cen</span><span class="p">[</span><span class="n">OWNER</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">min_count</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">cen</span><span class="p">[</span><span class="s2">&quot;lab&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cen</span><span class="p">[</span><span class="n">LABOUR</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">min_count</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">cen</span><span class="p">[</span><span class="s2">&quot;cen_owner_share&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cen</span><span class="p">[</span><span class="s2">&quot;own&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="p">(</span><span class="n">cen</span><span class="p">[</span><span class="s2">&quot;own&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="n">cen</span><span class="p">[</span><span class="s2">&quot;lab&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+
+    <span class="n">g</span><span class="o">.</span><span class="n">index</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="n">key</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">g</span><span class="o">.</span><span class="n">reset_index</span><span class="p">()</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span><span class="n">cen</span><span class="p">[[</span><span class="n">key</span><span class="p">,</span> <span class="s2">&quot;cen_owner_share&quot;</span><span class="p">]],</span> <span class="n">on</span><span class="o">=</span><span class="n">key</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;inner&quot;</span><span class="p">)</span>
+
+    <span class="n">r</span><span class="p">,</span> <span class="n">n</span> <span class="o">=</span> <span class="n">_spearman</span><span class="p">(</span><span class="n">d</span><span class="p">[</span><span class="s2">&quot;leg_owner_share&quot;</span><span class="p">],</span> <span class="n">d</span><span class="p">[</span><span class="s2">&quot;cen_owner_share&quot;</span><span class="p">])</span>
+    <span class="n">pear</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">d</span><span class="p">[</span><span class="s2">&quot;leg_owner_share&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">corr</span><span class="p">(</span><span class="n">d</span><span class="p">[</span><span class="s2">&quot;cen_owner_share&quot;</span><span class="p">]))</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  within-agriculture composition test (</span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s2"> okresy, &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">g</span><span class="p">[</span><span class="s1">&#39;ag_n&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> farm-occupation legionnaires)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    legionnaire self-employed share  vs  census Selbständige share&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    Spearman r = </span><span class="si">{</span><span class="n">r</span><span class="si">:</span><span class="s2">+.3f</span><span class="si">}</span><span class="s2">   Pearson r = </span><span class="si">{</span><span class="n">pear</span><span class="si">:</span><span class="s2">+.3f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    legionnaire mean </span><span class="si">{</span><span class="n">d</span><span class="p">[</span><span class="s1">&#39;leg_owner_share&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;vs census mean </span><span class="si">{</span><span class="n">d</span><span class="p">[</span><span class="s1">&#39;cen_owner_share&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">lo</span> <span class="o">=</span> <span class="n">d</span><span class="o">.</span><span class="n">nsmallest</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="s2">&quot;cen_owner_share&quot;</span><span class="p">)[[</span><span class="s2">&quot;cen_owner_share&quot;</span><span class="p">,</span> <span class="s2">&quot;leg_owner_share&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+    <span class="n">hi</span> <span class="o">=</span> <span class="n">d</span><span class="o">.</span><span class="n">nlargest</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="s2">&quot;cen_owner_share&quot;</span><span class="p">)[[</span><span class="s2">&quot;cen_owner_share&quot;</span><span class="p">,</span> <span class="s2">&quot;leg_owner_share&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">    8 most estate-dominated okresy: census owners </span><span class="si">{</span><span class="n">lo</span><span class="p">[</span><span class="s1">&#39;cen_owner_share&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;-&gt; legionnaire owners </span><span class="si">{</span><span class="n">lo</span><span class="p">[</span><span class="s1">&#39;leg_owner_share&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    8 most smallholder okresy:      census owners </span><span class="si">{</span><span class="n">hi</span><span class="p">[</span><span class="s1">&#39;cen_owner_share&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;-&gt; legionnaire owners </span><span class="si">{</span><span class="n">hi</span><span class="p">[</span><span class="s1">&#39;leg_owner_share&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># ── the level gap, and the one reading that closes it ────────────────────────────</span>
+    <span class="c1"># 0.907 legionnaire vs 0.463 census is far too large to be coding drift alone, and the</span>
+    <span class="c1"># obvious suspect is the census&#39;s own third category. `mithelfende Familienangehörige`</span>
+    <span class="c1"># — sons and brothers working the family holding — are 1910&#39;s largest single group in</span>
+    <span class="c1"># agriculture and are exactly who a 22-year-old volunteer saying `rolník` is likely to</span>
+    <span class="c1"># be. They are neither Selbständige nor wage labour, and were excluded from both sides</span>
+    <span class="c1"># above. Put them on the own-account side, where they economically belong (they work</span>
+    <span class="c1"># their family&#39;s land, not an employer&#39;s, for no wage), and see what the census says.</span>
+    <span class="n">cen2</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">FIN</span> <span class="o">/</span> <span class="s2">&quot;census&quot;</span> <span class="o">/</span> <span class="s2">&quot;census_okres_1910_pooled.parquet&quot;</span><span class="p">)</span>
+    <span class="n">k2</span> <span class="o">=</span> <span class="s2">&quot;census_okres_id&quot;</span> <span class="k">if</span> <span class="s2">&quot;census_okres_id&quot;</span> <span class="ow">in</span> <span class="n">cen2</span><span class="o">.</span><span class="n">columns</span> <span class="k">else</span> <span class="s2">&quot;okres_id&quot;</span>
+    <span class="n">cen2</span> <span class="o">=</span> <span class="n">cen2</span><span class="p">[[</span><span class="n">k2</span><span class="p">]</span> <span class="o">+</span> <span class="n">OWNER</span> <span class="o">+</span> <span class="n">LABOUR</span> <span class="o">+</span> <span class="n">FAMILY</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">cen2</span><span class="p">[</span><span class="s2">&quot;own_fam&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cen2</span><span class="p">[</span><span class="n">OWNER</span> <span class="o">+</span> <span class="n">FAMILY</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">min_count</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">cen2</span><span class="p">[</span><span class="s2">&quot;lab2&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cen2</span><span class="p">[</span><span class="n">LABOUR</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">min_count</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">cen2</span><span class="p">[</span><span class="s2">&quot;cen_ownfam_share&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">cen2</span><span class="p">[</span><span class="s2">&quot;own_fam&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="p">(</span><span class="n">cen2</span><span class="p">[</span><span class="s2">&quot;own_fam&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="n">cen2</span><span class="p">[</span><span class="s2">&quot;lab2&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">))</span>
+    <span class="n">d2</span> <span class="o">=</span> <span class="n">d</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span><span class="n">cen2</span><span class="p">[[</span><span class="n">k2</span><span class="p">,</span> <span class="s2">&quot;cen_ownfam_share&quot;</span><span class="p">]],</span> <span class="n">left_on</span><span class="o">=</span><span class="n">key</span><span class="p">,</span> <span class="n">right_on</span><span class="o">=</span><span class="n">k2</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;inner&quot;</span><span class="p">)</span>
+    <span class="n">r2</span><span class="p">,</span> <span class="n">n2</span> <span class="o">=</span> <span class="n">_spearman</span><span class="p">(</span><span class="n">d2</span><span class="p">[</span><span class="s2">&quot;leg_owner_share&quot;</span><span class="p">],</span> <span class="n">d2</span><span class="p">[</span><span class="s2">&quot;cen_ownfam_share&quot;</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">    counting assisting family members as own-account &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(they work family land, not an employer&#39;s):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;      census mean </span><span class="si">{</span><span class="n">d2</span><span class="p">[</span><span class="s1">&#39;cen_ownfam_share&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;vs legionnaire </span><span class="si">{</span><span class="n">d2</span><span class="p">[</span><span class="s1">&#39;leg_owner_share&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">   &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;Spearman r = </span><span class="si">{</span><span class="n">r2</span><span class="si">:</span><span class="s2">+.3f</span><span class="si">}</span><span class="s2">  (n=</span><span class="si">{</span><span class="n">n2</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;      the level gap closes from &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">d2</span><span class="p">[</span><span class="s1">&#39;leg_owner_share&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">d</span><span class="p">[</span><span class="s1">&#39;cen_owner_share&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="si">:</span><span class="s2">+.3f</span><span class="si">}</span><span class="s2"> to &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">d2</span><span class="p">[</span><span class="s1">&#39;leg_owner_share&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">d2</span><span class="p">[</span><span class="s1">&#39;cen_ownfam_share&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="si">:</span><span class="s2">+.3f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">d</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;1910 Berufsstellung check — is `rolník` an owner or a worker?</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">run</span><span class="p">()</span>
+    <span class="n">run_composition</span><span class="p">()</span>
+</pre></div></td></tr></table></div>
+</details>

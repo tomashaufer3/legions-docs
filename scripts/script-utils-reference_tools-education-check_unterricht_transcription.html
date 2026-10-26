@@ -1,0 +1,700 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Invariants on the transcription of Österreichische Statistik XCIII/1 (1908/09).</p><p class="tldr-facts"><b>Reference tools</b> · v1.0.0 · 217 lines · 3 public functions · 9 constants · used by nothing else · <code>utils/reference_tools/education/check_unterricht_transcription.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-reference_tools-education-check_unterricht_transcription-Result">Result</a><a class="chip" href="#fn-utils-reference_tools-education-check_unterricht_transcription-check_table">check_table</a><a class="chip" href="#fn-utils-reference_tools-education-check_unterricht_transcription-main">main</a><a class="chip const" href="#c-utils-reference_tools-education-check_unterricht_transcription-ROOT">ROOT</a><a class="chip const" href="#c-utils-reference_tools-education-check_unterricht_transcription-HERE">HERE</a><a class="chip const" href="#c-utils-reference_tools-education-check_unterricht_transcription-ROLLUPS">ROLLUPS</a><a class="chip const" href="#c-utils-reference_tools-education-check_unterricht_transcription-ROLLUPS_T34">ROLLUPS_T34</a><a class="chip const" href="#c-utils-reference_tools-education-check_unterricht_transcription-TABLES">TABLES</a><a class="chip const" href="#c-utils-reference_tools-education-check_unterricht_transcription-ROW_SUMS">ROW_SUMS</a><a class="chip const" href="#c-utils-reference_tools-education-check_unterricht_transcription-SUBSETS">SUBSETS</a><a class="chip const" href="#c-utils-reference_tools-education-check_unterricht_transcription-N_LANDS">N_LANDS</a><a class="chip const" href="#c-utils-reference_tools-education-check_unterricht_transcription-KNOWN_SOURCE_ERRATA">KNOWN_SOURCE_ERRATA</a></div>
+<h2>How it works</h2><p>Three tables of the volume are transcribed by hand from an image-only scan into
+<code>unterricht_t{19,20,34}_*.csv</code>.  Reading a printed table off a photographed page is the
+one step in this project with a known failure mode: <code>check_atlas_parties.py</code> exists because
+a row-offset in a table read off a curved page produced a <em>plausible</em> set of numbers that
+only a cross-reference caught.  The same risk applies here and is larger, because these are
+numeric columns where a slipped row leaves no grammatical trace at all.</p>
+<p>What makes the check possible is that the volume over-determines itself.  Every table prints
+both the parts <strong>and</strong> their roll-up: <em>Küstenland</em> is Triest + Görz und Gradisca + Istrien,
+<em>Tirol und Vorarlberg</em> is its two halves, the last row is the column total, and in Table 34
+the eight class-count columns must sum across to the school total on the same row.  None of
+that is used to <em>build</em> the CSVs — it is arithmetic the printer already did, so agreement is
+evidence the read is right rather than evidence the file is self-consistent.</p>
+<p>Every failure is reported with the row and column, because the point is to find the slipped
+line, not to learn that one exists.</p>
+<p>Run:   python utils/reference_tools/education/check_unterricht_transcription.py
+Emits: nothing — prints PASS/FAIL per invariant.  This is a transcription gate, never a
+       pipeline input; it writes no file and touches no code column.</p>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-reference_tools-education-check_unterricht_transcription-Result">
+<pre class="sig"><span class="k">class</span><span class="w"> </span><span class="nc">Result</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 105–111 (7 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">Result</span><span class="p">(</span><span class="nb">list</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">errata</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">dict</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">add</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">ok</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span> <span class="n">label</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">detail</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">ok</span><span class="p">,</span> <span class="n">label</span><span class="p">,</span> <span class="n">detail</span><span class="p">))</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-education-check_unterricht_transcription-check_table">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">check_table</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">rollups</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]],</span> <span class="n">res</span><span class="p">:</span> <span class="n">Result</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 119–185 (67 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">check_table</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">rollups</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]],</span> <span class="n">res</span><span class="p">:</span> <span class="n">Result</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="n">path</span><span class="o">.</span><span class="n">name</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="n">lands</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;row_kind&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;land&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;land&quot;</span><span class="p">)</span>
+    <span class="n">rolls</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;row_kind&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;rollup&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;land&quot;</span><span class="p">)</span>
+    <span class="n">total</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;row_kind&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;total&quot;</span><span class="p">]</span>
+    <span class="n">cols</span> <span class="o">=</span> <span class="n">_numeric</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+
+    <span class="n">res</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">lands</span><span class="p">)</span> <span class="o">==</span> <span class="n">N_LANDS</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">N_LANDS</span><span class="si">}</span><span class="s2"> crownland rows&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">lands</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">res</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">total</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: exactly one printed total row&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">total</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">res</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="ow">not</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;land&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">duplicated</span><span class="p">()</span><span class="o">.</span><span class="n">any</span><span class="p">(),</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: no duplicated row label&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;duplicates: </span><span class="si">{</span><span class="nb">sorted</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s1">&#39;land&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">duplicated</span><span class="p">(),</span><span class="w"> </span><span class="s1">&#39;land&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># 1. every column sums across the 17 crownlands to the printed total</span>
+    <span class="n">bad</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cols</span><span class="p">:</span>
+        <span class="n">got</span><span class="p">,</span> <span class="n">want</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">lands</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()),</span> <span class="nb">int</span><span class="p">(</span><span class="n">total</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="k">if</span> <span class="n">got</span> <span class="o">!=</span> <span class="n">want</span><span class="p">:</span>
+            <span class="n">bad</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">got</span><span class="si">}</span><span class="s2"> vs printed </span><span class="si">{</span><span class="n">want</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="n">res</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="ow">not</span> <span class="n">bad</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: every column sums to the printed total&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">bad</span><span class="p">))</span>
+
+    <span class="c1"># 2. every printed roll-up equals its printed parts, except where the printed volume</span>
+    <span class="c1">#    itself is known to be one out (see KNOWN_SOURCE_ERRATA)</span>
+    <span class="n">bad</span><span class="p">,</span> <span class="n">errata</span> <span class="o">=</span> <span class="p">{},</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">roll</span><span class="p">,</span> <span class="n">parts</span> <span class="ow">in</span> <span class="n">rollups</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">if</span> <span class="n">roll</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">rolls</span><span class="o">.</span><span class="n">index</span><span class="p">:</span>
+            <span class="n">bad</span><span class="p">[</span><span class="n">roll</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;roll-up row absent&quot;</span>
+            <span class="k">continue</span>
+        <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cols</span><span class="p">:</span>
+            <span class="n">got</span><span class="p">,</span> <span class="n">want</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">lands</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">parts</span><span class="p">,</span> <span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()),</span> <span class="nb">int</span><span class="p">(</span><span class="n">rolls</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">roll</span><span class="p">,</span> <span class="n">c</span><span class="p">])</span>
+            <span class="k">if</span> <span class="n">got</span> <span class="o">==</span> <span class="n">want</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">cell</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">roll</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">c</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="n">note</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;parts </span><span class="si">{</span><span class="n">got</span><span class="si">}</span><span class="s2"> vs printed </span><span class="si">{</span><span class="n">want</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="k">if</span> <span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">cell</span><span class="p">)</span> <span class="ow">in</span> <span class="n">KNOWN_SOURCE_ERRATA</span><span class="p">:</span>
+                <span class="n">errata</span><span class="p">[</span><span class="n">cell</span><span class="p">]</span> <span class="o">=</span> <span class="n">note</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">bad</span><span class="p">[</span><span class="n">cell</span><span class="p">]</span> <span class="o">=</span> <span class="n">note</span>
+    <span class="n">res</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="ow">not</span> <span class="n">bad</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: printed roll-ups equal their parts&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">bad</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">errata</span><span class="p">:</span>
+        <span class="n">res</span><span class="o">.</span><span class="n">errata</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">name</span><span class="p">,</span> <span class="n">errata</span><span class="p">))</span>
+
+    <span class="c1"># 3. column families add up across each row, on every row including the roll-ups</span>
+    <span class="n">bad</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">parts</span><span class="p">,</span> <span class="n">whole</span> <span class="ow">in</span> <span class="n">ROW_SUMS</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="p">[]):</span>
+        <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">iterrows</span><span class="p">():</span>
+            <span class="n">got</span><span class="p">,</span> <span class="n">want</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="nb">sum</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">p</span><span class="p">]</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">parts</span><span class="p">)),</span> <span class="nb">int</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">whole</span><span class="p">])</span>
+            <span class="k">if</span> <span class="n">got</span> <span class="o">!=</span> <span class="n">want</span><span class="p">:</span>
+                <span class="n">bad</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;land&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">whole</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">got</span><span class="si">}</span><span class="s2"> vs printed </span><span class="si">{</span><span class="n">want</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="n">res</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="ow">not</span> <span class="n">bad</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: row families sum to their printed total&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">bad</span><span class="p">))</span>
+
+    <span class="c1"># 4. a named subset never exceeds the whole it is drawn from</span>
+    <span class="n">bad</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">parts</span><span class="p">,</span> <span class="n">whole</span> <span class="ow">in</span> <span class="n">SUBSETS</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="p">[]):</span>
+        <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">iterrows</span><span class="p">():</span>
+            <span class="k">if</span> <span class="nb">sum</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">p</span><span class="p">]</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">parts</span><span class="p">)</span> <span class="o">&gt;</span> <span class="n">row</span><span class="p">[</span><span class="n">whole</span><span class="p">]:</span>
+                <span class="n">bad</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;land&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">whole</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;subset </span><span class="si">{</span><span class="nb">sum</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">parts</span><span class="p">)</span><span class="si">}</span><span class="s2"> &gt; </span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="n">whole</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="n">res</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="ow">not</span> <span class="n">bad</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: named subsets do not exceed their whole&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">bad</span><span class="p">))</span>
+
+    <span class="c1"># 5. nothing negative, nothing missing — a blank cell in the source is a printed</span>
+    <span class="c1">#    &quot;.&quot; meaning zero, and must have been transcribed as 0 rather than left empty</span>
+    <span class="n">holes</span> <span class="o">=</span> <span class="p">{</span><span class="n">c</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">isna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cols</span> <span class="k">if</span> <span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">isna</span><span class="p">()</span><span class="o">.</span><span class="n">any</span><span class="p">()}</span>
+    <span class="n">res</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="ow">not</span> <span class="n">holes</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: no empty numeric cell&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">holes</span><span class="p">))</span>
+    <span class="n">neg</span> <span class="o">=</span> <span class="p">{</span><span class="n">c</span><span class="p">:</span> <span class="nb">int</span><span class="p">((</span><span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cols</span> <span class="k">if</span> <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">()}</span>
+    <span class="n">res</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="ow">not</span> <span class="n">neg</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: no negative count&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">neg</span><span class="p">))</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-education-check_unterricht_transcription-main">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 188–213 (26 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">res</span> <span class="o">=</span> <span class="n">Result</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">fname</span><span class="p">,</span> <span class="n">rollups</span> <span class="ow">in</span> <span class="n">TABLES</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">path</span> <span class="o">=</span> <span class="n">HERE</span> <span class="o">/</span> <span class="n">fname</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="n">res</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="kc">False</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">fname</span><span class="si">}</span><span class="s2">: present&quot;</span><span class="p">,</span> <span class="s2">&quot;file not found&quot;</span><span class="p">)</span>
+            <span class="k">continue</span>
+        <span class="n">check_table</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">rollups</span><span class="p">,</span> <span class="n">res</span><span class="p">)</span>
+
+    <span class="n">width</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">lbl</span><span class="p">)</span> <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">lbl</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">res</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">ok</span><span class="p">,</span> <span class="n">label</span><span class="p">,</span> <span class="n">detail</span> <span class="ow">in</span> <span class="n">res</span><span class="p">:</span>
+        <span class="n">line</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="s1">&#39;PASS&#39;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">ok</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;FAIL&#39;</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">label</span><span class="si">:</span><span class="s2">&lt;</span><span class="si">{</span><span class="n">width</span><span class="si">}}</span><span class="s2">&quot;</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">line</span> <span class="k">if</span> <span class="n">ok</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">line</span><span class="si">}</span><span class="s2">  &lt;- </span><span class="si">{</span><span class="n">detail</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">failed</span> <span class="o">=</span> <span class="p">[</span><span class="n">lbl</span> <span class="k">for</span> <span class="n">ok</span><span class="p">,</span> <span class="n">lbl</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">res</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">ok</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="n">failed</span><span class="p">)</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">res</span><span class="p">)</span><span class="si">}</span><span class="s2"> invariants passed&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">res</span><span class="o">.</span><span class="n">errata</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">()</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Known errors in the printed volume (transcription follows the page):&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">fname</span><span class="p">,</span> <span class="n">cells</span> <span class="ow">in</span> <span class="n">res</span><span class="o">.</span><span class="n">errata</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">cell</span><span class="p">,</span> <span class="n">note</span> <span class="ow">in</span> <span class="n">cells</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">fname</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">cell</span><span class="si">}</span><span class="s2"> -&gt; </span><span class="si">{</span><span class="n">note</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">failed</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;FAILED:&quot;</span><span class="p">,</span> <span class="s2">&quot;; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">failed</span><span class="p">))</span>
+    <span class="k">return</span> <span class="mi">1</span> <span class="k">if</span> <span class="n">failed</span> <span class="k">else</span> <span class="mi">0</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-reference_tools-education-check_unterricht_transcription-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-education-check_unterricht_transcription-HERE"><pre class="sig">HERE<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;reference&#39;</span> <span class="o">/</span> <span class="s1">&#39;education&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-education-check_unterricht_transcription-ROLLUPS"><pre class="sig">ROLLUPS<span class="kind">dict · 2 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;Küstenland&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;Triest&#39;</span><span class="p">,</span> <span class="s1">&#39;Görz und Gradisca&#39;</span><span class="p">,</span> <span class="s1">&#39;Istrien&#39;</span><span class="p">],</span> <span class="s1">&#39;Tirol und Vorarlberg&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;Tirol&#39;</span><span class="p">,</span> <span class="s1">&#39;Vorarlberg&#39;</span><span class="p">]}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-education-check_unterricht_transcription-ROLLUPS_T34"><pre class="sig">ROLLUPS_T34<span class="kind">dict · 2 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;Küstenland&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;Triest&#39;</span><span class="p">,</span> <span class="s1">&#39;Görz und Gradiska&#39;</span><span class="p">,</span> <span class="s1">&#39;Istrien&#39;</span><span class="p">],</span> <span class="s1">&#39;Tirol und Vorarlberg&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;Tirol&#39;</span><span class="p">,</span> <span class="s1">&#39;Vorarlberg&#39;</span><span class="p">]}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-education-check_unterricht_transcription-TABLES"><pre class="sig">TABLES<span class="kind">dict · 3 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;unterricht_t34_volksschulen.csv&#39;</span><span class="p">:</span> <span class="n">ROLLUPS_T34</span><span class="p">,</span> <span class="s1">&#39;unterricht_t20_gewerbeschulen.csv&#39;</span><span class="p">:</span> <span class="n">ROLLUPS</span><span class="p">,</span> <span class="s1">&#39;unterricht_t19_handelslehranstalten.csv&#39;</span><span class="p">:</span> <span class="n">ROLLUPS</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-education-check_unterricht_transcription-ROW_SUMS"><pre class="sig">ROW_SUMS<span class="kind">dict · 3 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;unterricht_t34_volksschulen.csv&#39;</span><span class="p">:</span> <span class="p">[([</span><span class="sa">f</span><span class="s1">&#39;klassen_</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s1">&#39;</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">9</span><span class="p">)],</span> <span class="s1">&#39;volksschulen_total&#39;</span><span class="p">)],</span> <span class="s1">&#39;unterricht_t20_gewerbeschulen.csv&#39;</span><span class="p">:</span> <span class="p">[([</span><span class="s1">&#39;staatsgewerbe_anstalten&#39;</span><span class="p">,</span> <span class="s1">&#39;fachschulen_anstalten&#39;</span><span class="p">,</span> <span class="s1">&#39;handwerker_anstalten&#39;</span><span class="p">,</span> <span class="s1">&#39;fortbildung_anstalten&#39;</span><span class="p">],</span> <span class="s1">&#39;zusammen_anstalten&#39;</span><span class="p">),</span> <span class="p">([</span><span class="s1">&#39;staatsgewerbe_lehrkraefte&#39;</span><span class="p">,</span> <span class="s1">&#39;fachschulen_lehrkraefte&#39;</span><span class="p">,</span> <span class="s1">&#39;handwerker_lehrkraefte&#39;</span><span class="p">,</span> <span class="s1">&#39;fortbildung_lehrkraefte&#39;</span><span class="p">],</span> <span class="s1">&#39;zusammen_lehrkraefte&#39;</span><span class="p">),</span> <span class="p">([</span><span class="s1">&#39;staatsgewerbe_schueler&#39;</span><span class="p">,</span> <span class="s1">&#39;fachschulen_schueler&#39;</span><span class="p">,</span> <span class="s1">&#39;handwerker_schueler&#39;</span><span class="p">,</span> <span class="s1">&#39;fortbildung_schueler&#39;</span><span class="p">],</span> <span class="s1">&#39;zusammen_schueler&#39;</span><span class="p">)],</span> <span class="s1">&#39;unterricht_t19_handelslehranstalten.csv&#39;</span><span class="p">:</span> <span class="p">[([</span><span class="s1">&#39;hoehere_handelsschulen&#39;</span><span class="p">,</span> <span class="s1">&#39;tagesschulen_oeffentliche&#39;</span><span class="p">,</span> <span class="s1">&#39;tagesschulen_vereine_privat&#39;</span><span class="p">,</span> <span class="s1">&#39;kaufm_fortbildungsschulen&#39;</span><span class="p">],</span> <span class="s1">&#39;zusammen&#39;</span><span class="p">)]}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-education-check_unterricht_transcription-SUBSETS"><pre class="sig">SUBSETS<span class="kind">dict · 1 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;unterricht_t34_volksschulen.csv&#39;</span><span class="p">:</span> <span class="p">[([</span><span class="s1">&#39;buergerschulen_deutsch&#39;</span><span class="p">,</span> <span class="s1">&#39;buergerschulen_cechoslavisch&#39;</span><span class="p">],</span> <span class="s1">&#39;buergerschulen_total&#39;</span><span class="p">),</span> <span class="p">([</span><span class="s1">&#39;notschulen&#39;</span><span class="p">],</span> <span class="s1">&#39;volksschulen_total&#39;</span><span class="p">)]}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-education-check_unterricht_transcription-N_LANDS"><pre class="sig">N_LANDS<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">17</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-education-check_unterricht_transcription-KNOWN_SOURCE_ERRATA"><pre class="sig">KNOWN_SOURCE_ERRATA<span class="kind">set · 2 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{(</span><span class="s1">&#39;unterricht_t20_gewerbeschulen.csv&#39;</span><span class="p">,</span> <span class="s1">&#39;Tirol und Vorarlberg.fortbildung_anstalten&#39;</span><span class="p">),</span> <span class="p">(</span><span class="s1">&#39;unterricht_t20_gewerbeschulen.csv&#39;</span><span class="p">,</span> <span class="s1">&#39;Tirol und Vorarlberg.zusammen_anstalten&#39;</span><span class="p">)}</span>
+</pre></div>
+</details></div>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/reference_tools/education/check_unterricht_transcription.py · 217 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;Invariants on the transcription of Österreichische Statistik XCIII/1 (1908/09).</span>
+
+<span class="sd">Three tables of the volume are transcribed by hand from an image-only scan into</span>
+<span class="sd">``unterricht_t{19,20,34}_*.csv``.  Reading a printed table off a photographed page is the</span>
+<span class="sd">one step in this project with a known failure mode: `check_atlas_parties.py` exists because</span>
+<span class="sd">a row-offset in a table read off a curved page produced a *plausible* set of numbers that</span>
+<span class="sd">only a cross-reference caught.  The same risk applies here and is larger, because these are</span>
+<span class="sd">numeric columns where a slipped row leaves no grammatical trace at all.</span>
+
+<span class="sd">What makes the check possible is that the volume over-determines itself.  Every table prints</span>
+<span class="sd">both the parts **and** their roll-up: *Küstenland* is Triest + Görz und Gradisca + Istrien,</span>
+<span class="sd">*Tirol und Vorarlberg* is its two halves, the last row is the column total, and in Table 34</span>
+<span class="sd">the eight class-count columns must sum across to the school total on the same row.  None of</span>
+<span class="sd">that is used to *build* the CSVs — it is arithmetic the printer already did, so agreement is</span>
+<span class="sd">evidence the read is right rather than evidence the file is self-consistent.</span>
+
+<span class="sd">Every failure is reported with the row and column, because the point is to find the slipped</span>
+<span class="sd">line, not to learn that one exists.</span>
+
+<span class="sd">Run:   python utils/reference_tools/education/check_unterricht_transcription.py</span>
+<span class="sd">Emits: nothing — prints PASS/FAIL per invariant.  This is a transcription gate, never a</span>
+<span class="sd">       pipeline input; it writes no file and touches no code column.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+<span class="n">HERE</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;education&quot;</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.0.0&quot;</span>
+
+<span class="c1"># The volume prints these roll-ups alongside their parts, so each is a free check on the read.</span>
+<span class="n">ROLLUPS</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;Küstenland&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;Triest&quot;</span><span class="p">,</span> <span class="s2">&quot;Görz und Gradisca&quot;</span><span class="p">,</span> <span class="s2">&quot;Istrien&quot;</span><span class="p">],</span>
+    <span class="s2">&quot;Tirol und Vorarlberg&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;Tirol&quot;</span><span class="p">,</span> <span class="s2">&quot;Vorarlberg&quot;</span><span class="p">],</span>
+<span class="p">}</span>
+<span class="c1"># Table 34 spells one of them differently; the transcription keeps the printed spelling.</span>
+<span class="n">ROLLUPS_T34</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;Küstenland&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;Triest&quot;</span><span class="p">,</span> <span class="s2">&quot;Görz und Gradiska&quot;</span><span class="p">,</span> <span class="s2">&quot;Istrien&quot;</span><span class="p">],</span>
+    <span class="s2">&quot;Tirol und Vorarlberg&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;Tirol&quot;</span><span class="p">,</span> <span class="s2">&quot;Vorarlberg&quot;</span><span class="p">],</span>
+<span class="p">}</span>
+
+<span class="n">TABLES</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;unterricht_t34_volksschulen.csv&quot;</span><span class="p">:</span> <span class="n">ROLLUPS_T34</span><span class="p">,</span>
+    <span class="s2">&quot;unterricht_t20_gewerbeschulen.csv&quot;</span><span class="p">:</span> <span class="n">ROLLUPS</span><span class="p">,</span>
+    <span class="s2">&quot;unterricht_t19_handelslehranstalten.csv&quot;</span><span class="p">:</span> <span class="n">ROLLUPS</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="c1"># Column families that must add up across a row to a printed total on that same row.</span>
+<span class="n">ROW_SUMS</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;unterricht_t34_volksschulen.csv&quot;</span><span class="p">:</span> <span class="p">[</span>
+        <span class="p">([</span><span class="sa">f</span><span class="s2">&quot;klassen_</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">9</span><span class="p">)],</span> <span class="s2">&quot;volksschulen_total&quot;</span><span class="p">),</span>
+    <span class="p">],</span>
+    <span class="s2">&quot;unterricht_t20_gewerbeschulen.csv&quot;</span><span class="p">:</span> <span class="p">[</span>
+        <span class="p">([</span><span class="s2">&quot;staatsgewerbe_anstalten&quot;</span><span class="p">,</span> <span class="s2">&quot;fachschulen_anstalten&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;handwerker_anstalten&quot;</span><span class="p">,</span> <span class="s2">&quot;fortbildung_anstalten&quot;</span><span class="p">],</span> <span class="s2">&quot;zusammen_anstalten&quot;</span><span class="p">),</span>
+        <span class="p">([</span><span class="s2">&quot;staatsgewerbe_lehrkraefte&quot;</span><span class="p">,</span> <span class="s2">&quot;fachschulen_lehrkraefte&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;handwerker_lehrkraefte&quot;</span><span class="p">,</span> <span class="s2">&quot;fortbildung_lehrkraefte&quot;</span><span class="p">],</span> <span class="s2">&quot;zusammen_lehrkraefte&quot;</span><span class="p">),</span>
+        <span class="p">([</span><span class="s2">&quot;staatsgewerbe_schueler&quot;</span><span class="p">,</span> <span class="s2">&quot;fachschulen_schueler&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;handwerker_schueler&quot;</span><span class="p">,</span> <span class="s2">&quot;fortbildung_schueler&quot;</span><span class="p">],</span> <span class="s2">&quot;zusammen_schueler&quot;</span><span class="p">),</span>
+    <span class="p">],</span>
+    <span class="s2">&quot;unterricht_t19_handelslehranstalten.csv&quot;</span><span class="p">:</span> <span class="p">[</span>
+        <span class="p">([</span><span class="s2">&quot;hoehere_handelsschulen&quot;</span><span class="p">,</span> <span class="s2">&quot;tagesschulen_oeffentliche&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;tagesschulen_vereine_privat&quot;</span><span class="p">,</span> <span class="s2">&quot;kaufm_fortbildungsschulen&quot;</span><span class="p">],</span> <span class="s2">&quot;zusammen&quot;</span><span class="p">),</span>
+    <span class="p">],</span>
+<span class="p">}</span>
+
+<span class="c1"># Columns that are a named subset of another and so may never exceed it.</span>
+<span class="n">SUBSETS</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;unterricht_t34_volksschulen.csv&quot;</span><span class="p">:</span> <span class="p">[</span>
+        <span class="p">([</span><span class="s2">&quot;buergerschulen_deutsch&quot;</span><span class="p">,</span> <span class="s2">&quot;buergerschulen_cechoslavisch&quot;</span><span class="p">],</span> <span class="s2">&quot;buergerschulen_total&quot;</span><span class="p">),</span>
+        <span class="p">([</span><span class="s2">&quot;notschulen&quot;</span><span class="p">],</span> <span class="s2">&quot;volksschulen_total&quot;</span><span class="p">),</span>
+    <span class="p">],</span>
+<span class="p">}</span>
+
+<span class="c1"># The 17 crownlands, once each. Roll-ups and the total are excluded from column sums so a</span>
+<span class="c1"># column is never counted twice — the mistake that would make every total agree trivially.</span>
+<span class="n">N_LANDS</span> <span class="o">=</span> <span class="mi">17</span>
+
+<span class="c1"># Errors in the printed volume, not in the transcription.</span>
+<span class="c1">#</span>
+<span class="c1"># The transcription is faithful to the page, so a genuine arithmetic slip by the k.k.</span>
+<span class="c1"># Statistische Zentralkommission surfaces here as a failure.  Each entry below was checked</span>
+<span class="c1"># against the scan at high magnification and, crucially, against a *second* arithmetic path</span>
+<span class="c1"># that decides which of the two printed numbers is wrong — otherwise &quot;the source is wrong&quot;</span>
+<span class="c1"># is unfalsifiable and becomes a way to make any bad read pass.</span>
+<span class="c1">#</span>
+<span class="c1"># `20/Tirol und Vorarlberg`: the page prints Tirol 30 and Vorarlberg 13 gewerbliche</span>
+<span class="c1"># Fortbildungs-/Zeichenschulen but rolls them up to 42, and correspondingly 52 + 14 = 66</span>
+<span class="c1"># Anstalten altogether printed as 65.  Every other cell of the same roll-up adds up exactly</span>
+<span class="c1"># (Lehrkräfte 83 + 53 = 136, Schüler 1.839 + 447 = 2.286, Zusammen 250 + 60 = 310 and</span>
+<span class="c1"># 3.237 + 516 = 3.753), and the empire total of 1.200 Anstalten agrees with the crownland</span>
+<span class="c1"># rows and not with the roll-up.  So the two crownland rows are authoritative and the</span>
+<span class="c1"># roll-up is one short; the transcription keeps both as printed.</span>
+<span class="n">KNOWN_SOURCE_ERRATA</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="p">(</span><span class="s2">&quot;unterricht_t20_gewerbeschulen.csv&quot;</span><span class="p">,</span> <span class="s2">&quot;Tirol und Vorarlberg.fortbildung_anstalten&quot;</span><span class="p">),</span>
+    <span class="p">(</span><span class="s2">&quot;unterricht_t20_gewerbeschulen.csv&quot;</span><span class="p">,</span> <span class="s2">&quot;Tirol und Vorarlberg.zusammen_anstalten&quot;</span><span class="p">),</span>
+<span class="p">}</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">Result</span><span class="p">(</span><span class="nb">list</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">errata</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">dict</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">add</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">ok</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span> <span class="n">label</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">detail</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">ok</span><span class="p">,</span> <span class="n">label</span><span class="p">,</span> <span class="n">detail</span><span class="p">))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_numeric</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+    <span class="k">return</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span>
+            <span class="k">if</span> <span class="n">c</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">{</span><span class="s2">&quot;table_no&quot;</span><span class="p">,</span> <span class="s2">&quot;folio&quot;</span><span class="p">,</span> <span class="s2">&quot;pdf_page&quot;</span><span class="p">,</span> <span class="s2">&quot;land&quot;</span><span class="p">,</span> <span class="s2">&quot;row_kind&quot;</span><span class="p">}]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">check_table</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">rollups</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]],</span> <span class="n">res</span><span class="p">:</span> <span class="n">Result</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="n">path</span><span class="o">.</span><span class="n">name</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="n">lands</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;row_kind&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;land&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;land&quot;</span><span class="p">)</span>
+    <span class="n">rolls</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;row_kind&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;rollup&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;land&quot;</span><span class="p">)</span>
+    <span class="n">total</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;row_kind&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;total&quot;</span><span class="p">]</span>
+    <span class="n">cols</span> <span class="o">=</span> <span class="n">_numeric</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+
+    <span class="n">res</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">lands</span><span class="p">)</span> <span class="o">==</span> <span class="n">N_LANDS</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">N_LANDS</span><span class="si">}</span><span class="s2"> crownland rows&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">lands</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">res</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">total</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: exactly one printed total row&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">total</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">res</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="ow">not</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;land&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">duplicated</span><span class="p">()</span><span class="o">.</span><span class="n">any</span><span class="p">(),</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: no duplicated row label&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;duplicates: </span><span class="si">{</span><span class="nb">sorted</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s1">&#39;land&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">duplicated</span><span class="p">(),</span><span class="w"> </span><span class="s1">&#39;land&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># 1. every column sums across the 17 crownlands to the printed total</span>
+    <span class="n">bad</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cols</span><span class="p">:</span>
+        <span class="n">got</span><span class="p">,</span> <span class="n">want</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">lands</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()),</span> <span class="nb">int</span><span class="p">(</span><span class="n">total</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="k">if</span> <span class="n">got</span> <span class="o">!=</span> <span class="n">want</span><span class="p">:</span>
+            <span class="n">bad</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">got</span><span class="si">}</span><span class="s2"> vs printed </span><span class="si">{</span><span class="n">want</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="n">res</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="ow">not</span> <span class="n">bad</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: every column sums to the printed total&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">bad</span><span class="p">))</span>
+
+    <span class="c1"># 2. every printed roll-up equals its printed parts, except where the printed volume</span>
+    <span class="c1">#    itself is known to be one out (see KNOWN_SOURCE_ERRATA)</span>
+    <span class="n">bad</span><span class="p">,</span> <span class="n">errata</span> <span class="o">=</span> <span class="p">{},</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">roll</span><span class="p">,</span> <span class="n">parts</span> <span class="ow">in</span> <span class="n">rollups</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">if</span> <span class="n">roll</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">rolls</span><span class="o">.</span><span class="n">index</span><span class="p">:</span>
+            <span class="n">bad</span><span class="p">[</span><span class="n">roll</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;roll-up row absent&quot;</span>
+            <span class="k">continue</span>
+        <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cols</span><span class="p">:</span>
+            <span class="n">got</span><span class="p">,</span> <span class="n">want</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">lands</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">parts</span><span class="p">,</span> <span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()),</span> <span class="nb">int</span><span class="p">(</span><span class="n">rolls</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">roll</span><span class="p">,</span> <span class="n">c</span><span class="p">])</span>
+            <span class="k">if</span> <span class="n">got</span> <span class="o">==</span> <span class="n">want</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">cell</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">roll</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">c</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="n">note</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;parts </span><span class="si">{</span><span class="n">got</span><span class="si">}</span><span class="s2"> vs printed </span><span class="si">{</span><span class="n">want</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="k">if</span> <span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">cell</span><span class="p">)</span> <span class="ow">in</span> <span class="n">KNOWN_SOURCE_ERRATA</span><span class="p">:</span>
+                <span class="n">errata</span><span class="p">[</span><span class="n">cell</span><span class="p">]</span> <span class="o">=</span> <span class="n">note</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">bad</span><span class="p">[</span><span class="n">cell</span><span class="p">]</span> <span class="o">=</span> <span class="n">note</span>
+    <span class="n">res</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="ow">not</span> <span class="n">bad</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: printed roll-ups equal their parts&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">bad</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">errata</span><span class="p">:</span>
+        <span class="n">res</span><span class="o">.</span><span class="n">errata</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">name</span><span class="p">,</span> <span class="n">errata</span><span class="p">))</span>
+
+    <span class="c1"># 3. column families add up across each row, on every row including the roll-ups</span>
+    <span class="n">bad</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">parts</span><span class="p">,</span> <span class="n">whole</span> <span class="ow">in</span> <span class="n">ROW_SUMS</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="p">[]):</span>
+        <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">iterrows</span><span class="p">():</span>
+            <span class="n">got</span><span class="p">,</span> <span class="n">want</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="nb">sum</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">p</span><span class="p">]</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">parts</span><span class="p">)),</span> <span class="nb">int</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">whole</span><span class="p">])</span>
+            <span class="k">if</span> <span class="n">got</span> <span class="o">!=</span> <span class="n">want</span><span class="p">:</span>
+                <span class="n">bad</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;land&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">whole</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">got</span><span class="si">}</span><span class="s2"> vs printed </span><span class="si">{</span><span class="n">want</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="n">res</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="ow">not</span> <span class="n">bad</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: row families sum to their printed total&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">bad</span><span class="p">))</span>
+
+    <span class="c1"># 4. a named subset never exceeds the whole it is drawn from</span>
+    <span class="n">bad</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">parts</span><span class="p">,</span> <span class="n">whole</span> <span class="ow">in</span> <span class="n">SUBSETS</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="p">[]):</span>
+        <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">iterrows</span><span class="p">():</span>
+            <span class="k">if</span> <span class="nb">sum</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">p</span><span class="p">]</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">parts</span><span class="p">)</span> <span class="o">&gt;</span> <span class="n">row</span><span class="p">[</span><span class="n">whole</span><span class="p">]:</span>
+                <span class="n">bad</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;land&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">whole</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;subset </span><span class="si">{</span><span class="nb">sum</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">p</span><span class="p">]</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">parts</span><span class="p">)</span><span class="si">}</span><span class="s2"> &gt; </span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="n">whole</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="n">res</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="ow">not</span> <span class="n">bad</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: named subsets do not exceed their whole&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">bad</span><span class="p">))</span>
+
+    <span class="c1"># 5. nothing negative, nothing missing — a blank cell in the source is a printed</span>
+    <span class="c1">#    &quot;.&quot; meaning zero, and must have been transcribed as 0 rather than left empty</span>
+    <span class="n">holes</span> <span class="o">=</span> <span class="p">{</span><span class="n">c</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">isna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cols</span> <span class="k">if</span> <span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">isna</span><span class="p">()</span><span class="o">.</span><span class="n">any</span><span class="p">()}</span>
+    <span class="n">res</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="ow">not</span> <span class="n">holes</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: no empty numeric cell&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">holes</span><span class="p">))</span>
+    <span class="n">neg</span> <span class="o">=</span> <span class="p">{</span><span class="n">c</span><span class="p">:</span> <span class="nb">int</span><span class="p">((</span><span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cols</span> <span class="k">if</span> <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">()}</span>
+    <span class="n">res</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="ow">not</span> <span class="n">neg</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: no negative count&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">neg</span><span class="p">))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">res</span> <span class="o">=</span> <span class="n">Result</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">fname</span><span class="p">,</span> <span class="n">rollups</span> <span class="ow">in</span> <span class="n">TABLES</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">path</span> <span class="o">=</span> <span class="n">HERE</span> <span class="o">/</span> <span class="n">fname</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="n">res</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="kc">False</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">fname</span><span class="si">}</span><span class="s2">: present&quot;</span><span class="p">,</span> <span class="s2">&quot;file not found&quot;</span><span class="p">)</span>
+            <span class="k">continue</span>
+        <span class="n">check_table</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">rollups</span><span class="p">,</span> <span class="n">res</span><span class="p">)</span>
+
+    <span class="n">width</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">lbl</span><span class="p">)</span> <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">lbl</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">res</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">ok</span><span class="p">,</span> <span class="n">label</span><span class="p">,</span> <span class="n">detail</span> <span class="ow">in</span> <span class="n">res</span><span class="p">:</span>
+        <span class="n">line</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="s1">&#39;PASS&#39;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">ok</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;FAIL&#39;</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">label</span><span class="si">:</span><span class="s2">&lt;</span><span class="si">{</span><span class="n">width</span><span class="si">}}</span><span class="s2">&quot;</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">line</span> <span class="k">if</span> <span class="n">ok</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">line</span><span class="si">}</span><span class="s2">  &lt;- </span><span class="si">{</span><span class="n">detail</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">failed</span> <span class="o">=</span> <span class="p">[</span><span class="n">lbl</span> <span class="k">for</span> <span class="n">ok</span><span class="p">,</span> <span class="n">lbl</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">res</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">ok</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">res</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="n">failed</span><span class="p">)</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">res</span><span class="p">)</span><span class="si">}</span><span class="s2"> invariants passed&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">res</span><span class="o">.</span><span class="n">errata</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">()</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Known errors in the printed volume (transcription follows the page):&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">fname</span><span class="p">,</span> <span class="n">cells</span> <span class="ow">in</span> <span class="n">res</span><span class="o">.</span><span class="n">errata</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">cell</span><span class="p">,</span> <span class="n">note</span> <span class="ow">in</span> <span class="n">cells</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">fname</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">cell</span><span class="si">}</span><span class="s2"> -&gt; </span><span class="si">{</span><span class="n">note</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">failed</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;FAILED:&quot;</span><span class="p">,</span> <span class="s2">&quot;; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">failed</span><span class="p">))</span>
+    <span class="k">return</span> <span class="mi">1</span> <span class="k">if</span> <span class="n">failed</span> <span class="k">else</span> <span class="mi">0</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>

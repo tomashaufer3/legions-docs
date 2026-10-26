@@ -1,0 +1,1266 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Transleithanian analogue of <code>utils.parsing.lexikon</code> (the Czech ČSÚ register). Parses the
+<strong>1910 period-administrative section</strong> of Juraj Majo's <em>Historicko-demografický lexikón obcí
+Slovenska 1880–1910</em> (Štatistický úrad SR, 2012;
+<code>library/lexicons/Majo-2012_Historicko-demograficky-lexikon-obci-Slovenska_1880-1910.pdf</code>) into an
+<strong>obec → 1910 okres/župa</strong> crosswalk carrying the <strong>mother-tongue</strong> breakdown.</p><p class="tldr-facts"><b>Geography &amp; census</b> · v1.1.0 · 401 lines · 3 public functions · used by <code>02_data_cleaning.ipynb</code> · <code>utils/parsing/lexikon_sk.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-parsing-lexikon_sk-parse_lexikon_sk">parse_lexikon_sk</a><a class="chip" href="#fn-utils-parsing-lexikon_sk-build_crosswalk_sk">build_crosswalk_sk</a><a class="chip" href="#fn-utils-parsing-lexikon_sk-lexikon_sk_report">lexikon_sk_report</a></div>
+<h2>How it works</h2><h4>Why this fills a gap</h4>
+<p>The GISta backbone (<code>utils.parsing.districts_hu</code>) + census (<code>utils.parsing.census_hu</code>)
+are <strong>district-level</strong> only, and <code>utils.parsing.records_geo_hu</code> can therefore resolve a Slovak
+birthplace <strong>only</strong> when the string is a district/county seat (or a curated alias). This lexicon
+supplies the missing <strong>settlement</strong> layer — every obec on today's Slovak territory with its 1910
+okres — so an ordinary village birth resolves to its járás, joining the census. It is the exact
+counterpart of how <code>lexikon</code> feeds <code>records_geo</code> on the Czech side.</p>
+<h4>Section &amp; layout</h4>
+<p>Part I (mother tongue), sub-part <code>1910.1</code> (structure <em>as at the 1910 census</em>) spans <strong>printed
+pages 758–875</strong>, ordered ŽUPA (county) → okres (district) → obec, with <em>časti obce</em> (settlement
+parts) as un-numbered sub-rows. Names are the standardised <strong>Slovak</strong> forms (the okres name is the
+Slovak district seat — the join key to the GISta <code>name_sk</code>). Nine right-aligned numeric columns
+follow each name:</p>
+<pre><code>1 total · 2 slovak · 3 magyar · 4 german · 5 romanian · 6 rusyn · 7 croat · 8 serb · 9 other
+</code></pre>
+<p>Because zero columns are simply <strong>not printed</strong>, a trailing value cannot be assigned to its category
+by text order (Myjava's <code>114</code> is <em>other</em>, not <em>romanian</em>). We therefore read <strong>word x-coordinates</strong>
+with <code>pdfplumber</code> and assign each number to the column whose header anchor (<code>a b 1 2 … 9</code> row)
+it sits under — by its <strong>right</strong> edge, because the columns are right-aligned (see <code>_bounds</code>).
+Row totals are sum-checked against the categories.</p>
+<h4>Section headers</h4>
+<p>Two dividers structure the section, and each is printed in more than one wording. Both defects
+found on 2026-08-01 were the same mistake — a regex narrower than the source — so the full
+inventory is recorded here and in the regexes below:</p>
+<ul>
+<li>an <strong>okres</strong> divider, printed either <code>okres X</code> or, three times, adjectivally as <code>X okres</code>
+  (<code>Hradný okres</code>, <code>Pohronský okres</code>, <code>Medzibodrocký okres</code>) — DECISIONS D-21;</li>
+<li>a <strong>chartered-town</strong> divider closing each county, in four wordings, singular <em>and</em> plural
+  (<code>mesto so župnou právomocou</code> / <code>mesto so župnými právomocami</code> /
+  <code>mesto so zriadeným magistrátom</code> / <code>mestá so zriadeným magistrátom</code>) — DECISIONS D-20.</li>
+</ul>
+<h4>Usage</h4>
+<pre><code>from utils.parsing import lexikon_sk as lxs
+obce = lxs.parse_lexikon_sk(SK_LEXIKON_PDF)                 # raw obec/part rows + counts
+cross = lxs.build_crosswalk_sk(SK_LEXIKON_PDF, backbone_hu) # + GISta unit_id + language shares
+lxs.lexikon_sk_report(cross)
+</code></pre>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-parsing-lexikon_sk-parse_lexikon_sk">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">parse_lexikon_sk</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">,</span> <span class="n">page_first</span><span class="p">:</span> <span class="nb">int</span><span class="o">=</span><span class="n">_PAGE_FIRST</span><span class="p">,</span> <span class="n">page_last</span><span class="p">:</span> <span class="nb">int</span><span class="o">=</span><span class="n">_PAGE_LAST</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Parse the 1910.1 section → one row per obec / <em>časť obce</em> with mother-tongue counts.</p>
+<p>Columns: <code>obec_sk</code> · <code>unit_type</code> (<code>obec</code> / <code>part</code> / <code>town</code>) · <code>parent</code> (parent obec
+for a part) · <code>okres_sk</code> · <code>zupa_sk</code> · <code>pop_total</code> · <code>n_{slovak,magyar,german,romanian,
+rusyn,croat,serb,other}</code> · <code>sum_ok</code> (categories reconcile to the total).</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 203–280 (78 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">parse_lexikon_sk</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">,</span> <span class="n">page_first</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">_PAGE_FIRST</span><span class="p">,</span> <span class="n">page_last</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">_PAGE_LAST</span>
+                     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Parse the 1910.1 section → one row per obec / *časť obce* with mother-tongue counts.</span>
+
+<span class="sd">    Columns: ``obec_sk`` · ``unit_type`` (``obec`` / ``part`` / ``town``) · ``parent`` (parent obec</span>
+<span class="sd">    for a part) · ``okres_sk`` · ``zupa_sk`` · ``pop_total`` · ``n_{slovak,magyar,german,romanian,</span>
+<span class="sd">    rusyn,croat,serb,other}`` · ``sum_ok`` (categories reconcile to the total).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">recs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">zupa</span> <span class="o">=</span> <span class="n">okres</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">kind</span> <span class="o">=</span> <span class="s2">&quot;jaras&quot;</span>                      <span class="c1"># &#39;jaras&#39; (obce sit in an okres) | &#39;town&#39; (standalone unit)</span>
+    <span class="n">parent</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">with</span> <span class="n">pdfplumber</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">))</span> <span class="k">as</span> <span class="n">pdf</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">page</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">pdf</span><span class="o">.</span><span class="n">pages</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">_IDX_LO</span><span class="p">:</span>                       <span class="c1"># scan-speed prefilter (see module header)</span>
+                <span class="k">continue</span>
+            <span class="k">if</span> <span class="n">i</span> <span class="o">&gt;</span> <span class="n">_IDX_HI</span><span class="p">:</span>
+                <span class="k">break</span>
+            <span class="n">words</span> <span class="o">=</span> <span class="n">page</span><span class="o">.</span><span class="n">extract_words</span><span class="p">()</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">words</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">pno</span> <span class="o">=</span> <span class="n">_printed_page_no</span><span class="p">(</span><span class="n">words</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">pno</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="ow">not</span> <span class="p">(</span><span class="n">page_first</span> <span class="o">&lt;=</span> <span class="n">pno</span> <span class="o">&lt;=</span> <span class="n">page_last</span><span class="p">):</span>
+                <span class="k">continue</span>
+            <span class="n">rows</span> <span class="o">=</span> <span class="n">_rows</span><span class="p">(</span><span class="n">words</span><span class="p">)</span>
+            <span class="n">anchors</span> <span class="o">=</span> <span class="n">_anchors</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">anchors</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+                <span class="n">toks</span> <span class="o">=</span> <span class="p">[</span><span class="n">w</span><span class="p">[</span><span class="s2">&quot;text&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">r</span><span class="p">]</span>
+                <span class="n">text</span> <span class="o">=</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">toks</span><span class="p">)</span>
+                <span class="n">low</span> <span class="o">=</span> <span class="n">text</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+                <span class="c1"># ── structural lines ────────────────────────────────────────</span>
+                <span class="k">if</span> <span class="s2">&quot;p.č&quot;</span> <span class="ow">in</span> <span class="n">low</span> <span class="ow">or</span> <span class="n">low</span><span class="o">.</span><span class="n">startswith</span><span class="p">((</span><span class="s2">&quot;a b&quot;</span><span class="p">,</span> <span class="s2">&quot;obyvateľov&quot;</span><span class="p">,</span> <span class="s2">&quot;počet&quot;</span><span class="p">)):</span>
+                    <span class="k">continue</span>                                   <span class="c1"># repeating column header</span>
+                <span class="n">mz</span> <span class="o">=</span> <span class="n">_ZUPA</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">mz</span> <span class="ow">and</span> <span class="ow">not</span> <span class="nb">any</span><span class="p">(</span><span class="n">w</span><span class="p">[</span><span class="s2">&quot;x0&quot;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">_NUM_X0</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">r</span><span class="p">):</span>
+                    <span class="n">new_zupa</span> <span class="o">=</span> <span class="n">_clean_zupa</span><span class="p">(</span><span class="n">mz</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="s2">&quot;n&quot;</span><span class="p">))</span>
+                    <span class="k">if</span> <span class="n">new_zupa</span> <span class="o">!=</span> <span class="n">zupa</span><span class="p">:</span>               <span class="c1"># real county change (not the repeating header)</span>
+                        <span class="n">zupa</span><span class="p">,</span> <span class="n">okres</span><span class="p">,</span> <span class="n">kind</span><span class="p">,</span> <span class="n">parent</span> <span class="o">=</span> <span class="n">new_zupa</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;jaras&quot;</span><span class="p">,</span> <span class="kc">None</span>
+                    <span class="k">continue</span>
+                <span class="n">mo</span> <span class="o">=</span> <span class="n">_OKRES</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">mo</span> <span class="ow">and</span> <span class="ow">not</span> <span class="nb">any</span><span class="p">(</span><span class="n">w</span><span class="p">[</span><span class="s2">&quot;x0&quot;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">_NUM_X0</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">r</span><span class="p">):</span>
+                    <span class="n">name_</span> <span class="o">=</span> <span class="p">(</span><span class="n">mo</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="s2">&quot;full&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="n">mo</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="s2">&quot;adj&quot;</span><span class="p">))</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+                    <span class="n">okres</span><span class="p">,</span> <span class="n">kind</span><span class="p">,</span> <span class="n">parent</span> <span class="o">=</span> <span class="n">name_</span><span class="p">,</span> <span class="s2">&quot;jaras&quot;</span><span class="p">,</span> <span class="kc">None</span>
+                    <span class="k">continue</span>
+                <span class="k">if</span> <span class="n">_TOWN</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">text</span><span class="p">):</span>
+                    <span class="n">okres</span><span class="p">,</span> <span class="n">kind</span><span class="p">,</span> <span class="n">parent</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;town&quot;</span><span class="p">,</span> <span class="kc">None</span>
+                    <span class="k">continue</span>
+                <span class="k">if</span> <span class="n">low</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;spolu&quot;</span><span class="p">):</span>
+                    <span class="k">continue</span>                                   <span class="c1"># okres / župa subtotal</span>
+
+                <span class="c1"># ── data rows (obec / part) ─────────────────────────────────</span>
+                <span class="n">nums</span> <span class="o">=</span> <span class="p">[</span><span class="n">w</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">r</span> <span class="k">if</span> <span class="n">w</span><span class="p">[</span><span class="s2">&quot;x0&quot;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">_NUM_X0</span> <span class="ow">and</span> <span class="n">re</span><span class="o">.</span><span class="n">fullmatch</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\d+&quot;</span><span class="p">,</span> <span class="n">w</span><span class="p">[</span><span class="s2">&quot;text&quot;</span><span class="p">])]</span>
+                <span class="n">name_ws</span> <span class="o">=</span> <span class="p">[</span><span class="n">w</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">r</span> <span class="k">if</span> <span class="n">w</span><span class="p">[</span><span class="s2">&quot;x0&quot;</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">_NUM_X0</span><span class="p">]</span>
+                <span class="n">has_pc</span> <span class="o">=</span> <span class="nb">bool</span><span class="p">(</span><span class="n">name_ws</span><span class="p">)</span> <span class="ow">and</span> <span class="n">name_ws</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;x1&quot;</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">_PC_X1</span> <span class="ow">and</span> <span class="n">name_ws</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;text&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isdigit</span><span class="p">()</span>
+                <span class="n">name_ws</span> <span class="o">=</span> <span class="n">name_ws</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span> <span class="k">if</span> <span class="n">has_pc</span> <span class="k">else</span> <span class="n">name_ws</span>
+                <span class="n">name</span> <span class="o">=</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">w</span><span class="p">[</span><span class="s2">&quot;text&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">name_ws</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+                <span class="n">is_x</span> <span class="o">=</span> <span class="s2">&quot;x&quot;</span> <span class="ow">in</span> <span class="p">[</span><span class="n">w</span><span class="p">[</span><span class="s2">&quot;text&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">r</span><span class="p">]</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">nums</span>          <span class="c1"># obec with no counts</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">name</span> <span class="ow">or</span> <span class="p">(</span><span class="ow">not</span> <span class="n">nums</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">is_x</span><span class="p">):</span>
+                    <span class="k">continue</span>
+
+                <span class="n">unit_type</span> <span class="o">=</span> <span class="s2">&quot;town&quot;</span> <span class="k">if</span> <span class="n">kind</span> <span class="o">==</span> <span class="s2">&quot;town&quot;</span> <span class="k">else</span> <span class="p">(</span><span class="s2">&quot;obec&quot;</span> <span class="k">if</span> <span class="n">has_pc</span> <span class="k">else</span> <span class="s2">&quot;part&quot;</span><span class="p">)</span>
+                <span class="n">vals</span> <span class="o">=</span> <span class="n">_read_numbers</span><span class="p">(</span><span class="n">nums</span><span class="p">,</span> <span class="n">anchors</span><span class="p">)</span> <span class="k">if</span> <span class="n">nums</span> <span class="k">else</span> <span class="p">[</span><span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="mi">9</span>
+                <span class="n">rec</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;obec_sk&quot;</span><span class="p">:</span> <span class="n">name</span><span class="p">,</span> <span class="s2">&quot;unit_type&quot;</span><span class="p">:</span> <span class="n">unit_type</span><span class="p">,</span>
+                       <span class="s2">&quot;parent&quot;</span><span class="p">:</span> <span class="n">parent</span> <span class="k">if</span> <span class="n">unit_type</span> <span class="o">==</span> <span class="s2">&quot;part&quot;</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
+                       <span class="s2">&quot;okres_sk&quot;</span><span class="p">:</span> <span class="n">okres</span><span class="p">,</span> <span class="s2">&quot;zupa_sk&quot;</span><span class="p">:</span> <span class="n">zupa</span><span class="p">,</span>
+                       <span class="s2">&quot;pop_total&quot;</span><span class="p">:</span> <span class="n">vals</span><span class="p">[</span><span class="mi">0</span><span class="p">]}</span>
+                <span class="k">for</span> <span class="n">c</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">_CATS</span><span class="p">,</span> <span class="n">vals</span><span class="p">[</span><span class="mi">1</span><span class="p">:]):</span>
+                    <span class="n">rec</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;n_</span><span class="si">{</span><span class="n">c</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">v</span>
+                <span class="n">cats</span> <span class="o">=</span> <span class="p">[</span><span class="n">v</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">vals</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span> <span class="k">if</span> <span class="n">v</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">]</span>
+                <span class="n">rec</span><span class="p">[</span><span class="s2">&quot;sum_ok&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">vals</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">sum</span><span class="p">(</span><span class="n">cats</span><span class="p">)</span> <span class="o">==</span> <span class="n">vals</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+                <span class="n">recs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">rec</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">unit_type</span> <span class="o">==</span> <span class="s2">&quot;obec&quot;</span><span class="p">:</span>
+                    <span class="n">parent</span> <span class="o">=</span> <span class="n">name</span>                              <span class="c1"># parts below inherit this obec</span>
+
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="o">.</span><span class="n">from_records</span><span class="p">(</span><span class="n">recs</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-lexikon_sk-build_crosswalk_sk">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">build_crosswalk_sk</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">,</span> <span class="n">backbone_hu</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">fuzzy_threshold</span><span class="p">:</span> <span class="nb">int</span><span class="o">=</span><span class="mi">90</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Parse + attach the GISta <code>unit_id</code> (járás/town) and mother-tongue shares.</p>
+<p><code>unit_id</code> is resolved from the lexicon <code>okres</code> (a <em>district</em>, Slovak-named). The backbone
+stores that district as <code>jaras_hu</code> (Magyar adjectival) with <code>name_sk</code> = the <em>seat</em> town —
+a different place — so the matcher keys each járás by: its Slovak seat name(s), its Magyar seat,
+and the <strong>district</strong> name recovered from <code>jaras_hu</code> via the backbone's own Magyar→Slovak map
+(chartered-town exonym pairs); then exact, then subset-guarded rapidfuzz ≥ <em>fuzzy_threshold</em>.
+The handful of district exonyms whose base town is absent from the backbone (Fülek→Fiľakovo,
+Párkány→Štúrovo, Rimaszécs→Rimavská Seč, Udvard→Dvory nad Žitavou) are curated as <code>name_sk</code> /
+<code>name_sk_alt</code> in <code>district_sk_curation.csv</code> (<a class="cite" data-ref="wikidata" href="#references" onclick="return bibGo(event)">Wikidata</a>-validated). A <code>town</code> row maps to the
+backbone town unit of the same name. Rows whose district is a Hungarian-seated okres outside the
+Felvidék backbone (e.g. Cserhát, Rajka) or a region label (Žitný ostrov) keep <code>unit_id</code> =
+<code>&amp;lt;NA&amp;gt;</code> and are reported.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code> <code>utils/validation/build_validation_workbook.py</code></p>
+<details><summary>source · lines 286–379 (94 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span>
+<span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span>
+<span class="normal">337</span>
+<span class="normal">338</span>
+<span class="normal">339</span>
+<span class="normal">340</span>
+<span class="normal">341</span>
+<span class="normal">342</span>
+<span class="normal">343</span>
+<span class="normal">344</span>
+<span class="normal">345</span>
+<span class="normal">346</span>
+<span class="normal">347</span>
+<span class="normal">348</span>
+<span class="normal">349</span>
+<span class="normal">350</span>
+<span class="normal">351</span>
+<span class="normal">352</span>
+<span class="normal">353</span>
+<span class="normal">354</span>
+<span class="normal">355</span>
+<span class="normal">356</span>
+<span class="normal">357</span>
+<span class="normal">358</span>
+<span class="normal">359</span>
+<span class="normal">360</span>
+<span class="normal">361</span>
+<span class="normal">362</span>
+<span class="normal">363</span>
+<span class="normal">364</span>
+<span class="normal">365</span>
+<span class="normal">366</span>
+<span class="normal">367</span>
+<span class="normal">368</span>
+<span class="normal">369</span>
+<span class="normal">370</span>
+<span class="normal">371</span>
+<span class="normal">372</span>
+<span class="normal">373</span>
+<span class="normal">374</span>
+<span class="normal">375</span>
+<span class="normal">376</span>
+<span class="normal">377</span>
+<span class="normal">378</span>
+<span class="normal">379</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">build_crosswalk_sk</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">,</span> <span class="n">backbone_hu</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">fuzzy_threshold</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">90</span>
+                       <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Parse + attach the GISta ``unit_id`` (járás/town) and mother-tongue shares.</span>
+
+<span class="sd">    ``unit_id`` is resolved from the lexicon ``okres`` (a *district*, Slovak-named). The backbone</span>
+<span class="sd">    stores that district as ``jaras_hu`` (Magyar adjectival) with ``name_sk`` = the *seat* town —</span>
+<span class="sd">    a different place — so the matcher keys each járás by: its Slovak seat name(s), its Magyar seat,</span>
+<span class="sd">    and the **district** name recovered from ``jaras_hu`` via the backbone&#39;s own Magyar→Slovak map</span>
+<span class="sd">    (chartered-town exonym pairs); then exact, then subset-guarded rapidfuzz ≥ *fuzzy_threshold*.</span>
+<span class="sd">    The handful of district exonyms whose base town is absent from the backbone (Fülek→Fiľakovo,</span>
+<span class="sd">    Párkány→Štúrovo, Rimaszécs→Rimavská Seč, Udvard→Dvory nad Žitavou) are curated as ``name_sk`` /</span>
+<span class="sd">    ``name_sk_alt`` in ``district_sk_curation.csv`` (Wikidata-validated). A ``town`` row maps to the</span>
+<span class="sd">    backbone town unit of the same name. Rows whose district is a Hungarian-seated okres outside the</span>
+<span class="sd">    Felvidék backbone (e.g. Cserhát, Rajka) or a region label (Žitný ostrov) keep ``unit_id`` =</span>
+<span class="sd">    ``&lt;NA&gt;`` and are reported.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">parse_lexikon_sk</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">)</span>
+
+    <span class="c1"># The backbone&#39;s own Magyar→Slovak dictionary: name_hu → name_sk over EVERY unit that carries</span>
+    <span class="c1"># both. Chartered towns supply the exonym pairs the district names need (Érsekújvár↔Nové Zámky,</span>
+    <span class="c1"># Nagyrőce↔Revúca, …), so the crosswalk needs no external source for most of them.</span>
+    <span class="n">hu2sk</span> <span class="o">=</span> <span class="p">{</span><span class="n">_norm</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;name_hu&quot;</span><span class="p">]):</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;name_sk&quot;</span><span class="p">]</span>
+             <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">backbone_hu</span><span class="o">.</span><span class="n">iterrows</span><span class="p">()</span> <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name_hu&quot;</span><span class="p">)</span> <span class="ow">and</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name_sk&quot;</span><span class="p">)}</span>
+
+    <span class="c1"># járás lookup: norm(name) -&gt; unit_id. Keys per járás: Slovak seat name(s) + Magyar seat + the</span>
+    <span class="c1"># DISTRICT name. The lexicon&#39;s &quot;okres X&quot; is the district (jaras_hu adjectival, e.g. Érsekújvári),</span>
+    <span class="c1"># NOT the seat settlement (name_sk = Šurany); derive the district&#39;s Slovak name from the jaras_hu</span>
+    <span class="c1"># base town via hu2sk so &quot;okres Nové Zámky&quot; reaches the Érsekújvári járás. (name_sk_alt also</span>
+    <span class="c1"># carries curated district exonyms whose base town is absent from the backbone — Fülek→Fiľakovo.)</span>
+    <span class="n">jar</span> <span class="o">=</span> <span class="n">backbone_hu</span><span class="p">[</span><span class="n">backbone_hu</span><span class="p">[</span><span class="s2">&quot;unit_type&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;járás&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">seat_lut</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">jar</span><span class="o">.</span><span class="n">iterrows</span><span class="p">():</span>
+        <span class="n">keys</span> <span class="o">=</span> <span class="p">[</span><span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name_sk&quot;</span><span class="p">),</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name_sk_alt&quot;</span><span class="p">),</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name_sk_modern&quot;</span><span class="p">),</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name_hu&quot;</span><span class="p">)]</span>
+        <span class="n">base</span> <span class="o">=</span> <span class="n">_hu_adj_base</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;jaras_hu&quot;</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">base</span><span class="p">:</span>
+            <span class="n">keys</span> <span class="o">+=</span> <span class="p">[</span><span class="n">base</span><span class="p">,</span> <span class="n">hu2sk</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">_norm</span><span class="p">(</span><span class="n">base</span><span class="p">))]</span>        <span class="c1"># Magyar district base + its Slovak form</span>
+        <span class="k">for</span> <span class="n">nm</span> <span class="ow">in</span> <span class="n">keys</span><span class="p">:</span>
+            <span class="n">k</span> <span class="o">=</span> <span class="n">_norm</span><span class="p">(</span><span class="n">nm</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">k</span><span class="p">:</span>
+                <span class="n">seat_lut</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">])</span>
+    <span class="n">town_lut</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">backbone_hu</span><span class="p">[</span><span class="n">backbone_hu</span><span class="p">[</span><span class="s2">&quot;unit_type&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;járás&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">iterrows</span><span class="p">():</span>
+        <span class="k">for</span> <span class="n">nm</span> <span class="ow">in</span> <span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name_sk&quot;</span><span class="p">),</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name_sk_alt&quot;</span><span class="p">),</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name_sk_modern&quot;</span><span class="p">)):</span>
+            <span class="n">k</span> <span class="o">=</span> <span class="n">_norm</span><span class="p">(</span><span class="n">nm</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">k</span><span class="p">:</span>
+                <span class="n">town_lut</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">])</span>
+
+    <span class="kn">from</span><span class="w"> </span><span class="nn">rapidfuzz</span><span class="w"> </span><span class="kn">import</span> <span class="n">process</span><span class="p">,</span> <span class="n">fuzz</span>
+    <span class="n">seat_keys</span><span class="p">,</span> <span class="n">town_keys</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">seat_lut</span><span class="p">),</span> <span class="nb">list</span><span class="p">(</span><span class="n">town_lut</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_lut_unit</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">lut</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">keys</span><span class="p">:</span> <span class="nb">list</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Slovak name → GISta unit_id: exact, else token-subset fuzzy.</span>
+
+<span class="sd">        The lexicon uses the *1910* short name (``Brezno``, ``Bytča``) while the backbone often</span>
+<span class="sd">        carries the modern full form (``Brezno nad Hronom``, ``Veľká Bytča``); a subset-guarded</span>
+<span class="sd">        ``token_set_ratio`` bridges these without accepting mere letter overlap (``Fiľakovo`` vs</span>
+<span class="sd">        ``Ilava`` scored 62, safely below threshold). Used for both lookups — the chartered towns</span>
+<span class="sd">        need it for exactly the same reason the districts do: the lexicon prints ``Brezno``, the</span>
+<span class="sd">        backbone ``Brezno nad Hronom``, and without the fallback that town resolves to nothing.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">k</span> <span class="o">=</span> <span class="n">_norm</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">k</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span>
+        <span class="k">if</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">lut</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">lut</span><span class="p">[</span><span class="n">k</span><span class="p">]</span>
+        <span class="n">m</span> <span class="o">=</span> <span class="n">process</span><span class="o">.</span><span class="n">extractOne</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">keys</span><span class="p">,</span> <span class="n">scorer</span><span class="o">=</span><span class="n">fuzz</span><span class="o">.</span><span class="n">token_set_ratio</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">m</span> <span class="ow">and</span> <span class="n">m</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">fuzzy_threshold</span><span class="p">:</span>
+            <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">k</span><span class="o">.</span><span class="n">split</span><span class="p">()),</span> <span class="nb">set</span><span class="p">(</span><span class="n">m</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">split</span><span class="p">())</span>
+            <span class="k">if</span> <span class="n">a</span> <span class="o">&lt;=</span> <span class="n">b</span> <span class="ow">or</span> <span class="n">b</span> <span class="o">&lt;=</span> <span class="n">a</span><span class="p">:</span>                      <span class="c1"># one name&#39;s tokens contained in the other&#39;s</span>
+                <span class="k">return</span> <span class="n">lut</span><span class="p">[</span><span class="n">m</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span>
+        <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_okres_unit</span><span class="p">(</span><span class="n">okres</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">_lut_unit</span><span class="p">(</span><span class="n">okres</span><span class="p">,</span> <span class="n">seat_lut</span><span class="p">,</span> <span class="n">seat_keys</span><span class="p">)</span>
+
+    <span class="n">unit_ids</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">iterrows</span><span class="p">():</span>
+        <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;unit_type&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;town&quot;</span><span class="p">:</span>
+            <span class="c1"># a town row carries no okres of its own (the block replaces it), so the town lookup</span>
+            <span class="c1"># is the whole answer; the okres fallback only covers a row mis-typed as a town</span>
+            <span class="n">uid</span> <span class="o">=</span> <span class="n">_lut_unit</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;obec_sk&quot;</span><span class="p">],</span> <span class="n">town_lut</span><span class="p">,</span> <span class="n">town_keys</span><span class="p">)</span>
+            <span class="n">unit_ids</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">uid</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">uid</span><span class="p">)</span> <span class="k">else</span> <span class="n">_okres_unit</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;okres_sk&quot;</span><span class="p">]))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">unit_ids</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">_okres_unit</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;okres_sk&quot;</span><span class="p">]))</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">unit_ids</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;object&quot;</span><span class="p">)</span>
+
+    <span class="c1"># mother-tongue shares (fraction of the obec&#39;s present population)</span>
+    <span class="n">pop</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_numeric</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;pop_total&quot;</span><span class="p">],</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;coerce&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">share</span><span class="p">,</span> <span class="n">col</span> <span class="ow">in</span> <span class="p">[(</span><span class="s2">&quot;slovak_share&quot;</span><span class="p">,</span> <span class="s2">&quot;n_slovak&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;magyar_share&quot;</span><span class="p">,</span> <span class="s2">&quot;n_magyar&quot;</span><span class="p">),</span>
+                       <span class="p">(</span><span class="s2">&quot;german_share&quot;</span><span class="p">,</span> <span class="s2">&quot;n_german&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;rusyn_share&quot;</span><span class="p">,</span> <span class="s2">&quot;n_rusyn&quot;</span><span class="p">)]:</span>
+        <span class="n">df</span><span class="p">[</span><span class="n">share</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_numeric</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="n">col</span><span class="p">],</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;coerce&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="o">/</span> <span class="n">pop</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">)</span>
+
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;name_norm&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;obec_sk&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_norm</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">df</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-lexikon_sk-lexikon_sk_report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">lexikon_sk_report</span><span class="p">(</span><span class="n">cross</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span></pre>
+<div class="fndoc"><p>Print coverage: obce/parts/towns, okres→unit mapping, sum-check, ethnicity summary.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code></p>
+<details><summary>source · lines 382–401 (20 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">382</span>
+<span class="normal">383</span>
+<span class="normal">384</span>
+<span class="normal">385</span>
+<span class="normal">386</span>
+<span class="normal">387</span>
+<span class="normal">388</span>
+<span class="normal">389</span>
+<span class="normal">390</span>
+<span class="normal">391</span>
+<span class="normal">392</span>
+<span class="normal">393</span>
+<span class="normal">394</span>
+<span class="normal">395</span>
+<span class="normal">396</span>
+<span class="normal">397</span>
+<span class="normal">398</span>
+<span class="normal">399</span>
+<span class="normal">400</span>
+<span class="normal">401</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">lexikon_sk_report</span><span class="p">(</span><span class="n">cross</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Print coverage: obce/parts/towns, okres→unit mapping, sum-check, ethnicity summary.&quot;&quot;&quot;</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">cross</span><span class="p">)</span>
+    <span class="n">vc</span> <span class="o">=</span> <span class="n">cross</span><span class="p">[</span><span class="s2">&quot;unit_type&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span>
+    <span class="n">mapped</span> <span class="o">=</span> <span class="n">cross</span><span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+    <span class="n">with_pop</span> <span class="o">=</span> <span class="n">cross</span><span class="p">[</span><span class="s2">&quot;pop_total&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+    <span class="n">sum_ok</span> <span class="o">=</span> <span class="n">cross</span><span class="p">[</span><span class="s2">&quot;sum_ok&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Slovak lexikón crosswalk (Majo 2012, 1910.1)  rows = </span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">vc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  okres/town -&gt; GISta unit_id: </span><span class="si">{</span><span class="n">mapped</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">mapped</span><span class="o">/</span><span class="n">n</span><span class="o">*</span><span class="mi">100</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  with population:             </span><span class="si">{</span><span class="n">with_pop</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">with_pop</span><span class="o">/</span><span class="n">n</span><span class="o">*</span><span class="mi">100</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  category sum == total:       </span><span class="si">{</span><span class="n">sum_ok</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">with_pop</span><span class="si">}</span><span class="s2"> &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">sum_ok</span><span class="o">/</span><span class="nb">max</span><span class="p">(</span><span class="n">with_pop</span><span class="p">,</span><span class="mi">1</span><span class="p">)</span><span class="o">*</span><span class="mi">100</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">% of populated rows)&quot;</span><span class="p">)</span>
+    <span class="n">unmatched</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">cross</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">cross</span><span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isna</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">cross</span><span class="p">[</span><span class="s2">&quot;okres_sk&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">(),</span> <span class="s2">&quot;okres_sk&quot;</span><span class="p">]))</span>
+    <span class="k">if</span> <span class="n">unmatched</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  okres without a backbone unit (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">unmatched</span><span class="p">)</span><span class="si">}</span><span class="s2">): </span><span class="si">{</span><span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">unmatched</span><span class="p">[:</span><span class="mi">12</span><span class="p">])</span><span class="si">}</span><span class="s2">&quot;</span>
+              <span class="o">+</span> <span class="p">(</span><span class="s2">&quot; …&quot;</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">unmatched</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">12</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+    <span class="k">if</span> <span class="s2">&quot;slovak_share&quot;</span> <span class="ow">in</span> <span class="n">cross</span><span class="p">:</span>
+        <span class="n">s</span> <span class="o">=</span> <span class="n">cross</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">cross</span><span class="p">[</span><span class="s2">&quot;unit_type&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;part&quot;</span><span class="p">,</span> <span class="s2">&quot;slovak_share&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">dropna</span><span class="p">()</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Slovak-speaker share (obce/towns): mean </span><span class="si">{</span><span class="n">s</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="si">:</span><span class="s2">.1%</span><span class="si">}</span><span class="s2">, median </span><span class="si">{</span><span class="n">s</span><span class="o">.</span><span class="n">median</span><span class="p">()</span><span class="si">:</span><span class="s2">.1%</span><span class="si">}</span><span class="s2"> &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;(≥50% Slovak: </span><span class="si">{</span><span class="p">(</span><span class="n">s</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="mf">0.5</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">s</span><span class="p">)</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Used by</h2><p><code>02_data_cleaning.ipynb</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/parsing/lexikon_sk.py · 401 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span>
+<span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span>
+<span class="normal">337</span>
+<span class="normal">338</span>
+<span class="normal">339</span>
+<span class="normal">340</span>
+<span class="normal">341</span>
+<span class="normal">342</span>
+<span class="normal">343</span>
+<span class="normal">344</span>
+<span class="normal">345</span>
+<span class="normal">346</span>
+<span class="normal">347</span>
+<span class="normal">348</span>
+<span class="normal">349</span>
+<span class="normal">350</span>
+<span class="normal">351</span>
+<span class="normal">352</span>
+<span class="normal">353</span>
+<span class="normal">354</span>
+<span class="normal">355</span>
+<span class="normal">356</span>
+<span class="normal">357</span>
+<span class="normal">358</span>
+<span class="normal">359</span>
+<span class="normal">360</span>
+<span class="normal">361</span>
+<span class="normal">362</span>
+<span class="normal">363</span>
+<span class="normal">364</span>
+<span class="normal">365</span>
+<span class="normal">366</span>
+<span class="normal">367</span>
+<span class="normal">368</span>
+<span class="normal">369</span>
+<span class="normal">370</span>
+<span class="normal">371</span>
+<span class="normal">372</span>
+<span class="normal">373</span>
+<span class="normal">374</span>
+<span class="normal">375</span>
+<span class="normal">376</span>
+<span class="normal">377</span>
+<span class="normal">378</span>
+<span class="normal">379</span>
+<span class="normal">380</span>
+<span class="normal">381</span>
+<span class="normal">382</span>
+<span class="normal">383</span>
+<span class="normal">384</span>
+<span class="normal">385</span>
+<span class="normal">386</span>
+<span class="normal">387</span>
+<span class="normal">388</span>
+<span class="normal">389</span>
+<span class="normal">390</span>
+<span class="normal">391</span>
+<span class="normal">392</span>
+<span class="normal">393</span>
+<span class="normal">394</span>
+<span class="normal">395</span>
+<span class="normal">396</span>
+<span class="normal">397</span>
+<span class="normal">398</span>
+<span class="normal">399</span>
+<span class="normal">400</span>
+<span class="normal">401</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">lexikon_sk.py — Slovak settlement crosswalk + 1910 ethnicity from the Majo (2012) lexikón</span>
+<span class="sd">=========================================================================================</span>
+<span class="sd">Transleithanian analogue of :mod:`utils.parsing.lexikon` (the Czech ČSÚ register). Parses the</span>
+<span class="sd">**1910 period-administrative section** of Juraj Majo&#39;s *Historicko-demografický lexikón obcí</span>
+<span class="sd">Slovenska 1880–1910* (Štatistický úrad SR, 2012;</span>
+<span class="sd">``library/lexicons/Majo-2012_Historicko-demograficky-lexikon-obci-Slovenska_1880-1910.pdf``) into an</span>
+<span class="sd">**obec → 1910 okres/župa** crosswalk carrying the **mother-tongue** breakdown.</span>
+
+<span class="sd">Why this fills a gap</span>
+<span class="sd">--------------------</span>
+<span class="sd">The GISta backbone (:mod:`utils.parsing.districts_hu`) + census (:mod:`utils.parsing.census_hu`)</span>
+<span class="sd">are **district-level** only, and :mod:`utils.parsing.records_geo_hu` can therefore resolve a Slovak</span>
+<span class="sd">birthplace **only** when the string is a district/county seat (or a curated alias). This lexicon</span>
+<span class="sd">supplies the missing **settlement** layer — every obec on today&#39;s Slovak territory with its 1910</span>
+<span class="sd">okres — so an ordinary village birth resolves to its járás, joining the census. It is the exact</span>
+<span class="sd">counterpart of how :mod:`lexikon` feeds :mod:`records_geo` on the Czech side.</span>
+
+<span class="sd">Section &amp; layout</span>
+<span class="sd">----------------</span>
+<span class="sd">Part I (mother tongue), sub-part ``1910.1`` (structure *as at the 1910 census*) spans **printed</span>
+<span class="sd">pages 758–875**, ordered ŽUPA (county) → okres (district) → obec, with *časti obce* (settlement</span>
+<span class="sd">parts) as un-numbered sub-rows. Names are the standardised **Slovak** forms (the okres name is the</span>
+<span class="sd">Slovak district seat — the join key to the GISta ``name_sk``). Nine right-aligned numeric columns</span>
+<span class="sd">follow each name:</span>
+
+<span class="sd">    1 total · 2 slovak · 3 magyar · 4 german · 5 romanian · 6 rusyn · 7 croat · 8 serb · 9 other</span>
+
+<span class="sd">Because zero columns are simply **not printed**, a trailing value cannot be assigned to its category</span>
+<span class="sd">by text order (Myjava&#39;s ``114`` is *other*, not *romanian*). We therefore read **word x-coordinates**</span>
+<span class="sd">with :mod:`pdfplumber` and assign each number to the column whose header anchor (``a b 1 2 … 9`` row)</span>
+<span class="sd">it sits under — by its **right** edge, because the columns are right-aligned (see :func:`_bounds`).</span>
+<span class="sd">Row totals are sum-checked against the categories.</span>
+
+<span class="sd">Section headers</span>
+<span class="sd">---------------</span>
+<span class="sd">Two dividers structure the section, and each is printed in more than one wording. Both defects</span>
+<span class="sd">found on 2026-08-01 were the same mistake — a regex narrower than the source — so the full</span>
+<span class="sd">inventory is recorded here and in the regexes below:</span>
+
+<span class="sd">* an **okres** divider, printed either ``okres X`` or, three times, adjectivally as ``X okres``</span>
+<span class="sd">  (``Hradný okres``, ``Pohronský okres``, ``Medzibodrocký okres``) — DECISIONS D-21;</span>
+<span class="sd">* a **chartered-town** divider closing each county, in four wordings, singular *and* plural</span>
+<span class="sd">  (``mesto so župnou právomocou`` / ``mesto so župnými právomocami`` /</span>
+<span class="sd">  ``mesto so zriadeným magistrátom`` / ``mestá so zriadeným magistrátom``) — DECISIONS D-20.</span>
+
+<span class="sd">Usage</span>
+<span class="sd">-----</span>
+<span class="sd">    from utils.parsing import lexikon_sk as lxs</span>
+<span class="sd">    obce = lxs.parse_lexikon_sk(SK_LEXIKON_PDF)                 # raw obec/part rows + counts</span>
+<span class="sd">    cross = lxs.build_crosswalk_sk(SK_LEXIKON_PDF, backbone_hu) # + GISta unit_id + language shares</span>
+<span class="sd">    lxs.lexikon_sk_report(cross)</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">statistics</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">pdfplumber</span>
+<span class="k">except</span> <span class="ne">ImportError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>  <span class="c1"># pragma: no cover</span>
+    <span class="k">raise</span> <span class="ne">ImportError</span><span class="p">(</span><span class="s2">&quot;lexikon_sk.py requires pdfplumber (`pip install pdfplumber`).&quot;</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">exc</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing.records_geo</span><span class="w"> </span><span class="kn">import</span> <span class="n">_norm</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.1.0&quot;</span>
+
+<span class="c1"># Printed-page span of the 1910.1 mother-tongue section (period administrative structure). The</span>
+<span class="c1"># printed number is the precise selector (it also excludes the 1880/1890/1900 blocks, all ≤ 756,</span>
+<span class="c1"># and 1910.2 / Part II, all ≥ 876); the PDF-index window is only a scan-speed prefilter for this</span>
+<span class="c1"># fixed 2009-page artifact (printed 758–875 ≈ PDF pages 766–883).</span>
+<span class="n">_PAGE_FIRST</span><span class="p">,</span> <span class="n">_PAGE_LAST</span> <span class="o">=</span> <span class="mi">758</span><span class="p">,</span> <span class="mi">875</span>
+<span class="n">_IDX_LO</span><span class="p">,</span> <span class="n">_IDX_HI</span> <span class="o">=</span> <span class="mi">700</span><span class="p">,</span> <span class="mi">905</span>
+<span class="c1"># Census category columns, in printed order after the total (col 1).</span>
+<span class="n">_CATS</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;slovak&quot;</span><span class="p">,</span> <span class="s2">&quot;magyar&quot;</span><span class="p">,</span> <span class="s2">&quot;german&quot;</span><span class="p">,</span> <span class="s2">&quot;romanian&quot;</span><span class="p">,</span> <span class="s2">&quot;rusyn&quot;</span><span class="p">,</span> <span class="s2">&quot;croat&quot;</span><span class="p">,</span> <span class="s2">&quot;serb&quot;</span><span class="p">,</span> <span class="s2">&quot;other&quot;</span><span class="p">]</span>
+<span class="n">_NUM_X0</span> <span class="o">=</span> <span class="mi">300</span>          <span class="c1"># a token whose left edge is ≥ this is a numeric-column value, not the name</span>
+<span class="n">_PC_X1</span> <span class="o">=</span> <span class="mi">70</span>            <span class="c1"># a p.č. integer sits left of this; a name/part starts to its right</span>
+
+
+<span class="c1"># ═══════════════════════════════════════════════════════════════════════════</span>
+<span class="c1"># Low-level page geometry</span>
+<span class="c1"># ═══════════════════════════════════════════════════════════════════════════</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_printed_page_no</span><span class="p">(</span><span class="n">words</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The printed page number = the bottom-most standalone integer on the page.&quot;&quot;&quot;</span>
+    <span class="n">ints</span> <span class="o">=</span> <span class="p">[(</span><span class="n">w</span><span class="p">[</span><span class="s2">&quot;top&quot;</span><span class="p">],</span> <span class="n">w</span><span class="p">[</span><span class="s2">&quot;text&quot;</span><span class="p">])</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">words</span> <span class="k">if</span> <span class="n">re</span><span class="o">.</span><span class="n">fullmatch</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\d{1,4}&quot;</span><span class="p">,</span> <span class="n">w</span><span class="p">[</span><span class="s2">&quot;text&quot;</span><span class="p">])]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">ints</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">return</span> <span class="nb">int</span><span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="n">ints</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">t</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="mi">0</span><span class="p">])[</span><span class="mi">1</span><span class="p">])</span>          <span class="c1"># largest `top` = lowest on the page</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_rows</span><span class="p">(</span><span class="n">words</span><span class="p">,</span> <span class="n">tol</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">3.0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Cluster words into visual rows by their ``top`` coordinate (tolerance in px).&quot;&quot;&quot;</span>
+    <span class="n">out</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">words</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">w</span><span class="p">:</span> <span class="p">(</span><span class="n">w</span><span class="p">[</span><span class="s2">&quot;top&quot;</span><span class="p">],</span> <span class="n">w</span><span class="p">[</span><span class="s2">&quot;x0&quot;</span><span class="p">])):</span>
+        <span class="k">if</span> <span class="n">out</span> <span class="ow">and</span> <span class="nb">abs</span><span class="p">(</span><span class="n">w</span><span class="p">[</span><span class="s2">&quot;top&quot;</span><span class="p">]</span> <span class="o">-</span> <span class="n">out</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="mi">0</span><span class="p">])</span> <span class="o">&lt;=</span> <span class="n">tol</span><span class="p">:</span>
+            <span class="n">out</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">w</span><span class="p">)</span>                          <span class="c1"># type: ignore[index]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">w</span><span class="p">[</span><span class="s2">&quot;top&quot;</span><span class="p">],</span> <span class="p">[</span><span class="n">w</span><span class="p">]))</span>                   <span class="c1"># type: ignore[list-item]</span>
+    <span class="k">return</span> <span class="p">[</span><span class="nb">sorted</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">w</span><span class="p">:</span> <span class="n">w</span><span class="p">[</span><span class="s2">&quot;x0&quot;</span><span class="p">])</span> <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">out</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_anchors</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Column anchors [total, cat1..cat8] from the ``a b 1 2 3 4 5 6 7 8 9`` header row.&quot;&quot;&quot;</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+        <span class="n">toks</span> <span class="o">=</span> <span class="p">[</span><span class="n">w</span><span class="p">[</span><span class="s2">&quot;text&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">r</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">toks</span><span class="p">[:</span><span class="mi">2</span><span class="p">]</span> <span class="o">==</span> <span class="p">[</span><span class="s2">&quot;a&quot;</span><span class="p">,</span> <span class="s2">&quot;b&quot;</span><span class="p">]</span> <span class="ow">and</span> <span class="p">[</span><span class="n">t</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">toks</span> <span class="k">if</span> <span class="n">t</span><span class="o">.</span><span class="n">isdigit</span><span class="p">()][:</span><span class="mi">9</span><span class="p">]</span> <span class="o">==</span> <span class="nb">list</span><span class="p">(</span><span class="s2">&quot;123456789&quot;</span><span class="p">):</span>
+            <span class="n">xs</span> <span class="o">=</span> <span class="p">[</span><span class="n">w</span><span class="p">[</span><span class="s2">&quot;x0&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">r</span> <span class="k">if</span> <span class="n">w</span><span class="p">[</span><span class="s2">&quot;text&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isdigit</span><span class="p">()][:</span><span class="mi">9</span><span class="p">]</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">xs</span><span class="p">)</span> <span class="o">==</span> <span class="mi">9</span><span class="p">:</span>
+                <span class="k">return</span> <span class="n">xs</span>
+    <span class="k">return</span> <span class="kc">None</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_bounds</span><span class="p">(</span><span class="n">anchors</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">float</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">float</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Boundaries between the 9 columns, expressed on the tokens&#39; **right** edge (len 8).</span>
+
+<span class="sd">    The anchors are the header digits&#39; *left* edges, but the values beneath them are</span>
+<span class="sd">    **right-aligned**: on printed p. 803 the ``4`` header sits at x0 471.1 while every value in</span>
+<span class="sd">    that column ends at x1 496.8 — about half a column further right. So the boundary between</span>
+<span class="sd">    two columns is the anchors&#39; midpoint shifted right by that much, and half the *median*</span>
+<span class="sd">    anchor gap is used rather than a constant so the rule survives the small per-page drift</span>
+<span class="sd">    between recto and verso.</span>
+
+<span class="sd">    Comparing a token&#39;s **centre** against the unshifted midpoints (what this did before) drifts</span>
+<span class="sd">    narrow values one column to the left, and can drop two of them into the same bucket, where</span>
+<span class="sd">    they silently concatenate: Nitra&#39;s ``9`` Croats and ``13`` Serbs became *913 Serbs*. That cost</span>
+<span class="sd">    27 broken row sums and — worse, because the sum check cannot see it — 135 further rows whose</span>
+<span class="sd">    counts reconciled while sitting under the wrong heading. DECISIONS D-20.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">half</span> <span class="o">=</span> <span class="n">statistics</span><span class="o">.</span><span class="n">median</span><span class="p">([</span><span class="n">anchors</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">anchors</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+                              <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">anchors</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)])</span> <span class="o">/</span> <span class="mi">2</span>
+    <span class="k">return</span> <span class="p">[(</span><span class="n">anchors</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">+</span> <span class="n">anchors</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">])</span> <span class="o">/</span> <span class="mi">2</span> <span class="o">+</span> <span class="n">half</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">anchors</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_read_numbers</span><span class="p">(</span><span class="n">nums</span><span class="p">,</span> <span class="n">anchors</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">float</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Assign numeric tokens to the 9 columns by right edge; concatenate within a column.</span>
+
+<span class="sd">    Zero columns are unprinted, so a column with no token stays ``None`` (kept distinct from a</span>
+<span class="sd">    printed 0). Thousands are split tokens (``10`` + ``063``) that share a column and re-join.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">bnds</span> <span class="o">=</span> <span class="n">_bounds</span><span class="p">(</span><span class="n">anchors</span><span class="p">)</span>
+    <span class="n">buckets</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[[]</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">9</span><span class="p">)]</span>
+    <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">nums</span><span class="p">:</span>
+        <span class="n">x1</span> <span class="o">=</span> <span class="n">w</span><span class="p">[</span><span class="s2">&quot;x1&quot;</span><span class="p">]</span>                        <span class="c1"># right-aligned columns -&gt; the right edge is the key</span>
+        <span class="n">col</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">while</span> <span class="n">col</span> <span class="o">&lt;</span> <span class="mi">8</span> <span class="ow">and</span> <span class="n">x1</span> <span class="o">&gt;=</span> <span class="n">bnds</span><span class="p">[</span><span class="n">col</span><span class="p">]:</span>
+            <span class="n">col</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">buckets</span><span class="p">[</span><span class="n">col</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">w</span><span class="p">[</span><span class="s2">&quot;text&quot;</span><span class="p">])</span>
+    <span class="k">return</span> <span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">b</span><span class="p">))</span> <span class="k">if</span> <span class="n">b</span> <span class="k">else</span> <span class="kc">None</span> <span class="k">for</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">buckets</span><span class="p">]</span>
+
+
+<span class="c1"># ═══════════════════════════════════════════════════════════════════════════</span>
+<span class="c1"># Parser</span>
+<span class="c1"># ═══════════════════════════════════════════════════════════════════════════</span>
+<span class="n">_ZUPA</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;^(?!.*p\.\s*č)(?P&lt;n&gt;[A-Za-zÁ-ž][A-Za-zÁ-ž .\-]*?)\s*župa$&quot;</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">IGNORECASE</span><span class="p">)</span>
+
+<span class="c1"># The okres divider is printed in TWO forms. The usual one names the district outright</span>
+<span class="c1"># (&quot;okres Revúca&quot;); three blocks instead use the **adjectival** form (&quot;Hradný okres&quot; = Vári</span>
+<span class="c1"># járás/Tvrdošín, &quot;Pohronský okres&quot; = Garamvölgyi, &quot;Medzibodrocký okres&quot; = Bodrogközi).</span>
+<span class="c1"># Matching only the first form left those 55 obce with no okres of their own — and the 19 Orava</span>
+<span class="c1"># obce of the Hradný block did not even fail loudly: they inherited the *previous* okres and were</span>
+<span class="c1"># filed under Trstená, ~98 person records on the wrong járás. The three adjectives resolve to a</span>
+<span class="c1"># unit through curated `sk_alt` entries (utils/reference_tools/places/build_sk_curation.py), because the</span>
+<span class="c1"># Magyar-&gt;Slovak bridge cannot reach them (_hu_adj_base(&quot;Vári&quot;) -&gt; &quot;Vár&quot;, not a chartered town).</span>
+<span class="c1"># Case is spelled out rather than using re.IGNORECASE, so the adjectival branch still requires a</span>
+<span class="c1"># capitalised head word. DECISIONS D-21.</span>
+<span class="n">_OKRES</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;^(?:[Oo]kres\s+(?P&lt;full&gt;.+)&quot;</span>
+                    <span class="sa">r</span><span class="s2">&quot;|(?P&lt;adj&gt;[A-ZÁ-Ž][A-Za-zÁ-ž\-]*)\s+[Oo]kres)$&quot;</span><span class="p">)</span>
+
+<span class="c1"># Each county closes with its chartered towns, under one of FOUR printed headers — singular</span>
+<span class="c1"># &quot;mesto so župnou právomocou&quot; / &quot;mesto so župnými právomocami&quot; / &quot;mesto so zriadeným</span>
+<span class="c1"># magistrátom&quot;, and plural &quot;mestá so zriadeným magistrátom&quot;. The old `^mesto so ` matched the</span>
+<span class="c1"># three singular forms only, and the plural is the ONLY header seven counties use (Gemer, Nitra,</span>
+<span class="c1"># Spiš, Šariš, Tekov, Trenčín, Zvolen): their 27 town rows therefore kept the last-seen okres —</span>
+<span class="c1"># the county&#39;s final járás — so obec Nitra was filed under okres Nové Mesto nad Váhom. The four</span>
+<span class="c1"># Bratislava towns escaped only by accident, a singular block sitting above them on the same page</span>
+<span class="c1"># leaving `kind` set. Anchored on the two attested stems so it cannot swallow an obec headword.</span>
+<span class="c1"># DECISIONS D-20.</span>
+<span class="n">_TOWN</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;^(mest[oá]\s+so\s+(župn|zriaden)|slobodné\s+kráľ)&quot;</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">IGNORECASE</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_clean_zupa</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Canonical župa name: normalise hyphen/space and case so the running page header and the</span>
+<span class="sd">    ALL-CAPS section-divider render identically (else a župa &#39;change&#39; spuriously resets the okres).&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\s*-\s*&quot;</span><span class="p">,</span> <span class="s2">&quot;-&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">name</span><span class="o">.</span><span class="n">split</span><span class="p">()))</span><span class="o">.</span><span class="n">title</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_hu_adj_base</span><span class="p">(</span><span class="n">jaras_hu</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Base town of a Hungarian adjectival district name (``Érsekújvári`` → ``Érsekújvár``).</span>
+
+<span class="sd">    The lexicon&#39;s ``okres`` is the *district* (named after a town, in Slovak); the GISta backbone</span>
+<span class="sd">    stores that district&#39;s Magyar adjectival form in ``jaras_hu``. Stripping the ``-i`` adjectival</span>
+<span class="sd">    suffix recovers the base town, which the backbone&#39;s own Magyar→Slovak map then translates.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">jaras_hu</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">jaras_hu</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">return</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;i$&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">jaras_hu</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">parse_lexikon_sk</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">,</span> <span class="n">page_first</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">_PAGE_FIRST</span><span class="p">,</span> <span class="n">page_last</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">_PAGE_LAST</span>
+                     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Parse the 1910.1 section → one row per obec / *časť obce* with mother-tongue counts.</span>
+
+<span class="sd">    Columns: ``obec_sk`` · ``unit_type`` (``obec`` / ``part`` / ``town``) · ``parent`` (parent obec</span>
+<span class="sd">    for a part) · ``okres_sk`` · ``zupa_sk`` · ``pop_total`` · ``n_{slovak,magyar,german,romanian,</span>
+<span class="sd">    rusyn,croat,serb,other}`` · ``sum_ok`` (categories reconcile to the total).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">recs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">zupa</span> <span class="o">=</span> <span class="n">okres</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">kind</span> <span class="o">=</span> <span class="s2">&quot;jaras&quot;</span>                      <span class="c1"># &#39;jaras&#39; (obce sit in an okres) | &#39;town&#39; (standalone unit)</span>
+    <span class="n">parent</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">with</span> <span class="n">pdfplumber</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">))</span> <span class="k">as</span> <span class="n">pdf</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">page</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">pdf</span><span class="o">.</span><span class="n">pages</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">_IDX_LO</span><span class="p">:</span>                       <span class="c1"># scan-speed prefilter (see module header)</span>
+                <span class="k">continue</span>
+            <span class="k">if</span> <span class="n">i</span> <span class="o">&gt;</span> <span class="n">_IDX_HI</span><span class="p">:</span>
+                <span class="k">break</span>
+            <span class="n">words</span> <span class="o">=</span> <span class="n">page</span><span class="o">.</span><span class="n">extract_words</span><span class="p">()</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">words</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">pno</span> <span class="o">=</span> <span class="n">_printed_page_no</span><span class="p">(</span><span class="n">words</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">pno</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="ow">not</span> <span class="p">(</span><span class="n">page_first</span> <span class="o">&lt;=</span> <span class="n">pno</span> <span class="o">&lt;=</span> <span class="n">page_last</span><span class="p">):</span>
+                <span class="k">continue</span>
+            <span class="n">rows</span> <span class="o">=</span> <span class="n">_rows</span><span class="p">(</span><span class="n">words</span><span class="p">)</span>
+            <span class="n">anchors</span> <span class="o">=</span> <span class="n">_anchors</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">anchors</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+                <span class="n">toks</span> <span class="o">=</span> <span class="p">[</span><span class="n">w</span><span class="p">[</span><span class="s2">&quot;text&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">r</span><span class="p">]</span>
+                <span class="n">text</span> <span class="o">=</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">toks</span><span class="p">)</span>
+                <span class="n">low</span> <span class="o">=</span> <span class="n">text</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+                <span class="c1"># ── structural lines ────────────────────────────────────────</span>
+                <span class="k">if</span> <span class="s2">&quot;p.č&quot;</span> <span class="ow">in</span> <span class="n">low</span> <span class="ow">or</span> <span class="n">low</span><span class="o">.</span><span class="n">startswith</span><span class="p">((</span><span class="s2">&quot;a b&quot;</span><span class="p">,</span> <span class="s2">&quot;obyvateľov&quot;</span><span class="p">,</span> <span class="s2">&quot;počet&quot;</span><span class="p">)):</span>
+                    <span class="k">continue</span>                                   <span class="c1"># repeating column header</span>
+                <span class="n">mz</span> <span class="o">=</span> <span class="n">_ZUPA</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">mz</span> <span class="ow">and</span> <span class="ow">not</span> <span class="nb">any</span><span class="p">(</span><span class="n">w</span><span class="p">[</span><span class="s2">&quot;x0&quot;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">_NUM_X0</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">r</span><span class="p">):</span>
+                    <span class="n">new_zupa</span> <span class="o">=</span> <span class="n">_clean_zupa</span><span class="p">(</span><span class="n">mz</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="s2">&quot;n&quot;</span><span class="p">))</span>
+                    <span class="k">if</span> <span class="n">new_zupa</span> <span class="o">!=</span> <span class="n">zupa</span><span class="p">:</span>               <span class="c1"># real county change (not the repeating header)</span>
+                        <span class="n">zupa</span><span class="p">,</span> <span class="n">okres</span><span class="p">,</span> <span class="n">kind</span><span class="p">,</span> <span class="n">parent</span> <span class="o">=</span> <span class="n">new_zupa</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;jaras&quot;</span><span class="p">,</span> <span class="kc">None</span>
+                    <span class="k">continue</span>
+                <span class="n">mo</span> <span class="o">=</span> <span class="n">_OKRES</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">mo</span> <span class="ow">and</span> <span class="ow">not</span> <span class="nb">any</span><span class="p">(</span><span class="n">w</span><span class="p">[</span><span class="s2">&quot;x0&quot;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">_NUM_X0</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">r</span><span class="p">):</span>
+                    <span class="n">name_</span> <span class="o">=</span> <span class="p">(</span><span class="n">mo</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="s2">&quot;full&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="n">mo</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="s2">&quot;adj&quot;</span><span class="p">))</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+                    <span class="n">okres</span><span class="p">,</span> <span class="n">kind</span><span class="p">,</span> <span class="n">parent</span> <span class="o">=</span> <span class="n">name_</span><span class="p">,</span> <span class="s2">&quot;jaras&quot;</span><span class="p">,</span> <span class="kc">None</span>
+                    <span class="k">continue</span>
+                <span class="k">if</span> <span class="n">_TOWN</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">text</span><span class="p">):</span>
+                    <span class="n">okres</span><span class="p">,</span> <span class="n">kind</span><span class="p">,</span> <span class="n">parent</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;town&quot;</span><span class="p">,</span> <span class="kc">None</span>
+                    <span class="k">continue</span>
+                <span class="k">if</span> <span class="n">low</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;spolu&quot;</span><span class="p">):</span>
+                    <span class="k">continue</span>                                   <span class="c1"># okres / župa subtotal</span>
+
+                <span class="c1"># ── data rows (obec / part) ─────────────────────────────────</span>
+                <span class="n">nums</span> <span class="o">=</span> <span class="p">[</span><span class="n">w</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">r</span> <span class="k">if</span> <span class="n">w</span><span class="p">[</span><span class="s2">&quot;x0&quot;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">_NUM_X0</span> <span class="ow">and</span> <span class="n">re</span><span class="o">.</span><span class="n">fullmatch</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\d+&quot;</span><span class="p">,</span> <span class="n">w</span><span class="p">[</span><span class="s2">&quot;text&quot;</span><span class="p">])]</span>
+                <span class="n">name_ws</span> <span class="o">=</span> <span class="p">[</span><span class="n">w</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">r</span> <span class="k">if</span> <span class="n">w</span><span class="p">[</span><span class="s2">&quot;x0&quot;</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">_NUM_X0</span><span class="p">]</span>
+                <span class="n">has_pc</span> <span class="o">=</span> <span class="nb">bool</span><span class="p">(</span><span class="n">name_ws</span><span class="p">)</span> <span class="ow">and</span> <span class="n">name_ws</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;x1&quot;</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">_PC_X1</span> <span class="ow">and</span> <span class="n">name_ws</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;text&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isdigit</span><span class="p">()</span>
+                <span class="n">name_ws</span> <span class="o">=</span> <span class="n">name_ws</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span> <span class="k">if</span> <span class="n">has_pc</span> <span class="k">else</span> <span class="n">name_ws</span>
+                <span class="n">name</span> <span class="o">=</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">w</span><span class="p">[</span><span class="s2">&quot;text&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">name_ws</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+                <span class="n">is_x</span> <span class="o">=</span> <span class="s2">&quot;x&quot;</span> <span class="ow">in</span> <span class="p">[</span><span class="n">w</span><span class="p">[</span><span class="s2">&quot;text&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">r</span><span class="p">]</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">nums</span>          <span class="c1"># obec with no counts</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">name</span> <span class="ow">or</span> <span class="p">(</span><span class="ow">not</span> <span class="n">nums</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">is_x</span><span class="p">):</span>
+                    <span class="k">continue</span>
+
+                <span class="n">unit_type</span> <span class="o">=</span> <span class="s2">&quot;town&quot;</span> <span class="k">if</span> <span class="n">kind</span> <span class="o">==</span> <span class="s2">&quot;town&quot;</span> <span class="k">else</span> <span class="p">(</span><span class="s2">&quot;obec&quot;</span> <span class="k">if</span> <span class="n">has_pc</span> <span class="k">else</span> <span class="s2">&quot;part&quot;</span><span class="p">)</span>
+                <span class="n">vals</span> <span class="o">=</span> <span class="n">_read_numbers</span><span class="p">(</span><span class="n">nums</span><span class="p">,</span> <span class="n">anchors</span><span class="p">)</span> <span class="k">if</span> <span class="n">nums</span> <span class="k">else</span> <span class="p">[</span><span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="mi">9</span>
+                <span class="n">rec</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;obec_sk&quot;</span><span class="p">:</span> <span class="n">name</span><span class="p">,</span> <span class="s2">&quot;unit_type&quot;</span><span class="p">:</span> <span class="n">unit_type</span><span class="p">,</span>
+                       <span class="s2">&quot;parent&quot;</span><span class="p">:</span> <span class="n">parent</span> <span class="k">if</span> <span class="n">unit_type</span> <span class="o">==</span> <span class="s2">&quot;part&quot;</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
+                       <span class="s2">&quot;okres_sk&quot;</span><span class="p">:</span> <span class="n">okres</span><span class="p">,</span> <span class="s2">&quot;zupa_sk&quot;</span><span class="p">:</span> <span class="n">zupa</span><span class="p">,</span>
+                       <span class="s2">&quot;pop_total&quot;</span><span class="p">:</span> <span class="n">vals</span><span class="p">[</span><span class="mi">0</span><span class="p">]}</span>
+                <span class="k">for</span> <span class="n">c</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">_CATS</span><span class="p">,</span> <span class="n">vals</span><span class="p">[</span><span class="mi">1</span><span class="p">:]):</span>
+                    <span class="n">rec</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;n_</span><span class="si">{</span><span class="n">c</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">v</span>
+                <span class="n">cats</span> <span class="o">=</span> <span class="p">[</span><span class="n">v</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">vals</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span> <span class="k">if</span> <span class="n">v</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">]</span>
+                <span class="n">rec</span><span class="p">[</span><span class="s2">&quot;sum_ok&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">vals</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">sum</span><span class="p">(</span><span class="n">cats</span><span class="p">)</span> <span class="o">==</span> <span class="n">vals</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+                <span class="n">recs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">rec</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">unit_type</span> <span class="o">==</span> <span class="s2">&quot;obec&quot;</span><span class="p">:</span>
+                    <span class="n">parent</span> <span class="o">=</span> <span class="n">name</span>                              <span class="c1"># parts below inherit this obec</span>
+
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="o">.</span><span class="n">from_records</span><span class="p">(</span><span class="n">recs</span><span class="p">)</span>
+
+
+<span class="c1"># ═══════════════════════════════════════════════════════════════════════════</span>
+<span class="c1"># Crosswalk to the GISta backbone</span>
+<span class="c1"># ═══════════════════════════════════════════════════════════════════════════</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">build_crosswalk_sk</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">,</span> <span class="n">backbone_hu</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">fuzzy_threshold</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">90</span>
+                       <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Parse + attach the GISta ``unit_id`` (járás/town) and mother-tongue shares.</span>
+
+<span class="sd">    ``unit_id`` is resolved from the lexicon ``okres`` (a *district*, Slovak-named). The backbone</span>
+<span class="sd">    stores that district as ``jaras_hu`` (Magyar adjectival) with ``name_sk`` = the *seat* town —</span>
+<span class="sd">    a different place — so the matcher keys each járás by: its Slovak seat name(s), its Magyar seat,</span>
+<span class="sd">    and the **district** name recovered from ``jaras_hu`` via the backbone&#39;s own Magyar→Slovak map</span>
+<span class="sd">    (chartered-town exonym pairs); then exact, then subset-guarded rapidfuzz ≥ *fuzzy_threshold*.</span>
+<span class="sd">    The handful of district exonyms whose base town is absent from the backbone (Fülek→Fiľakovo,</span>
+<span class="sd">    Párkány→Štúrovo, Rimaszécs→Rimavská Seč, Udvard→Dvory nad Žitavou) are curated as ``name_sk`` /</span>
+<span class="sd">    ``name_sk_alt`` in ``district_sk_curation.csv`` (Wikidata-validated). A ``town`` row maps to the</span>
+<span class="sd">    backbone town unit of the same name. Rows whose district is a Hungarian-seated okres outside the</span>
+<span class="sd">    Felvidék backbone (e.g. Cserhát, Rajka) or a region label (Žitný ostrov) keep ``unit_id`` =</span>
+<span class="sd">    ``&lt;NA&gt;`` and are reported.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">parse_lexikon_sk</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">)</span>
+
+    <span class="c1"># The backbone&#39;s own Magyar→Slovak dictionary: name_hu → name_sk over EVERY unit that carries</span>
+    <span class="c1"># both. Chartered towns supply the exonym pairs the district names need (Érsekújvár↔Nové Zámky,</span>
+    <span class="c1"># Nagyrőce↔Revúca, …), so the crosswalk needs no external source for most of them.</span>
+    <span class="n">hu2sk</span> <span class="o">=</span> <span class="p">{</span><span class="n">_norm</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;name_hu&quot;</span><span class="p">]):</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;name_sk&quot;</span><span class="p">]</span>
+             <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">backbone_hu</span><span class="o">.</span><span class="n">iterrows</span><span class="p">()</span> <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name_hu&quot;</span><span class="p">)</span> <span class="ow">and</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name_sk&quot;</span><span class="p">)}</span>
+
+    <span class="c1"># járás lookup: norm(name) -&gt; unit_id. Keys per járás: Slovak seat name(s) + Magyar seat + the</span>
+    <span class="c1"># DISTRICT name. The lexicon&#39;s &quot;okres X&quot; is the district (jaras_hu adjectival, e.g. Érsekújvári),</span>
+    <span class="c1"># NOT the seat settlement (name_sk = Šurany); derive the district&#39;s Slovak name from the jaras_hu</span>
+    <span class="c1"># base town via hu2sk so &quot;okres Nové Zámky&quot; reaches the Érsekújvári járás. (name_sk_alt also</span>
+    <span class="c1"># carries curated district exonyms whose base town is absent from the backbone — Fülek→Fiľakovo.)</span>
+    <span class="n">jar</span> <span class="o">=</span> <span class="n">backbone_hu</span><span class="p">[</span><span class="n">backbone_hu</span><span class="p">[</span><span class="s2">&quot;unit_type&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;járás&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">seat_lut</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">jar</span><span class="o">.</span><span class="n">iterrows</span><span class="p">():</span>
+        <span class="n">keys</span> <span class="o">=</span> <span class="p">[</span><span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name_sk&quot;</span><span class="p">),</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name_sk_alt&quot;</span><span class="p">),</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name_sk_modern&quot;</span><span class="p">),</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name_hu&quot;</span><span class="p">)]</span>
+        <span class="n">base</span> <span class="o">=</span> <span class="n">_hu_adj_base</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;jaras_hu&quot;</span><span class="p">))</span>
+        <span class="k">if</span> <span class="n">base</span><span class="p">:</span>
+            <span class="n">keys</span> <span class="o">+=</span> <span class="p">[</span><span class="n">base</span><span class="p">,</span> <span class="n">hu2sk</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">_norm</span><span class="p">(</span><span class="n">base</span><span class="p">))]</span>        <span class="c1"># Magyar district base + its Slovak form</span>
+        <span class="k">for</span> <span class="n">nm</span> <span class="ow">in</span> <span class="n">keys</span><span class="p">:</span>
+            <span class="n">k</span> <span class="o">=</span> <span class="n">_norm</span><span class="p">(</span><span class="n">nm</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">k</span><span class="p">:</span>
+                <span class="n">seat_lut</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">])</span>
+    <span class="n">town_lut</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">backbone_hu</span><span class="p">[</span><span class="n">backbone_hu</span><span class="p">[</span><span class="s2">&quot;unit_type&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;járás&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">iterrows</span><span class="p">():</span>
+        <span class="k">for</span> <span class="n">nm</span> <span class="ow">in</span> <span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name_sk&quot;</span><span class="p">),</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name_sk_alt&quot;</span><span class="p">),</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name_sk_modern&quot;</span><span class="p">)):</span>
+            <span class="n">k</span> <span class="o">=</span> <span class="n">_norm</span><span class="p">(</span><span class="n">nm</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">k</span><span class="p">:</span>
+                <span class="n">town_lut</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">])</span>
+
+    <span class="kn">from</span><span class="w"> </span><span class="nn">rapidfuzz</span><span class="w"> </span><span class="kn">import</span> <span class="n">process</span><span class="p">,</span> <span class="n">fuzz</span>
+    <span class="n">seat_keys</span><span class="p">,</span> <span class="n">town_keys</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">seat_lut</span><span class="p">),</span> <span class="nb">list</span><span class="p">(</span><span class="n">town_lut</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_lut_unit</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">lut</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">keys</span><span class="p">:</span> <span class="nb">list</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Slovak name → GISta unit_id: exact, else token-subset fuzzy.</span>
+
+<span class="sd">        The lexicon uses the *1910* short name (``Brezno``, ``Bytča``) while the backbone often</span>
+<span class="sd">        carries the modern full form (``Brezno nad Hronom``, ``Veľká Bytča``); a subset-guarded</span>
+<span class="sd">        ``token_set_ratio`` bridges these without accepting mere letter overlap (``Fiľakovo`` vs</span>
+<span class="sd">        ``Ilava`` scored 62, safely below threshold). Used for both lookups — the chartered towns</span>
+<span class="sd">        need it for exactly the same reason the districts do: the lexicon prints ``Brezno``, the</span>
+<span class="sd">        backbone ``Brezno nad Hronom``, and without the fallback that town resolves to nothing.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">k</span> <span class="o">=</span> <span class="n">_norm</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">k</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span>
+        <span class="k">if</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">lut</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">lut</span><span class="p">[</span><span class="n">k</span><span class="p">]</span>
+        <span class="n">m</span> <span class="o">=</span> <span class="n">process</span><span class="o">.</span><span class="n">extractOne</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="n">keys</span><span class="p">,</span> <span class="n">scorer</span><span class="o">=</span><span class="n">fuzz</span><span class="o">.</span><span class="n">token_set_ratio</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">m</span> <span class="ow">and</span> <span class="n">m</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">fuzzy_threshold</span><span class="p">:</span>
+            <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">k</span><span class="o">.</span><span class="n">split</span><span class="p">()),</span> <span class="nb">set</span><span class="p">(</span><span class="n">m</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">split</span><span class="p">())</span>
+            <span class="k">if</span> <span class="n">a</span> <span class="o">&lt;=</span> <span class="n">b</span> <span class="ow">or</span> <span class="n">b</span> <span class="o">&lt;=</span> <span class="n">a</span><span class="p">:</span>                      <span class="c1"># one name&#39;s tokens contained in the other&#39;s</span>
+                <span class="k">return</span> <span class="n">lut</span><span class="p">[</span><span class="n">m</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span>
+        <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_okres_unit</span><span class="p">(</span><span class="n">okres</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">_lut_unit</span><span class="p">(</span><span class="n">okres</span><span class="p">,</span> <span class="n">seat_lut</span><span class="p">,</span> <span class="n">seat_keys</span><span class="p">)</span>
+
+    <span class="n">unit_ids</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">iterrows</span><span class="p">():</span>
+        <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;unit_type&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;town&quot;</span><span class="p">:</span>
+            <span class="c1"># a town row carries no okres of its own (the block replaces it), so the town lookup</span>
+            <span class="c1"># is the whole answer; the okres fallback only covers a row mis-typed as a town</span>
+            <span class="n">uid</span> <span class="o">=</span> <span class="n">_lut_unit</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;obec_sk&quot;</span><span class="p">],</span> <span class="n">town_lut</span><span class="p">,</span> <span class="n">town_keys</span><span class="p">)</span>
+            <span class="n">unit_ids</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">uid</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">uid</span><span class="p">)</span> <span class="k">else</span> <span class="n">_okres_unit</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;okres_sk&quot;</span><span class="p">]))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">unit_ids</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">_okres_unit</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;okres_sk&quot;</span><span class="p">]))</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">unit_ids</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;object&quot;</span><span class="p">)</span>
+
+    <span class="c1"># mother-tongue shares (fraction of the obec&#39;s present population)</span>
+    <span class="n">pop</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_numeric</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;pop_total&quot;</span><span class="p">],</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;coerce&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">share</span><span class="p">,</span> <span class="n">col</span> <span class="ow">in</span> <span class="p">[(</span><span class="s2">&quot;slovak_share&quot;</span><span class="p">,</span> <span class="s2">&quot;n_slovak&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;magyar_share&quot;</span><span class="p">,</span> <span class="s2">&quot;n_magyar&quot;</span><span class="p">),</span>
+                       <span class="p">(</span><span class="s2">&quot;german_share&quot;</span><span class="p">,</span> <span class="s2">&quot;n_german&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;rusyn_share&quot;</span><span class="p">,</span> <span class="s2">&quot;n_rusyn&quot;</span><span class="p">)]:</span>
+        <span class="n">df</span><span class="p">[</span><span class="n">share</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_numeric</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="n">col</span><span class="p">],</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;coerce&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="o">/</span> <span class="n">pop</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">)</span>
+
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;name_norm&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;obec_sk&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_norm</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">df</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">lexikon_sk_report</span><span class="p">(</span><span class="n">cross</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Print coverage: obce/parts/towns, okres→unit mapping, sum-check, ethnicity summary.&quot;&quot;&quot;</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">cross</span><span class="p">)</span>
+    <span class="n">vc</span> <span class="o">=</span> <span class="n">cross</span><span class="p">[</span><span class="s2">&quot;unit_type&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span>
+    <span class="n">mapped</span> <span class="o">=</span> <span class="n">cross</span><span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+    <span class="n">with_pop</span> <span class="o">=</span> <span class="n">cross</span><span class="p">[</span><span class="s2">&quot;pop_total&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+    <span class="n">sum_ok</span> <span class="o">=</span> <span class="n">cross</span><span class="p">[</span><span class="s2">&quot;sum_ok&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Slovak lexikón crosswalk (Majo 2012, 1910.1)  rows = </span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">vc</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  okres/town -&gt; GISta unit_id: </span><span class="si">{</span><span class="n">mapped</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">mapped</span><span class="o">/</span><span class="n">n</span><span class="o">*</span><span class="mi">100</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  with population:             </span><span class="si">{</span><span class="n">with_pop</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">with_pop</span><span class="o">/</span><span class="n">n</span><span class="o">*</span><span class="mi">100</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  category sum == total:       </span><span class="si">{</span><span class="n">sum_ok</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">with_pop</span><span class="si">}</span><span class="s2"> &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">sum_ok</span><span class="o">/</span><span class="nb">max</span><span class="p">(</span><span class="n">with_pop</span><span class="p">,</span><span class="mi">1</span><span class="p">)</span><span class="o">*</span><span class="mi">100</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">% of populated rows)&quot;</span><span class="p">)</span>
+    <span class="n">unmatched</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">cross</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">cross</span><span class="p">[</span><span class="s2">&quot;unit_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isna</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">cross</span><span class="p">[</span><span class="s2">&quot;okres_sk&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">(),</span> <span class="s2">&quot;okres_sk&quot;</span><span class="p">]))</span>
+    <span class="k">if</span> <span class="n">unmatched</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  okres without a backbone unit (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">unmatched</span><span class="p">)</span><span class="si">}</span><span class="s2">): </span><span class="si">{</span><span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">unmatched</span><span class="p">[:</span><span class="mi">12</span><span class="p">])</span><span class="si">}</span><span class="s2">&quot;</span>
+              <span class="o">+</span> <span class="p">(</span><span class="s2">&quot; …&quot;</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">unmatched</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">12</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+    <span class="k">if</span> <span class="s2">&quot;slovak_share&quot;</span> <span class="ow">in</span> <span class="n">cross</span><span class="p">:</span>
+        <span class="n">s</span> <span class="o">=</span> <span class="n">cross</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">cross</span><span class="p">[</span><span class="s2">&quot;unit_type&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;part&quot;</span><span class="p">,</span> <span class="s2">&quot;slovak_share&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">dropna</span><span class="p">()</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Slovak-speaker share (obce/towns): mean </span><span class="si">{</span><span class="n">s</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="si">:</span><span class="s2">.1%</span><span class="si">}</span><span class="s2">, median </span><span class="si">{</span><span class="n">s</span><span class="o">.</span><span class="n">median</span><span class="p">()</span><span class="si">:</span><span class="s2">.1%</span><span class="si">}</span><span class="s2"> &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;(≥50% Slovak: </span><span class="si">{</span><span class="p">(</span><span class="n">s</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="mf">0.5</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">s</span><span class="p">)</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>

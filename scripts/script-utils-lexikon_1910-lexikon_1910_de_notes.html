@@ -1,0 +1,1551 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>The German edition's apparatus, read from the image alone (D-92).</p><p class="tldr-facts"><b>1910 register</b> · v0.3.0 · 461 lines · 15 public functions · 9 constants · used by <code>utils/lexikon_1910/draw_gold_sample.py</code>, <code>utils/lexikon_1910/lexikon_1910_courts.py</code>, <code>utils/lexikon_1910/run_frozen.py</code> +1 · <code>utils/lexikon_1910/lexikon_1910_de_notes.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_de_notes-build_system_de">build_system_de</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_de_notes-native_width">native_width</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_de_notes-render_native">render_native</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_de_notes-strip_height">strip_height</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_de_notes-empty_notes">empty_notes</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_de_notes-cut_page">cut_page</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_de_notes-last_heading_crop">last_heading_crop</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_de_notes-header_crop">header_crop</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_de_notes-header_check">header_check</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_de_notes-fold">fold</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_de_notes-expand_court_abbreviations">expand_court_abbreviations</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_de_notes-name_forms">name_forms</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_de_notes-load_court_crosswalk">load_court_crosswalk</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_de_notes-court_name">court_name</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_de_notes-relabel_sections">relabel_sections</a><a class="chip const" href="#c-utils-lexikon_1910-lexikon_1910_de_notes-ROOT">ROOT</a><a class="chip const" href="#c-utils-lexikon_1910-lexikon_1910_de_notes-CURATION">CURATION</a><a class="chip const" href="#c-utils-lexikon_1910-lexikon_1910_de_notes-DISTRICTS">DISTRICTS</a><a class="chip const" href="#c-utils-lexikon_1910-lexikon_1910_de_notes-SECTION_HEADS_DE">SECTION_HEADS_DE</a><a class="chip const" href="#c-utils-lexikon_1910-lexikon_1910_de_notes-HEADER_SYSTEM_DE">HEADER_SYSTEM_DE</a><a class="chip const" href="#c-utils-lexikon_1910-lexikon_1910_de_notes-HEADER_MATCH">HEADER_MATCH</a><a class="chip const" href="#c-utils-lexikon_1910-lexikon_1910_de_notes-COURT_FUZZY">COURT_FUZZY</a><a class="chip const" href="#c-utils-lexikon_1910-lexikon_1910_de_notes-COURT_MARGIN">COURT_MARGIN</a><a class="chip const" href="#c-utils-lexikon_1910-lexikon_1910_de_notes-PREFIX_MIN">PREFIX_MIN</a></div>
+<h2>How it works</h2><p>The <em>Spezialortsrepertorium von Böhmen</em> (Wien 1915) is the Czech volume's twin
+and prints the same three documents in the same layout — the table, the two
+apparatus columns under it (<code>Ortsbestandteile im Gerichtsbezirk X:</code> and
+<code>Ämter, Anstalten usw. im Gerichtsbezirk X:</code>), and the postal and railway
+legend across the foot. What it lacks is a text layer fit to cut on: the UBW
+scan's OCR words are too poor to find a heading in (D-67), so every boundary has
+to come from the pixels and every label from a reading of the heading itself.</p>
+<p>This module is the German half of what channel G of
+<code>run_lexikon_1910_pilot.py</code> does for the Czech volume, built from the same
+parts rather than beside them:</p>
+<ul>
+<li><strong>where</strong> a section starts is <code>lexikon_1910_image</code> (the geometry measured on
+  four volumes, D-80), through <code>lexikon_1910_notes.image_section_segments</code> with
+  an empty text layer, so every heading the image finds is cut out and read;</li>
+<li><strong>which</strong> section it opens is the German profile's heading matcher
+  (<code>volumes/boehmen_de.toml</code>, <code>VolumeProfile.find_heading</code>) applied to that
+  reading — the same rule as the Czech one, with this volume's words;</li>
+<li><strong>what the reader is told</strong> is the Czech prompt with the German volume's own
+  heading words, abbreviations and legend, and the closed token list of the
+  <code>de</code> pictogram rows (80 symbols, read off the German plate, scan 0012);</li>
+<li><strong>which court</strong> a German heading names is answered by the project's court
+  crosswalk (<code>reference/places/district_cs_curation.csv</code>), so a German entry is
+  keyed by the same court slug as the Czech one and the German gold sheets
+  (which file every section under <code>soudní okres X</code>) — never by page (D-67).</li>
+</ul>
+<p>It also reads the <strong>column header</strong> once a page and checks it against the
+profile's seventeen labels, which D-80 and D-83 left as the German reader's job:
+the table geometry is found in the image, and only a reading says the columns
+are the ones the profile expects.</p>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_de_notes-build_system_de">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">build_system_de</span><span class="p">(</span><span class="n">abbreviations</span><span class="p">,</span> <span class="n">section</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">atlas</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">think</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">contrast</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<div class="fndoc"><p>The German apparatus prompt: the Czech builder's, with this volume's words.</p>
+<p>Everything after the head — the atlas note (the contrast note when a
+contrast sheet follows the key), the note for a reader that thinks, and the
+closed token list — is <code>lexikon_1910_vision</code>'s own text,
+so the two editions are told the same things about the symbols and differ
+only in what their volume prints. <code>abbreviations</code> must be the <code>de</code> rows:
+the token list is read off them, and the German plate has no
+<code>[cooperative]</code>, <code>[port]</code> or <code>[rc-parish-exp]</code>.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_r5_german_notes.py</code> <code>utils/lexikon_1910/run_r5_german_notes.py</code></p>
+<details><summary>source · lines 177–203 (27 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">build_system_de</span><span class="p">(</span><span class="n">abbreviations</span><span class="p">,</span> <span class="n">section</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">atlas</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+                    <span class="n">think</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">contrast</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The German apparatus prompt: the Czech builder&#39;s, with this volume&#39;s words.</span>
+
+<span class="sd">    Everything after the head — the atlas note (the contrast note when a</span>
+<span class="sd">    contrast sheet follows the key), the note for a reader that thinks, and the</span>
+<span class="sd">    closed token list — is ``lexikon_1910_vision``&#39;s own text,</span>
+<span class="sd">    so the two editions are told the same things about the symbols and differ</span>
+<span class="sd">    only in what their volume prints. ``abbreviations`` must be the ``de`` rows:</span>
+<span class="sd">    the token list is read off them, and the German plate has no</span>
+<span class="sd">    ``[cooperative]``, ``[port]`` or ``[rc-parish-exp]``.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">head</span> <span class="o">=</span> <span class="n">SECTION_HEADS_DE</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">section</span><span class="p">,</span> <span class="n">_SHARED_HEAD_DE</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">contrast</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">atlas</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;a contrast sheet is read against the key: it needs atlas=True&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">atlas</span><span class="p">:</span>
+        <span class="n">head</span> <span class="o">+=</span> <span class="p">(</span><span class="n">lxv</span><span class="o">.</span><span class="n">_CONTRAST_NOTE</span> <span class="k">if</span> <span class="n">contrast</span> <span class="k">else</span> <span class="n">lxv</span><span class="o">.</span><span class="n">_ATLAS_NOTE</span><span class="p">)</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+            <span class="n">unknown</span><span class="o">=</span><span class="n">lxv</span><span class="o">.</span><span class="n">UNKNOWN_TOKEN</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">think</span><span class="p">:</span>
+        <span class="n">head</span> <span class="o">+=</span> <span class="n">lxv</span><span class="o">.</span><span class="n">_THINK_NOTE</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">unknown</span><span class="o">=</span><span class="n">lxv</span><span class="o">.</span><span class="n">UNKNOWN_TOKEN</span><span class="p">)</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="n">lxv</span><span class="o">.</span><span class="n">pictograms</span><span class="p">(</span><span class="n">abbreviations</span><span class="p">,</span> <span class="n">section</span><span class="o">=</span><span class="n">section</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">rows</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;no pictogram rows in the German abbreviation table — load &quot;</span>
+                         <span class="s2">&quot;it with lang=&#39;de&#39;&quot;</span><span class="p">)</span>
+    <span class="n">listing</span> <span class="o">=</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">a</span><span class="o">.</span><span class="n">code</span><span class="si">:</span><span class="s2">&lt;16</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">a</span><span class="o">.</span><span class="n">english</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">head</span> <span class="o">+</span> <span class="n">lxv</span><span class="o">.</span><span class="n">_ANNOTATE_TAIL</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+        <span class="n">vocabulary</span><span class="o">=</span><span class="n">listing</span><span class="p">,</span> <span class="n">unknown</span><span class="o">=</span><span class="n">lxv</span><span class="o">.</span><span class="n">UNKNOWN_TOKEN</span><span class="p">,</span> <span class="n">example</span><span class="o">=</span><span class="n">rows</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">code</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_de_notes-native_width">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">native_width</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">,</span> <span class="n">scan</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<div class="fndoc"><p>The width of the scan image embedded in a PDF page, in its own pixels.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 210–215 (6 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">native_width</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">,</span> <span class="n">scan</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The width of the scan image embedded in a PDF page, in its own pixels.&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">fitz</span>
+
+    <span class="k">with</span> <span class="n">fitz</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">))</span> <span class="k">as</span> <span class="n">doc</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">doc</span><span class="p">[</span><span class="n">scan</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">get_images</span><span class="p">(</span><span class="n">full</span><span class="o">=</span><span class="kc">True</span><span class="p">)[</span><span class="mi">0</span><span class="p">][</span><span class="mi">2</span><span class="p">]</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_de_notes-render_native">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">render_native</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">,</span> <span class="n">scan</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span></pre>
+<div class="fndoc"><p>One page at the scan's native resolution (the profile's <code>render = native</code>).</p></div>
+<p class="calls"><b>Called by</b> <code>utils/lexikon_1910/draw_gold_sample.py</code> <code>utils/lexikon_1910/run_r5_german_notes.py</code></p>
+<details><summary>source · lines 218–222 (5 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">render_native</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">,</span> <span class="n">scan</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;One page at the scan&#39;s native resolution (the profile&#39;s ``render = native``).&quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">.</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910</span> <span class="k">as</span> <span class="n">lx</span>
+
+    <span class="k">return</span> <span class="n">lx</span><span class="o">.</span><span class="n">render_page</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">,</span> <span class="n">scan</span><span class="p">,</span> <span class="n">native_width</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">,</span> <span class="n">scan</span><span class="p">))</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_de_notes-strip_height">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">strip_height</span><span class="p">(</span><span class="n">czech_height</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<div class="fndoc"><p>A strip ceiling in this page's pixels holding as much print as
+<code>czech_height</code> holds on the Czech render.</p>
+<p><code>scale</code> is <code>lexikon_1910_image</code>'s: the page's frame over the Czech
+reference frame. The German scans are ~0.75 of the Czech render, so the
+bake-off's 500 px strips become ~375 px here and a strip still holds the
+same number of printed lines.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_r5_german_notes.py</code> <code>utils/lexikon_1910/run_r5_german_notes.py</code></p>
+<details><summary>source · lines 225–234 (10 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">strip_height</span><span class="p">(</span><span class="n">czech_height</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A strip ceiling in this page&#39;s pixels holding as much print as</span>
+<span class="sd">    ``czech_height`` holds on the Czech render.</span>
+
+<span class="sd">    ``scale`` is ``lexikon_1910_image``&#39;s: the page&#39;s frame over the Czech</span>
+<span class="sd">    reference frame. The German scans are ~0.75 of the Czech render, so the</span>
+<span class="sd">    bake-off&#39;s 500 px strips become ~375 px here and a strip still holds the</span>
+<span class="sd">    same number of printed lines.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="nb">max</span><span class="p">(</span><span class="mi">120</span><span class="p">,</span> <span class="nb">round</span><span class="p">(</span><span class="n">czech_height</span> <span class="o">*</span> <span class="n">scale</span><span class="p">))</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_de_notes-empty_notes">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">empty_notes</span><span class="p">(</span><span class="n">stem</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">Notes</span></pre>
+<div class="fndoc"><p>A text layer with nothing in it, for a volume that has none to cut on.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 237–239 (3 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">empty_notes</span><span class="p">(</span><span class="n">stem</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">Notes</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A text layer with nothing in it, for a volume that has none to cut on.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">Notes</span><span class="p">(</span><span class="n">page</span><span class="o">=</span><span class="n">stem</span><span class="p">,</span> <span class="n">top</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">bottom</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">split_x</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_de_notes-cut_page">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">cut_page</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">stem</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">profile</span><span class="p">,</span> <span class="n">carry</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">read_heading</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span></pre>
+<div class="fndoc"><p><code>(segments, report)</code>: the page's sections cut on the image, plus its legend.</p>
+<p>Every heading is labelled by <code>read_heading(crop) -&gt; str</code> through the
+profile's matcher; one it cannot label is reported in
+<code>report.headings_image_unread</code> and the section before it runs on (D-38).
+The postal legend under the divider is appended as a <code>legend</code> segment, as
+the pilot's <code>--notes-legend</code> does. A page whose image shows no divider
+has no apparatus to cut and returns no segments — there is no text layer to
+fall back to.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/lexikon_1910/run_r5_german_notes.py</code></p>
+<details><summary>source · lines 242–262 (21 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">cut_page</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">stem</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">profile</span><span class="p">,</span> <span class="n">carry</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">read_heading</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``(segments, report)``: the page&#39;s sections cut on the image, plus its legend.</span>
+
+<span class="sd">    Every heading is labelled by ``read_heading(crop) -&gt; str`` through the</span>
+<span class="sd">    profile&#39;s matcher; one it cannot label is reported in</span>
+<span class="sd">    ``report.headings_image_unread`` and the section before it runs on (D-38).</span>
+<span class="sd">    The postal legend under the divider is appended as a ``legend`` segment, as</span>
+<span class="sd">    the pilot&#39;s ``--notes-legend`` does. A page whose image shows no divider</span>
+<span class="sd">    has no apparatus to cut and returns no segments — there is no text layer to</span>
+<span class="sd">    fall back to.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">segments</span><span class="p">,</span> <span class="n">report</span> <span class="o">=</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">image_section_segments</span><span class="p">(</span>
+        <span class="n">empty_notes</span><span class="p">(</span><span class="n">stem</span><span class="p">),</span> <span class="kc">None</span><span class="p">,</span> <span class="n">image</span><span class="p">,</span> <span class="n">carry</span><span class="o">=</span><span class="n">carry</span><span class="p">,</span> <span class="n">read_heading</span><span class="o">=</span><span class="n">read_heading</span><span class="p">,</span>
+        <span class="n">find</span><span class="o">=</span><span class="n">profile</span><span class="o">.</span><span class="n">find_heading</span><span class="p">,</span> <span class="n">full_width_headings</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">report</span><span class="o">.</span><span class="n">geometry</span> <span class="o">!=</span> <span class="s2">&quot;image&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[],</span> <span class="n">report</span>
+    <span class="k">if</span> <span class="n">report</span><span class="o">.</span><span class="n">legend</span><span class="p">:</span>
+        <span class="n">segments</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">lxnt</span><span class="o">.</span><span class="n">Segment</span><span class="p">(</span><span class="n">kind</span><span class="o">=</span><span class="s2">&quot;legend&quot;</span><span class="p">,</span> <span class="n">district</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">page</span><span class="o">=</span><span class="n">stem</span><span class="p">,</span>
+                                     <span class="n">region</span><span class="o">=</span><span class="s2">&quot;footer&quot;</span><span class="p">,</span> <span class="n">box</span><span class="o">=</span><span class="n">report</span><span class="o">.</span><span class="n">legend</span><span class="p">,</span>
+                                     <span class="n">order</span><span class="o">=</span><span class="mi">900</span><span class="p">,</span> <span class="n">lines</span><span class="o">=</span><span class="p">[]))</span>
+    <span class="k">return</span> <span class="n">segments</span><span class="p">,</span> <span class="n">report</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_de_notes-last_heading_crop">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">last_heading_crop</span><span class="p">(</span><span class="n">image</span><span class="p">)</span></pre>
+<div class="fndoc"><p>The last section heading on a page, as a crop to read, or <code>None</code>.</p>
+<p>What a section carried onto the next page opened under. Reading order is the
+left column then the right, so the last heading of the right column wins,
+and the left column's last only where the right has none.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/lexikon_1910/run_r5_german_notes.py</code></p>
+<details><summary>source · lines 265–285 (21 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">last_heading_crop</span><span class="p">(</span><span class="n">image</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The last section heading on a page, as a crop to read, or ``None``.</span>
+
+<span class="sd">    What a section carried onto the next page opened under. Reading order is the</span>
+<span class="sd">    left column then the right, so the last heading of the right column wins,</span>
+<span class="sd">    and the left column&#39;s last only where the right has none.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">.</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_image</span> <span class="k">as</span> <span class="n">lximg</span>
+
+    <span class="n">geo</span> <span class="o">=</span> <span class="n">lximg</span><span class="o">.</span><span class="n">detect</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">full_width_headings</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">columns</span> <span class="o">=</span> <span class="n">geo</span><span class="o">.</span><span class="n">apparatus</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">region</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;right&quot;</span><span class="p">,</span> <span class="s2">&quot;left&quot;</span><span class="p">):</span>
+        <span class="n">heads</span> <span class="o">=</span> <span class="p">[</span><span class="n">h</span> <span class="k">for</span> <span class="n">h</span> <span class="ow">in</span> <span class="n">geo</span><span class="o">.</span><span class="n">headings</span> <span class="k">if</span> <span class="n">h</span><span class="o">.</span><span class="n">region</span> <span class="o">==</span> <span class="n">region</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">heads</span> <span class="ow">and</span> <span class="n">region</span> <span class="ow">in</span> <span class="n">columns</span><span class="p">:</span>
+            <span class="n">left</span><span class="p">,</span> <span class="n">_top</span><span class="p">,</span> <span class="n">right</span><span class="p">,</span> <span class="n">_foot</span> <span class="o">=</span> <span class="n">columns</span><span class="p">[</span><span class="n">region</span><span class="p">]</span>
+            <span class="n">h</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">heads</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">h</span><span class="p">:</span> <span class="n">h</span><span class="o">.</span><span class="n">top</span><span class="p">)</span>
+            <span class="n">pad</span> <span class="o">=</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">HEADING_PAD</span>
+            <span class="k">return</span> <span class="n">image</span><span class="o">.</span><span class="n">crop</span><span class="p">((</span><span class="nb">max</span><span class="p">(</span><span class="n">left</span><span class="p">,</span> <span class="n">h</span><span class="o">.</span><span class="n">left</span> <span class="o">-</span> <span class="n">pad</span><span class="p">),</span> <span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">h</span><span class="o">.</span><span class="n">top</span> <span class="o">-</span> <span class="n">pad</span><span class="p">),</span>
+                               <span class="nb">min</span><span class="p">(</span><span class="n">right</span><span class="p">,</span> <span class="n">h</span><span class="o">.</span><span class="n">right</span> <span class="o">+</span> <span class="n">pad</span><span class="p">),</span>
+                               <span class="nb">min</span><span class="p">(</span><span class="n">image</span><span class="o">.</span><span class="n">height</span><span class="p">,</span> <span class="n">h</span><span class="o">.</span><span class="n">bottom</span> <span class="o">+</span> <span class="n">pad</span><span class="p">)))</span>
+    <span class="k">return</span> <span class="kc">None</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_de_notes-header_crop">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">header_crop</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">geo</span><span class="p">)</span></pre>
+<div class="fndoc"><p>The table's column header: the frame's width, the table's top to the
+header's foot. <code>None</code> where the geometry found no header.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/lexikon_1910/run_r5_german_notes.py</code></p>
+<details><summary>source · lines 288–295 (8 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">header_crop</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">geo</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The table&#39;s column header: the frame&#39;s width, the table&#39;s top to the</span>
+<span class="sd">    header&#39;s foot. ``None`` where the geometry found no header.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">geo</span><span class="o">.</span><span class="n">frame</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">geo</span><span class="o">.</span><span class="n">table_top</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">geo</span><span class="o">.</span><span class="n">header_bottom</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="n">geo</span><span class="o">.</span><span class="n">header_bottom</span> <span class="o">-</span> <span class="n">geo</span><span class="o">.</span><span class="n">table_top</span> <span class="o">&lt;</span> <span class="mi">20</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">return</span> <span class="n">image</span><span class="o">.</span><span class="n">crop</span><span class="p">((</span><span class="n">geo</span><span class="o">.</span><span class="n">frame</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">geo</span><span class="o">.</span><span class="n">table_top</span><span class="p">,</span> <span class="n">geo</span><span class="o">.</span><span class="n">frame</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">geo</span><span class="o">.</span><span class="n">header_bottom</span><span class="p">))</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_de_notes-header_check">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">header_check</span><span class="p">(</span><span class="n">lines</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">profile</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span></pre>
+<div class="fndoc"><p>Which of the profile's column labels the header reading contains.</p>
+<p>A record, never a gate: a label the reader missed is reported by name, so a
+page whose columns are not the profile's (a statutory city's 15, D-80) shows
+as many missing labels rather than as a silently mis-assigned table.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_r5_german_notes.py</code> <code>utils/lexikon_1910/run_r5_german_notes.py</code></p>
+<details><summary>source · lines 303–323 (21 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">header_check</span><span class="p">(</span><span class="n">lines</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">profile</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Which of the profile&#39;s column labels the header reading contains.</span>
+
+<span class="sd">    A record, never a gate: a label the reader missed is reported by name, so a</span>
+<span class="sd">    page whose columns are not the profile&#39;s (a statutory city&#39;s 15, D-80) shows</span>
+<span class="sd">    as many missing labels rather than as a silently mis-assigned table.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">rapidfuzz</span><span class="w"> </span><span class="kn">import</span> <span class="n">fuzz</span>
+
+    <span class="n">text</span> <span class="o">=</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">normalise</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">line</span><span class="p">)</span> <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">lines</span><span class="p">))</span>
+    <span class="n">missing</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">column</span> <span class="ow">in</span> <span class="n">profile</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="n">key</span> <span class="o">=</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">normalise</span><span class="p">(</span><span class="n">column</span><span class="o">.</span><span class="n">label</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">key</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="k">if</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">text</span> <span class="ow">or</span> <span class="p">(</span><span class="n">text</span> <span class="ow">and</span> <span class="n">fuzz</span><span class="o">.</span><span class="n">partial_ratio</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">text</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="n">HEADER_MATCH</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="n">missing</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">column</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;columns&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">profile</span><span class="o">.</span><span class="n">columns</span><span class="p">),</span>
+            <span class="s2">&quot;found&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">profile</span><span class="o">.</span><span class="n">columns</span><span class="p">)</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">missing</span><span class="p">),</span>
+            <span class="s2">&quot;missing&quot;</span><span class="p">:</span> <span class="n">missing</span><span class="p">}</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_de_notes-fold">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">fold</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<div class="fndoc"><p>A German name as the curation spells it: umlauts written out, then
+<code>lexikon_1910_notes.normalise</code> (<code>Mühlhausen</code> -&gt; <code>muehlhausen</code>).</p></div>
+<p class="calls"><b>Called by</b> <code>utils/lexikon_1910/lexikon_1910_courts.py</code> <code>utils/lexikon_1910/run_r5_german_notes.py</code></p>
+<details><summary>source · lines 334–337 (4 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span>
+<span class="normal">337</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">fold</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A German name as the curation spells it: umlauts written out, then</span>
+<span class="sd">    ``lexikon_1910_notes.normalise`` (``Mühlhausen`` -&gt; ``muehlhausen``).&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">normalise</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">name</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">translate</span><span class="p">(</span><span class="n">_UMLAUTS</span><span class="p">))</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_de_notes-expand_court_abbreviations">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">expand_court_abbreviations</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<div class="fndoc"><p><code>Böhm. Aicha</code> -&gt; <code>Böhmisch Aicha</code>; a name without an abbreviation is unchanged.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_route_fixes.py</code> <code>utils/lexikon_1910/lexikon_1910_courts.py</code></p>
+<details><summary>source · lines 353–358 (6 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">353</span>
+<span class="normal">354</span>
+<span class="normal">355</span>
+<span class="normal">356</span>
+<span class="normal">357</span>
+<span class="normal">358</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">expand_court_abbreviations</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``Böhm. Aicha`` -&gt; ``Böhmisch Aicha``; a name without an abbreviation is unchanged.&quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">name</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">pattern</span><span class="p">,</span> <span class="n">full</span> <span class="ow">in</span> <span class="n">_COURT_ABBREVIATIONS</span><span class="p">:</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="n">pattern</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="n">full</span><span class="p">,</span> <span class="n">out</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\s+&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">out</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_de_notes-name_forms">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">name_forms</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span></pre>
+<div class="fndoc"><p>Every spelling a German court name may be matched under: as printed and with its
+abbreviations written out, each folded and plainly normalised.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_r5_german_notes.py</code> <code>tests/test_route_fixes.py</code> <code>utils/lexikon_1910/lexikon_1910_editions.py</code> <code>utils/lexikon_1910/run_frozen.py</code></p>
+<details><summary>source · lines 361–367 (7 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">361</span>
+<span class="normal">362</span>
+<span class="normal">363</span>
+<span class="normal">364</span>
+<span class="normal">365</span>
+<span class="normal">366</span>
+<span class="normal">367</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">name_forms</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Every spelling a German court name may be matched under: as printed and with its</span>
+<span class="sd">    abbreviations written out, each folded and plainly normalised.&quot;&quot;&quot;</span>
+    <span class="n">forms</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">variant</span> <span class="ow">in</span> <span class="p">{</span><span class="nb">str</span><span class="p">(</span><span class="n">name</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">),</span> <span class="n">expand_court_abbreviations</span><span class="p">(</span><span class="n">name</span><span class="p">)}:</span>
+        <span class="n">forms</span> <span class="o">|=</span> <span class="p">{</span><span class="n">fold</span><span class="p">(</span><span class="n">variant</span><span class="p">),</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">normalise</span><span class="p">(</span><span class="n">variant</span><span class="p">)}</span>
+    <span class="k">return</span> <span class="p">{</span><span class="n">form</span> <span class="k">for</span> <span class="n">form</span> <span class="ow">in</span> <span class="n">forms</span> <span class="k">if</span> <span class="n">form</span><span class="p">}</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_de_notes-load_court_crosswalk">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">load_court_crosswalk</span><span class="p">(</span><span class="n">curation</span><span class="p">:</span> <span class="n">Path</span><span class="o">=</span><span class="n">CURATION</span><span class="p">,</span> <span class="n">districts</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span><span class="o">=</span><span class="n">DISTRICTS</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span></pre>
+<div class="fndoc"><p><code>{German name form: Czech court name}</code> for every court in the backbone.</p>
+<p>Two sources, and a form both claim for <strong>different</strong> courts is dropped
+rather than given to either — a German name that is two Czech courts is a
+question, not an answer.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_r5_german_notes.py</code> <code>utils/lexikon_1910/run_frozen.py</code> <code>utils/lexikon_1910/run_r5_german_notes.py</code></p>
+<details><summary>source · lines 370–398 (29 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">370</span>
+<span class="normal">371</span>
+<span class="normal">372</span>
+<span class="normal">373</span>
+<span class="normal">374</span>
+<span class="normal">375</span>
+<span class="normal">376</span>
+<span class="normal">377</span>
+<span class="normal">378</span>
+<span class="normal">379</span>
+<span class="normal">380</span>
+<span class="normal">381</span>
+<span class="normal">382</span>
+<span class="normal">383</span>
+<span class="normal">384</span>
+<span class="normal">385</span>
+<span class="normal">386</span>
+<span class="normal">387</span>
+<span class="normal">388</span>
+<span class="normal">389</span>
+<span class="normal">390</span>
+<span class="normal">391</span>
+<span class="normal">392</span>
+<span class="normal">393</span>
+<span class="normal">394</span>
+<span class="normal">395</span>
+<span class="normal">396</span>
+<span class="normal">397</span>
+<span class="normal">398</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">load_court_crosswalk</span><span class="p">(</span><span class="n">curation</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">CURATION</span><span class="p">,</span>
+                         <span class="n">districts</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="n">DISTRICTS</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``{German name form: Czech court name}`` for every court in the backbone.</span>
+
+<span class="sd">    Two sources, and a form both claim for **different** courts is dropped</span>
+<span class="sd">    rather than given to either — a German name that is two Czech courts is a</span>
+<span class="sd">    question, not an answer.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">pairs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">with</span> <span class="n">Path</span><span class="p">(</span><span class="n">curation</span><span class="p">)</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictReader</span><span class="p">(</span><span class="n">fh</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;level&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="s2">&quot;court&quot;</span> <span class="ow">and</span> <span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;cs&quot;</span><span class="p">):</span>
+                <span class="n">pairs</span> <span class="o">+=</span> <span class="p">[(</span><span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;key&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;cs&quot;</span><span class="p">]),</span> <span class="p">(</span><span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;de&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;cs&quot;</span><span class="p">])]</span>
+    <span class="k">if</span> <span class="n">districts</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">Path</span><span class="p">(</span><span class="n">districts</span><span class="p">)</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="k">with</span> <span class="n">Path</span><span class="p">(</span><span class="n">districts</span><span class="p">)</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictReader</span><span class="p">(</span><span class="n">fh</span><span class="p">):</span>
+                <span class="k">if</span> <span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;gerichtsbezirk_cs&quot;</span><span class="p">):</span>
+                    <span class="n">pairs</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;gerichtsbezirk_de&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span>
+                                  <span class="n">row</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_cs&quot;</span><span class="p">]))</span>
+    <span class="n">out</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">clash</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">german</span><span class="p">,</span> <span class="n">czech</span> <span class="ow">in</span> <span class="n">pairs</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">form</span> <span class="ow">in</span> <span class="n">name_forms</span><span class="p">(</span><span class="n">german</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">form</span> <span class="ow">in</span> <span class="n">out</span> <span class="ow">and</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">normalise</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="n">form</span><span class="p">])</span> <span class="o">!=</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">normalise</span><span class="p">(</span><span class="n">czech</span><span class="p">):</span>
+                <span class="n">clash</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">form</span><span class="p">)</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">form</span><span class="p">,</span> <span class="n">czech</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">form</span> <span class="ow">in</span> <span class="n">clash</span><span class="p">:</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">form</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_de_notes-court_name">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">court_name</span><span class="p">(</span><span class="n">german</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">crosswalk</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span></pre>
+<div class="fndoc"><p><code>(Czech court name, how)</code> for a court named in a German heading.</p>
+<p><code>how</code> is <code>exact</code>, <code>prefix</code>, <code>fuzzy</code> or <code>unmapped</code>. <code>prefix</code> is a
+heading that prints a court's name short (<code>Gablonz</code> for <em>Gablonz an der
+Neiße</em>): the read begins exactly one court's name, by at least
+<code>PREFIX_MIN</code> letters. An unmapped court returns <code>""</code> and the caller
+keeps the German name: its entries then share no key with the gold and are
+reported, never guessed onto a neighbour.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_r5_german_notes.py</code> <code>utils/lexikon_1910/run_frozen.py</code> <code>utils/lexikon_1910/run_r5_german_notes.py</code></p>
+<details><summary>source · lines 411–443 (33 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">411</span>
+<span class="normal">412</span>
+<span class="normal">413</span>
+<span class="normal">414</span>
+<span class="normal">415</span>
+<span class="normal">416</span>
+<span class="normal">417</span>
+<span class="normal">418</span>
+<span class="normal">419</span>
+<span class="normal">420</span>
+<span class="normal">421</span>
+<span class="normal">422</span>
+<span class="normal">423</span>
+<span class="normal">424</span>
+<span class="normal">425</span>
+<span class="normal">426</span>
+<span class="normal">427</span>
+<span class="normal">428</span>
+<span class="normal">429</span>
+<span class="normal">430</span>
+<span class="normal">431</span>
+<span class="normal">432</span>
+<span class="normal">433</span>
+<span class="normal">434</span>
+<span class="normal">435</span>
+<span class="normal">436</span>
+<span class="normal">437</span>
+<span class="normal">438</span>
+<span class="normal">439</span>
+<span class="normal">440</span>
+<span class="normal">441</span>
+<span class="normal">442</span>
+<span class="normal">443</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">court_name</span><span class="p">(</span><span class="n">german</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">crosswalk</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``(Czech court name, how)`` for a court named in a German heading.</span>
+
+<span class="sd">    ``how`` is ``exact``, ``prefix``, ``fuzzy`` or ``unmapped``. ``prefix`` is a</span>
+<span class="sd">    heading that prints a court&#39;s name short (``Gablonz`` for *Gablonz an der</span>
+<span class="sd">    Neiße*): the read begins exactly one court&#39;s name, by at least</span>
+<span class="sd">    :data:`PREFIX_MIN` letters. An unmapped court returns ``&quot;&quot;`` and the caller</span>
+<span class="sd">    keeps the German name: its entries then share no key with the gold and are</span>
+<span class="sd">    reported, never guessed onto a neighbour.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">rapidfuzz</span><span class="w"> </span><span class="kn">import</span> <span class="n">fuzz</span>
+
+    <span class="k">for</span> <span class="n">form</span> <span class="ow">in</span> <span class="n">name_forms</span><span class="p">(</span><span class="n">german</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">form</span> <span class="ow">in</span> <span class="n">crosswalk</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">crosswalk</span><span class="p">[</span><span class="n">form</span><span class="p">],</span> <span class="s2">&quot;exact&quot;</span>
+    <span class="n">key</span> <span class="o">=</span> <span class="n">fold</span><span class="p">(</span><span class="n">expand_court_abbreviations</span><span class="p">(</span><span class="n">german</span><span class="p">))</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">key</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">3</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;unmapped&quot;</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">key</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="n">PREFIX_MIN</span><span class="p">:</span>
+        <span class="n">begun</span> <span class="o">=</span> <span class="p">{</span><span class="n">lxnt</span><span class="o">.</span><span class="n">normalise</span><span class="p">(</span><span class="n">czech</span><span class="p">)</span> <span class="k">for</span> <span class="n">form</span><span class="p">,</span> <span class="n">czech</span> <span class="ow">in</span> <span class="n">crosswalk</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+                 <span class="k">if</span> <span class="n">form</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">key</span><span class="p">)}</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">begun</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="k">return</span> <span class="nb">next</span><span class="p">(</span><span class="n">czech</span> <span class="k">for</span> <span class="n">form</span><span class="p">,</span> <span class="n">czech</span> <span class="ow">in</span> <span class="n">crosswalk</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+                        <span class="k">if</span> <span class="n">form</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">key</span><span class="p">)),</span> <span class="s2">&quot;prefix&quot;</span>
+    <span class="n">best</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">form</span><span class="p">,</span> <span class="n">czech</span> <span class="ow">in</span> <span class="n">crosswalk</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">score</span> <span class="o">=</span> <span class="n">fuzz</span><span class="o">.</span><span class="n">ratio</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">form</span><span class="p">)</span>
+        <span class="n">best</span><span class="p">[</span><span class="n">czech</span><span class="p">]</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">best</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">czech</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">),</span> <span class="n">score</span><span class="p">)</span>
+    <span class="n">ranked</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">best</span><span class="o">.</span><span class="n">items</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">kv</span><span class="p">:</span> <span class="o">-</span><span class="n">kv</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+    <span class="k">if</span> <span class="n">ranked</span> <span class="ow">and</span> <span class="n">ranked</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">COURT_FUZZY</span> <span class="ow">and</span> <span class="p">(</span>
+            <span class="nb">len</span><span class="p">(</span><span class="n">ranked</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span> <span class="ow">or</span> <span class="n">ranked</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">ranked</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">COURT_MARGIN</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">ranked</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">],</span> <span class="s2">&quot;fuzzy&quot;</span>
+    <span class="k">return</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;unmapped&quot;</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_de_notes-relabel_sections">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">relabel_sections</span><span class="p">(</span><span class="n">sections</span><span class="p">,</span> <span class="n">crosswalk</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span></pre>
+<div class="fndoc"><p>Put each section under its Czech court name; return what was done.</p>
+<p>The decoder keys an entry on <code>normalise(section.district)</code>, and the gold
+sheets key it on the Czech court (<code>soudní okres Trutnov</code> -&gt; <code>trutnov</code>),
+so this is the step that makes a German entry and a gold entry the same
+entry. The German name read off the heading is kept in the returned rows.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_r5_german_notes.py</code> <code>utils/lexikon_1910/run_r5_german_notes.py</code></p>
+<details><summary>source · lines 446–461 (16 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">446</span>
+<span class="normal">447</span>
+<span class="normal">448</span>
+<span class="normal">449</span>
+<span class="normal">450</span>
+<span class="normal">451</span>
+<span class="normal">452</span>
+<span class="normal">453</span>
+<span class="normal">454</span>
+<span class="normal">455</span>
+<span class="normal">456</span>
+<span class="normal">457</span>
+<span class="normal">458</span>
+<span class="normal">459</span>
+<span class="normal">460</span>
+<span class="normal">461</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">relabel_sections</span><span class="p">(</span><span class="n">sections</span><span class="p">,</span> <span class="n">crosswalk</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Put each section under its Czech court name; return what was done.</span>
+
+<span class="sd">    The decoder keys an entry on ``normalise(section.district)``, and the gold</span>
+<span class="sd">    sheets key it on the Czech court (``soudní okres Trutnov`` -&gt; ``trutnov``),</span>
+<span class="sd">    so this is the step that makes a German entry and a gold entry the same</span>
+<span class="sd">    entry. The German name read off the heading is kept in the returned rows.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">log</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">section</span> <span class="ow">in</span> <span class="n">sections</span><span class="p">:</span>
+        <span class="n">czech</span><span class="p">,</span> <span class="n">how</span> <span class="o">=</span> <span class="n">court_name</span><span class="p">(</span><span class="n">section</span><span class="o">.</span><span class="n">district</span><span class="p">,</span> <span class="n">crosswalk</span><span class="p">)</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;page&quot;</span><span class="p">:</span> <span class="n">section</span><span class="o">.</span><span class="n">page</span><span class="p">,</span> <span class="s2">&quot;kind&quot;</span><span class="p">:</span> <span class="n">section</span><span class="o">.</span><span class="n">kind</span><span class="p">,</span>
+                    <span class="s2">&quot;court_de&quot;</span><span class="p">:</span> <span class="n">section</span><span class="o">.</span><span class="n">district</span><span class="p">,</span> <span class="s2">&quot;court_cs&quot;</span><span class="p">:</span> <span class="n">czech</span><span class="p">,</span> <span class="s2">&quot;how&quot;</span><span class="p">:</span> <span class="n">how</span><span class="p">})</span>
+        <span class="k">if</span> <span class="n">czech</span><span class="p">:</span>
+            <span class="n">section</span><span class="o">.</span><span class="n">district</span> <span class="o">=</span> <span class="n">czech</span>
+    <span class="k">return</span> <span class="n">log</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-lexikon_1910-lexikon_1910_de_notes-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-lexikon_1910_de_notes-CURATION"><pre class="sig">CURATION<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;reference&#39;</span> <span class="o">/</span> <span class="s1">&#39;places&#39;</span> <span class="o">/</span> <span class="s1">&#39;district_cs_curation.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-lexikon_1910_de_notes-DISTRICTS"><pre class="sig">DISTRICTS<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;data&#39;</span> <span class="o">/</span> <span class="s1">&#39;final&#39;</span> <span class="o">/</span> <span class="s1">&#39;geo&#39;</span> <span class="o">/</span> <span class="s1">&#39;districts_1910.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-lexikon_1910_de_notes-SECTION_HEADS_DE"><pre class="sig">SECTION_HEADS_DE<span class="kind">dict · 2 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;offices&#39;</span><span class="p">:</span> <span class="n">_OFFICES_HEAD_DE</span><span class="p">,</span> <span class="s1">&#39;parts&#39;</span><span class="p">:</span> <span class="n">_PARTS_HEAD_DE</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-lexikon_1910_de_notes-HEADER_SYSTEM_DE"><pre class="sig">HEADER_SYSTEM_DE<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="sa">f</span><span class="s1">&#39;You are transcribing the column header of a statistical table in </span><span class="si">{</span><span class="n">_VOLUME</span><span class="si">}</span><span class="se">\n\n</span><span class="s1">The image shows only the header: the labels printed above the columns, some of them spanning several columns, some printed sideways. Return every printed label as one string, each label once, left to right and top to bottom. Do not describe the layout and do not add labels that are not printed.</span><span class="se">\n\n</span><span class="si">{</span><span class="n">_RULES</span><span class="si">}</span><span class="s1">&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-lexikon_1910_de_notes-HEADER_MATCH"><pre class="sig">HEADER_MATCH<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">85</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-lexikon_1910_de_notes-COURT_FUZZY"><pre class="sig">COURT_FUZZY<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">90</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-lexikon_1910_de_notes-COURT_MARGIN"><pre class="sig">COURT_MARGIN<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">5</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-lexikon_1910_de_notes-PREFIX_MIN"><pre class="sig">PREFIX_MIN<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">6</span>
+</pre></div>
+</details></div>
+<h2>Used by</h2><p><code>utils/lexikon_1910/draw_gold_sample.py</code> <code>utils/lexikon_1910/lexikon_1910_courts.py</code> <code>utils/lexikon_1910/run_frozen.py</code> <code>utils/lexikon_1910/run_r5_german_notes.py</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/lexikon_1910/lexikon_1910_de_notes.py · 461 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span>
+<span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span>
+<span class="normal">337</span>
+<span class="normal">338</span>
+<span class="normal">339</span>
+<span class="normal">340</span>
+<span class="normal">341</span>
+<span class="normal">342</span>
+<span class="normal">343</span>
+<span class="normal">344</span>
+<span class="normal">345</span>
+<span class="normal">346</span>
+<span class="normal">347</span>
+<span class="normal">348</span>
+<span class="normal">349</span>
+<span class="normal">350</span>
+<span class="normal">351</span>
+<span class="normal">352</span>
+<span class="normal">353</span>
+<span class="normal">354</span>
+<span class="normal">355</span>
+<span class="normal">356</span>
+<span class="normal">357</span>
+<span class="normal">358</span>
+<span class="normal">359</span>
+<span class="normal">360</span>
+<span class="normal">361</span>
+<span class="normal">362</span>
+<span class="normal">363</span>
+<span class="normal">364</span>
+<span class="normal">365</span>
+<span class="normal">366</span>
+<span class="normal">367</span>
+<span class="normal">368</span>
+<span class="normal">369</span>
+<span class="normal">370</span>
+<span class="normal">371</span>
+<span class="normal">372</span>
+<span class="normal">373</span>
+<span class="normal">374</span>
+<span class="normal">375</span>
+<span class="normal">376</span>
+<span class="normal">377</span>
+<span class="normal">378</span>
+<span class="normal">379</span>
+<span class="normal">380</span>
+<span class="normal">381</span>
+<span class="normal">382</span>
+<span class="normal">383</span>
+<span class="normal">384</span>
+<span class="normal">385</span>
+<span class="normal">386</span>
+<span class="normal">387</span>
+<span class="normal">388</span>
+<span class="normal">389</span>
+<span class="normal">390</span>
+<span class="normal">391</span>
+<span class="normal">392</span>
+<span class="normal">393</span>
+<span class="normal">394</span>
+<span class="normal">395</span>
+<span class="normal">396</span>
+<span class="normal">397</span>
+<span class="normal">398</span>
+<span class="normal">399</span>
+<span class="normal">400</span>
+<span class="normal">401</span>
+<span class="normal">402</span>
+<span class="normal">403</span>
+<span class="normal">404</span>
+<span class="normal">405</span>
+<span class="normal">406</span>
+<span class="normal">407</span>
+<span class="normal">408</span>
+<span class="normal">409</span>
+<span class="normal">410</span>
+<span class="normal">411</span>
+<span class="normal">412</span>
+<span class="normal">413</span>
+<span class="normal">414</span>
+<span class="normal">415</span>
+<span class="normal">416</span>
+<span class="normal">417</span>
+<span class="normal">418</span>
+<span class="normal">419</span>
+<span class="normal">420</span>
+<span class="normal">421</span>
+<span class="normal">422</span>
+<span class="normal">423</span>
+<span class="normal">424</span>
+<span class="normal">425</span>
+<span class="normal">426</span>
+<span class="normal">427</span>
+<span class="normal">428</span>
+<span class="normal">429</span>
+<span class="normal">430</span>
+<span class="normal">431</span>
+<span class="normal">432</span>
+<span class="normal">433</span>
+<span class="normal">434</span>
+<span class="normal">435</span>
+<span class="normal">436</span>
+<span class="normal">437</span>
+<span class="normal">438</span>
+<span class="normal">439</span>
+<span class="normal">440</span>
+<span class="normal">441</span>
+<span class="normal">442</span>
+<span class="normal">443</span>
+<span class="normal">444</span>
+<span class="normal">445</span>
+<span class="normal">446</span>
+<span class="normal">447</span>
+<span class="normal">448</span>
+<span class="normal">449</span>
+<span class="normal">450</span>
+<span class="normal">451</span>
+<span class="normal">452</span>
+<span class="normal">453</span>
+<span class="normal">454</span>
+<span class="normal">455</span>
+<span class="normal">456</span>
+<span class="normal">457</span>
+<span class="normal">458</span>
+<span class="normal">459</span>
+<span class="normal">460</span>
+<span class="normal">461</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;The German edition&#39;s apparatus, read from the image alone (D-92).</span>
+
+<span class="sd">The *Spezialortsrepertorium von Böhmen* (Wien 1915) is the Czech volume&#39;s twin</span>
+<span class="sd">and prints the same three documents in the same layout — the table, the two</span>
+<span class="sd">apparatus columns under it (``Ortsbestandteile im Gerichtsbezirk X:`` and</span>
+<span class="sd">``Ämter, Anstalten usw. im Gerichtsbezirk X:``), and the postal and railway</span>
+<span class="sd">legend across the foot. What it lacks is a text layer fit to cut on: the UBW</span>
+<span class="sd">scan&#39;s OCR words are too poor to find a heading in (D-67), so every boundary has</span>
+<span class="sd">to come from the pixels and every label from a reading of the heading itself.</span>
+
+<span class="sd">This module is the German half of what channel G of</span>
+<span class="sd">``run_lexikon_1910_pilot.py`` does for the Czech volume, built from the same</span>
+<span class="sd">parts rather than beside them:</span>
+
+<span class="sd">* **where** a section starts is ``lexikon_1910_image`` (the geometry measured on</span>
+<span class="sd">  four volumes, D-80), through ``lexikon_1910_notes.image_section_segments`` with</span>
+<span class="sd">  an empty text layer, so every heading the image finds is cut out and read;</span>
+<span class="sd">* **which** section it opens is the German profile&#39;s heading matcher</span>
+<span class="sd">  (``volumes/boehmen_de.toml``, ``VolumeProfile.find_heading``) applied to that</span>
+<span class="sd">  reading — the same rule as the Czech one, with this volume&#39;s words;</span>
+<span class="sd">* **what the reader is told** is the Czech prompt with the German volume&#39;s own</span>
+<span class="sd">  heading words, abbreviations and legend, and the closed token list of the</span>
+<span class="sd">  ``de`` pictogram rows (80 symbols, read off the German plate, scan 0012);</span>
+<span class="sd">* **which court** a German heading names is answered by the project&#39;s court</span>
+<span class="sd">  crosswalk (``reference/places/district_cs_curation.csv``), so a German entry is</span>
+<span class="sd">  keyed by the same court slug as the Czech one and the German gold sheets</span>
+<span class="sd">  (which file every section under ``soudní okres X``) — never by page (D-67).</span>
+
+<span class="sd">It also reads the **column header** once a page and checks it against the</span>
+<span class="sd">profile&#39;s seventeen labels, which D-80 and D-83 left as the German reader&#39;s job:</span>
+<span class="sd">the table geometry is found in the image, and only a reading says the columns</span>
+<span class="sd">are the ones the profile expects.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;0.3.0&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">csv</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">.</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_notes</span> <span class="k">as</span> <span class="n">lxnt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_vision</span> <span class="k">as</span> <span class="n">lxv</span>
+
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+<span class="n">CURATION</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;places&quot;</span> <span class="o">/</span> <span class="s2">&quot;district_cs_curation.csv&quot;</span>
+<span class="c1">#: The built district backbone, a second source of German court spellings</span>
+<span class="c1">#: (``Reichenau an der Kněžna`` where the curation has ``… Kneszna``). Optional:</span>
+<span class="c1">#: the crosswalk works from the curation alone when it is not built.</span>
+<span class="n">DISTRICTS</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;data&quot;</span> <span class="o">/</span> <span class="s2">&quot;final&quot;</span> <span class="o">/</span> <span class="s2">&quot;geo&quot;</span> <span class="o">/</span> <span class="s2">&quot;districts_1910.csv&quot;</span>
+
+
+<span class="c1"># --------------------------------------------------------------------------- #</span>
+<span class="c1"># The prompts</span>
+<span class="c1"># --------------------------------------------------------------------------- #</span>
+
+<span class="n">_VOLUME</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;the 1910 Austrian census volume *Spezialortsrepertorium von Böhmen* &quot;</span>
+           <span class="s2">&quot;(Special Place Register for Bohemia), printed in Vienna in 1915, in &quot;</span>
+           <span class="s2">&quot;German. Place names are often printed in German and Czech together &quot;</span>
+           <span class="s1">&#39;(&quot;Altenbuch, Staré Buky&quot;).&#39;</span><span class="p">)</span>
+
+<span class="n">_RULES</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span><span class="se">\</span>
+<span class="s2">Rules:</span>
+<span class="s2">- Transcribe exactly what is printed. Do not translate, expand an abbreviation, </span><span class="se">\</span>
+<span class="s2">correct a spelling, or reorder anything.</span>
+<span class="s2">- Keep the line breaks of the print. Do not join lines and do not reflow the text. </span><span class="se">\</span>
+<span class="s2">A word broken across two lines stays broken, with its hyphen.</span>
+<span class="s2">- If a character is genuinely illegible, write &quot;?&quot; in its place. Do not guess a </span><span class="se">\</span>
+<span class="s2">plausible letter or digit.</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+<span class="n">_SHARED_HEAD_DE</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span><span class="se">\</span>
+<span class="s2">You are transcribing the small print that runs *below* a statistical table in </span><span class="se">\</span>
+<span class="si">{</span><span class="n">_VOLUME</span><span class="si">}</span>
+
+<span class="s2">The image shows one region of that footnote apparatus. It contains, in printed </span><span class="se">\</span>
+<span class="s2">order, some mixture of:</span>
+
+<span class="s2">* section headings — &quot;Ortsbestandteile im Gerichtsbezirk X:&quot; and &quot;Ämter, </span><span class="se">\</span>
+<span class="s2">Anstalten usw. im Gerichtsbezirk X:&quot;</span>
+<span class="s2">* entries keyed by number — &quot;11, 2) ...&quot;, &quot;3, —) ...&quot;</span>
+<span class="s2">* house-population pairs for the parts of a settlement — &quot;58—386&quot;</span>
+<span class="s2">* altitudes above sea level — &quot;425 m&quot;</span>
+<span class="s2">* a numbered postal and railway legend introduced by two symbols and &quot;zum GB. </span><span class="se">\</span>
+<span class="s2">X:&quot; — &quot;1) Trautenau. 2) Parschnitz. ...&quot;</span>
+<span class="s2">* printed pictograms standing for an office, a school, a doctor, and so on</span>
+
+<span class="s2">Return every printed line as one string, in printed order, top to bottom.</span>
+
+<span class="si">{</span><span class="n">_RULES</span><span class="si">}</span><span class="se">\</span>
+<span class="s2">- Keep every number exactly as printed, including the key numbers and their </span><span class="se">\</span>
+<span class="s2">closing parenthesis, and the raised (superscript) key figures of the legend.</span>
+<span class="s2">- Write the dash between a house count and a population count as an em dash: 58—386.</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+<span class="n">_OFFICES_HEAD_DE</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span><span class="se">\</span>
+<span class="s2">You are transcribing one section of the small print below a statistical table in </span><span class="se">\</span>
+<span class="si">{</span><span class="n">_VOLUME</span><span class="si">}</span>
+
+<span class="s2">The section is headed &quot;Ämter, Anstalten usw. im Gerichtsbezirk X:&quot; — the </span><span class="se">\</span>
+<span class="s2">offices, institutions and so on of every municipality in one judicial district. </span><span class="se">\</span>
+<span class="s2">The heading may or may not be in this image; if the image starts mid-section, </span><span class="se">\</span>
+<span class="s2">start with the first line you see.</span>
+
+<span class="s2">Each entry begins with its key: the municipality&#39;s number, a comma, the </span><span class="se">\</span>
+<span class="s2">settlement&#39;s number or a dash, and a closing parenthesis — &quot;1, 1)&quot;, &quot;23, 2)&quot;, </span><span class="se">\</span>
+<span class="s2">&quot;27, —)&quot;. A later entry for the same municipality opens with the settlement </span><span class="se">\</span>
+<span class="s2">number alone: &quot;— 2)&quot;. A named part of a settlement may open a run inside an </span><span class="se">\</span>
+<span class="s2">entry: &quot;Karthaus: ...&quot;.</span>
+
+<span class="s2">After the key comes a list separated by commas, mixing:</span>
+
+<span class="s2">* printed pictograms — a school, a doctor, a post horn, a bell, a fire ladder</span>
+<span class="s2">* ordinary abbreviations — &quot;BG.&quot;, &quot;Sta.&quot;, &quot;Notar&quot;, &quot;2 Adv.&quot;, &quot;Gymn.&quot;, &quot;Bsch.&quot;, </span><span class="se">\</span>
+<span class="s2">&quot;gw. Fortbsch.&quot;, &quot;BezVertrg.&quot;, &quot;öff.&quot;</span>
+<span class="s2">* Roman numerals, which give the number of school classes — &quot;II&quot;, &quot;III&quot;, &quot;VI&quot;</span>
+<span class="s2">* a count printed in front of an item — &quot;2 Adv.&quot;, &quot;3 Bsch.&quot;</span>
+<span class="s2">* an altitude above sea level — &quot;604 m&quot;, &quot;ca. 245 m&quot;</span>
+<span class="s2">* single capital letters naming registered cooperatives, set in the list among </span><span class="se">\</span>
+<span class="s2">the other items — &quot;R&quot;, &quot;K&quot;, &quot;B&quot;, &quot;G&quot;, &quot;L&quot;, &quot;S&quot;, &quot;Sch&quot; — sometimes with a small </span><span class="se">\</span>
+<span class="s2">&quot;d&quot; or &quot;b&quot; after them</span>
+
+<span class="s2">Return every printed line as one string, in printed order, top to bottom.</span>
+
+<span class="si">{</span><span class="n">_RULES</span><span class="si">}</span><span class="se">\</span>
+<span class="s2">- Keep every entry key exactly as printed, including its comma and its closing </span><span class="se">\</span>
+<span class="s2">parenthesis.</span>
+<span class="s2">- Keep every count, every Roman numeral and every cooperative letter. They are </span><span class="se">\</span>
+<span class="s2">the number of schools, the number of classes, and the kind of cooperative — not </span><span class="se">\</span>
+<span class="s2">decoration.</span>
+<span class="s2">- Transcribe the whole image. Do not stop early, and do not summarise: the last </span><span class="se">\</span>
+<span class="s2">printed line in the image must appear in your reply.</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+<span class="n">_PARTS_HEAD_DE</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span><span class="se">\</span>
+<span class="s2">You are transcribing one section of the small print below a statistical table in </span><span class="se">\</span>
+<span class="si">{</span><span class="n">_VOLUME</span><span class="si">}</span>
+
+<span class="s2">The section is headed &quot;Ortsbestandteile im Gerichtsbezirk X:&quot; — the named parts </span><span class="se">\</span>
+<span class="s2">each settlement is made of. The heading may or may not be in this image; if the </span><span class="se">\</span>
+<span class="s2">image starts mid-section, start with the first line you see.</span>
+
+<span class="s2">Each entry begins with its key — &quot;2, —)&quot;, &quot;5, 2)&quot; — and then lists parts. Each </span><span class="se">\</span>
+<span class="s2">part is a place name, often German and Czech together (&quot;Mittelaltenbuch, </span><span class="se">\</span>
+<span class="s2">Prostřední Staré Buky&quot;), then a printed pictogram for what kind of place it is, </span><span class="se">\</span>
+<span class="s2">then its houses and its population joined by a dash: &quot;61—246&quot;.</span>
+
+<span class="s2">Return every printed line as one string, in printed order, top to bottom.</span>
+
+<span class="si">{</span><span class="n">_RULES</span><span class="si">}</span><span class="se">\</span>
+<span class="s2">- Keep every entry key exactly as printed, including its comma and its closing </span><span class="se">\</span>
+<span class="s2">parenthesis.</span>
+<span class="s2">- Write the dash between a house count and a population count as an em dash: </span><span class="se">\</span>
+<span class="s2">58—386. Never drop either number and never swap them.</span>
+<span class="s2">- Transcribe the whole image. Do not stop early, and do not summarise: the last </span><span class="se">\</span>
+<span class="s2">printed line in the image must appear in your reply.</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+<span class="n">SECTION_HEADS_DE</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;offices&quot;</span><span class="p">:</span> <span class="n">_OFFICES_HEAD_DE</span><span class="p">,</span> <span class="s2">&quot;parts&quot;</span><span class="p">:</span> <span class="n">_PARTS_HEAD_DE</span><span class="p">}</span>
+
+<span class="c1">#: The column header is read on its own, once a page. The labels are printed</span>
+<span class="c1">#: across several header rows and spanned by group labels, so the reply is asked</span>
+<span class="c1">#: for in the only order a reader can give without a layout model: as printed</span>
+<span class="c1">#: lines, each label once.</span>
+<span class="n">HEADER_SYSTEM_DE</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span><span class="se">\</span>
+<span class="s2">You are transcribing the column header of a statistical table in </span><span class="si">{</span><span class="n">_VOLUME</span><span class="si">}</span>
+
+<span class="s2">The image shows only the header: the labels printed above the columns, some of </span><span class="se">\</span>
+<span class="s2">them spanning several columns, some printed sideways. Return every printed label </span><span class="se">\</span>
+<span class="s2">as one string, each label once, left to right and top to bottom. Do not describe </span><span class="se">\</span>
+<span class="s2">the layout and do not add labels that are not printed.</span>
+
+<span class="si">{</span><span class="n">_RULES</span><span class="si">}</span><span class="s2">&quot;&quot;&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">build_system_de</span><span class="p">(</span><span class="n">abbreviations</span><span class="p">,</span> <span class="n">section</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">atlas</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+                    <span class="n">think</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">contrast</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The German apparatus prompt: the Czech builder&#39;s, with this volume&#39;s words.</span>
+
+<span class="sd">    Everything after the head — the atlas note (the contrast note when a</span>
+<span class="sd">    contrast sheet follows the key), the note for a reader that thinks, and the</span>
+<span class="sd">    closed token list — is ``lexikon_1910_vision``&#39;s own text,</span>
+<span class="sd">    so the two editions are told the same things about the symbols and differ</span>
+<span class="sd">    only in what their volume prints. ``abbreviations`` must be the ``de`` rows:</span>
+<span class="sd">    the token list is read off them, and the German plate has no</span>
+<span class="sd">    ``[cooperative]``, ``[port]`` or ``[rc-parish-exp]``.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">head</span> <span class="o">=</span> <span class="n">SECTION_HEADS_DE</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">section</span><span class="p">,</span> <span class="n">_SHARED_HEAD_DE</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">contrast</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">atlas</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;a contrast sheet is read against the key: it needs atlas=True&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">atlas</span><span class="p">:</span>
+        <span class="n">head</span> <span class="o">+=</span> <span class="p">(</span><span class="n">lxv</span><span class="o">.</span><span class="n">_CONTRAST_NOTE</span> <span class="k">if</span> <span class="n">contrast</span> <span class="k">else</span> <span class="n">lxv</span><span class="o">.</span><span class="n">_ATLAS_NOTE</span><span class="p">)</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+            <span class="n">unknown</span><span class="o">=</span><span class="n">lxv</span><span class="o">.</span><span class="n">UNKNOWN_TOKEN</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">think</span><span class="p">:</span>
+        <span class="n">head</span> <span class="o">+=</span> <span class="n">lxv</span><span class="o">.</span><span class="n">_THINK_NOTE</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">unknown</span><span class="o">=</span><span class="n">lxv</span><span class="o">.</span><span class="n">UNKNOWN_TOKEN</span><span class="p">)</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="n">lxv</span><span class="o">.</span><span class="n">pictograms</span><span class="p">(</span><span class="n">abbreviations</span><span class="p">,</span> <span class="n">section</span><span class="o">=</span><span class="n">section</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">rows</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;no pictogram rows in the German abbreviation table — load &quot;</span>
+                         <span class="s2">&quot;it with lang=&#39;de&#39;&quot;</span><span class="p">)</span>
+    <span class="n">listing</span> <span class="o">=</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">a</span><span class="o">.</span><span class="n">code</span><span class="si">:</span><span class="s2">&lt;16</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">a</span><span class="o">.</span><span class="n">english</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">head</span> <span class="o">+</span> <span class="n">lxv</span><span class="o">.</span><span class="n">_ANNOTATE_TAIL</span><span class="o">.</span><span class="n">format</span><span class="p">(</span>
+        <span class="n">vocabulary</span><span class="o">=</span><span class="n">listing</span><span class="p">,</span> <span class="n">unknown</span><span class="o">=</span><span class="n">lxv</span><span class="o">.</span><span class="n">UNKNOWN_TOKEN</span><span class="p">,</span> <span class="n">example</span><span class="o">=</span><span class="n">rows</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">code</span><span class="p">)</span>
+
+
+<span class="c1"># --------------------------------------------------------------------------- #</span>
+<span class="c1"># The page</span>
+<span class="c1"># --------------------------------------------------------------------------- #</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">native_width</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">,</span> <span class="n">scan</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The width of the scan image embedded in a PDF page, in its own pixels.&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">fitz</span>
+
+    <span class="k">with</span> <span class="n">fitz</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">))</span> <span class="k">as</span> <span class="n">doc</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">doc</span><span class="p">[</span><span class="n">scan</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">get_images</span><span class="p">(</span><span class="n">full</span><span class="o">=</span><span class="kc">True</span><span class="p">)[</span><span class="mi">0</span><span class="p">][</span><span class="mi">2</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">render_native</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">,</span> <span class="n">scan</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;One page at the scan&#39;s native resolution (the profile&#39;s ``render = native``).&quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">.</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910</span> <span class="k">as</span> <span class="n">lx</span>
+
+    <span class="k">return</span> <span class="n">lx</span><span class="o">.</span><span class="n">render_page</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">,</span> <span class="n">scan</span><span class="p">,</span> <span class="n">native_width</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">,</span> <span class="n">scan</span><span class="p">))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">strip_height</span><span class="p">(</span><span class="n">czech_height</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">scale</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A strip ceiling in this page&#39;s pixels holding as much print as</span>
+<span class="sd">    ``czech_height`` holds on the Czech render.</span>
+
+<span class="sd">    ``scale`` is ``lexikon_1910_image``&#39;s: the page&#39;s frame over the Czech</span>
+<span class="sd">    reference frame. The German scans are ~0.75 of the Czech render, so the</span>
+<span class="sd">    bake-off&#39;s 500 px strips become ~375 px here and a strip still holds the</span>
+<span class="sd">    same number of printed lines.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="nb">max</span><span class="p">(</span><span class="mi">120</span><span class="p">,</span> <span class="nb">round</span><span class="p">(</span><span class="n">czech_height</span> <span class="o">*</span> <span class="n">scale</span><span class="p">))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">empty_notes</span><span class="p">(</span><span class="n">stem</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">Notes</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A text layer with nothing in it, for a volume that has none to cut on.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">Notes</span><span class="p">(</span><span class="n">page</span><span class="o">=</span><span class="n">stem</span><span class="p">,</span> <span class="n">top</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">bottom</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">split_x</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">cut_page</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">stem</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">profile</span><span class="p">,</span> <span class="n">carry</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">read_heading</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``(segments, report)``: the page&#39;s sections cut on the image, plus its legend.</span>
+
+<span class="sd">    Every heading is labelled by ``read_heading(crop) -&gt; str`` through the</span>
+<span class="sd">    profile&#39;s matcher; one it cannot label is reported in</span>
+<span class="sd">    ``report.headings_image_unread`` and the section before it runs on (D-38).</span>
+<span class="sd">    The postal legend under the divider is appended as a ``legend`` segment, as</span>
+<span class="sd">    the pilot&#39;s ``--notes-legend`` does. A page whose image shows no divider</span>
+<span class="sd">    has no apparatus to cut and returns no segments — there is no text layer to</span>
+<span class="sd">    fall back to.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">segments</span><span class="p">,</span> <span class="n">report</span> <span class="o">=</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">image_section_segments</span><span class="p">(</span>
+        <span class="n">empty_notes</span><span class="p">(</span><span class="n">stem</span><span class="p">),</span> <span class="kc">None</span><span class="p">,</span> <span class="n">image</span><span class="p">,</span> <span class="n">carry</span><span class="o">=</span><span class="n">carry</span><span class="p">,</span> <span class="n">read_heading</span><span class="o">=</span><span class="n">read_heading</span><span class="p">,</span>
+        <span class="n">find</span><span class="o">=</span><span class="n">profile</span><span class="o">.</span><span class="n">find_heading</span><span class="p">,</span> <span class="n">full_width_headings</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">report</span><span class="o">.</span><span class="n">geometry</span> <span class="o">!=</span> <span class="s2">&quot;image&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">[],</span> <span class="n">report</span>
+    <span class="k">if</span> <span class="n">report</span><span class="o">.</span><span class="n">legend</span><span class="p">:</span>
+        <span class="n">segments</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">lxnt</span><span class="o">.</span><span class="n">Segment</span><span class="p">(</span><span class="n">kind</span><span class="o">=</span><span class="s2">&quot;legend&quot;</span><span class="p">,</span> <span class="n">district</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">page</span><span class="o">=</span><span class="n">stem</span><span class="p">,</span>
+                                     <span class="n">region</span><span class="o">=</span><span class="s2">&quot;footer&quot;</span><span class="p">,</span> <span class="n">box</span><span class="o">=</span><span class="n">report</span><span class="o">.</span><span class="n">legend</span><span class="p">,</span>
+                                     <span class="n">order</span><span class="o">=</span><span class="mi">900</span><span class="p">,</span> <span class="n">lines</span><span class="o">=</span><span class="p">[]))</span>
+    <span class="k">return</span> <span class="n">segments</span><span class="p">,</span> <span class="n">report</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">last_heading_crop</span><span class="p">(</span><span class="n">image</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The last section heading on a page, as a crop to read, or ``None``.</span>
+
+<span class="sd">    What a section carried onto the next page opened under. Reading order is the</span>
+<span class="sd">    left column then the right, so the last heading of the right column wins,</span>
+<span class="sd">    and the left column&#39;s last only where the right has none.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">.</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_image</span> <span class="k">as</span> <span class="n">lximg</span>
+
+    <span class="n">geo</span> <span class="o">=</span> <span class="n">lximg</span><span class="o">.</span><span class="n">detect</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">full_width_headings</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">columns</span> <span class="o">=</span> <span class="n">geo</span><span class="o">.</span><span class="n">apparatus</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">region</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;right&quot;</span><span class="p">,</span> <span class="s2">&quot;left&quot;</span><span class="p">):</span>
+        <span class="n">heads</span> <span class="o">=</span> <span class="p">[</span><span class="n">h</span> <span class="k">for</span> <span class="n">h</span> <span class="ow">in</span> <span class="n">geo</span><span class="o">.</span><span class="n">headings</span> <span class="k">if</span> <span class="n">h</span><span class="o">.</span><span class="n">region</span> <span class="o">==</span> <span class="n">region</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">heads</span> <span class="ow">and</span> <span class="n">region</span> <span class="ow">in</span> <span class="n">columns</span><span class="p">:</span>
+            <span class="n">left</span><span class="p">,</span> <span class="n">_top</span><span class="p">,</span> <span class="n">right</span><span class="p">,</span> <span class="n">_foot</span> <span class="o">=</span> <span class="n">columns</span><span class="p">[</span><span class="n">region</span><span class="p">]</span>
+            <span class="n">h</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">heads</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">h</span><span class="p">:</span> <span class="n">h</span><span class="o">.</span><span class="n">top</span><span class="p">)</span>
+            <span class="n">pad</span> <span class="o">=</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">HEADING_PAD</span>
+            <span class="k">return</span> <span class="n">image</span><span class="o">.</span><span class="n">crop</span><span class="p">((</span><span class="nb">max</span><span class="p">(</span><span class="n">left</span><span class="p">,</span> <span class="n">h</span><span class="o">.</span><span class="n">left</span> <span class="o">-</span> <span class="n">pad</span><span class="p">),</span> <span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">h</span><span class="o">.</span><span class="n">top</span> <span class="o">-</span> <span class="n">pad</span><span class="p">),</span>
+                               <span class="nb">min</span><span class="p">(</span><span class="n">right</span><span class="p">,</span> <span class="n">h</span><span class="o">.</span><span class="n">right</span> <span class="o">+</span> <span class="n">pad</span><span class="p">),</span>
+                               <span class="nb">min</span><span class="p">(</span><span class="n">image</span><span class="o">.</span><span class="n">height</span><span class="p">,</span> <span class="n">h</span><span class="o">.</span><span class="n">bottom</span> <span class="o">+</span> <span class="n">pad</span><span class="p">)))</span>
+    <span class="k">return</span> <span class="kc">None</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">header_crop</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">geo</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The table&#39;s column header: the frame&#39;s width, the table&#39;s top to the</span>
+<span class="sd">    header&#39;s foot. ``None`` where the geometry found no header.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">geo</span><span class="o">.</span><span class="n">frame</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">geo</span><span class="o">.</span><span class="n">table_top</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">geo</span><span class="o">.</span><span class="n">header_bottom</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="n">geo</span><span class="o">.</span><span class="n">header_bottom</span> <span class="o">-</span> <span class="n">geo</span><span class="o">.</span><span class="n">table_top</span> <span class="o">&lt;</span> <span class="mi">20</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">return</span> <span class="n">image</span><span class="o">.</span><span class="n">crop</span><span class="p">((</span><span class="n">geo</span><span class="o">.</span><span class="n">frame</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">geo</span><span class="o">.</span><span class="n">table_top</span><span class="p">,</span> <span class="n">geo</span><span class="o">.</span><span class="n">frame</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">geo</span><span class="o">.</span><span class="n">header_bottom</span><span class="p">))</span>
+
+
+<span class="c1">#: A printed label counts as found when its letters occur in the reply, or</span>
+<span class="c1">#: nearly so: a partial ratio at least this high (rapidfuzz, normalised text).</span>
+<span class="n">HEADER_MATCH</span> <span class="o">=</span> <span class="mi">85</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">header_check</span><span class="p">(</span><span class="n">lines</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">profile</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Which of the profile&#39;s column labels the header reading contains.</span>
+
+<span class="sd">    A record, never a gate: a label the reader missed is reported by name, so a</span>
+<span class="sd">    page whose columns are not the profile&#39;s (a statutory city&#39;s 15, D-80) shows</span>
+<span class="sd">    as many missing labels rather than as a silently mis-assigned table.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">rapidfuzz</span><span class="w"> </span><span class="kn">import</span> <span class="n">fuzz</span>
+
+    <span class="n">text</span> <span class="o">=</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">normalise</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">line</span><span class="p">)</span> <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">lines</span><span class="p">))</span>
+    <span class="n">missing</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">column</span> <span class="ow">in</span> <span class="n">profile</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="n">key</span> <span class="o">=</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">normalise</span><span class="p">(</span><span class="n">column</span><span class="o">.</span><span class="n">label</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">key</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="k">if</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">text</span> <span class="ow">or</span> <span class="p">(</span><span class="n">text</span> <span class="ow">and</span> <span class="n">fuzz</span><span class="o">.</span><span class="n">partial_ratio</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">text</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="n">HEADER_MATCH</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="n">missing</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">column</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;columns&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">profile</span><span class="o">.</span><span class="n">columns</span><span class="p">),</span>
+            <span class="s2">&quot;found&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">profile</span><span class="o">.</span><span class="n">columns</span><span class="p">)</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">missing</span><span class="p">),</span>
+            <span class="s2">&quot;missing&quot;</span><span class="p">:</span> <span class="n">missing</span><span class="p">}</span>
+
+
+<span class="c1"># --------------------------------------------------------------------------- #</span>
+<span class="c1"># Which court: German heading -&gt; the Czech court slug</span>
+<span class="c1"># --------------------------------------------------------------------------- #</span>
+
+<span class="n">_UMLAUTS</span> <span class="o">=</span> <span class="nb">str</span><span class="o">.</span><span class="n">maketrans</span><span class="p">({</span><span class="s2">&quot;ä&quot;</span><span class="p">:</span> <span class="s2">&quot;ae&quot;</span><span class="p">,</span> <span class="s2">&quot;ö&quot;</span><span class="p">:</span> <span class="s2">&quot;oe&quot;</span><span class="p">,</span> <span class="s2">&quot;ü&quot;</span><span class="p">:</span> <span class="s2">&quot;ue&quot;</span><span class="p">,</span> <span class="s2">&quot;Ä&quot;</span><span class="p">:</span> <span class="s2">&quot;Ae&quot;</span><span class="p">,</span> <span class="s2">&quot;Ö&quot;</span><span class="p">:</span> <span class="s2">&quot;Oe&quot;</span><span class="p">,</span>
+                          <span class="s2">&quot;Ü&quot;</span><span class="p">:</span> <span class="s2">&quot;Ue&quot;</span><span class="p">,</span> <span class="s2">&quot;ß&quot;</span><span class="p">:</span> <span class="s2">&quot;ss&quot;</span><span class="p">})</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">fold</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;A German name as the curation spells it: umlauts written out, then</span>
+<span class="sd">    ``lexikon_1910_notes.normalise`` (``Mühlhausen`` -&gt; ``muehlhausen``).&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">normalise</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">name</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">translate</span><span class="p">(</span><span class="n">_UMLAUTS</span><span class="p">))</span>
+
+
+<span class="c1">#: How the German headings shorten a court name&#39;s first word — ``Böhm. Aicha``, read</span>
+<span class="c1">#: once as ``Bhm. Aicha`` — expanded before the name is looked up (D-120). The 1910</span>
+<span class="c1">#: court backbone&#39;s German names begin with these words in full.</span>
+<span class="n">_COURT_ABBREVIATIONS</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="p">(</span><span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\bB(?:ö|oe|o)?hm?\.\s*&quot;</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">I</span><span class="p">),</span> <span class="s2">&quot;Böhmisch &quot;</span><span class="p">),</span>
+    <span class="p">(</span><span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\bM(?:ä|ae|a)hr\.\s*&quot;</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">I</span><span class="p">),</span> <span class="s2">&quot;Mährisch &quot;</span><span class="p">),</span>
+    <span class="p">(</span><span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\bUng\.\s*&quot;</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">I</span><span class="p">),</span> <span class="s2">&quot;Ungarisch &quot;</span><span class="p">),</span>
+    <span class="p">(</span><span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\bWall\.\s*&quot;</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">I</span><span class="p">),</span> <span class="s2">&quot;Wallachisch &quot;</span><span class="p">),</span>
+    <span class="p">(</span><span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\b(?:Kgl|Königl|Koenigl)\.\s*&quot;</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">I</span><span class="p">),</span> <span class="s2">&quot;Königliche &quot;</span><span class="p">),</span>
+    <span class="p">(</span><span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\bSt\.\s*&quot;</span><span class="p">),</span> <span class="s2">&quot;Sankt &quot;</span><span class="p">),</span>
+<span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">expand_court_abbreviations</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``Böhm. Aicha`` -&gt; ``Böhmisch Aicha``; a name without an abbreviation is unchanged.&quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">name</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">pattern</span><span class="p">,</span> <span class="n">full</span> <span class="ow">in</span> <span class="n">_COURT_ABBREVIATIONS</span><span class="p">:</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="n">pattern</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="n">full</span><span class="p">,</span> <span class="n">out</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\s+&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">out</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">name_forms</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Every spelling a German court name may be matched under: as printed and with its</span>
+<span class="sd">    abbreviations written out, each folded and plainly normalised.&quot;&quot;&quot;</span>
+    <span class="n">forms</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">variant</span> <span class="ow">in</span> <span class="p">{</span><span class="nb">str</span><span class="p">(</span><span class="n">name</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">),</span> <span class="n">expand_court_abbreviations</span><span class="p">(</span><span class="n">name</span><span class="p">)}:</span>
+        <span class="n">forms</span> <span class="o">|=</span> <span class="p">{</span><span class="n">fold</span><span class="p">(</span><span class="n">variant</span><span class="p">),</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">normalise</span><span class="p">(</span><span class="n">variant</span><span class="p">)}</span>
+    <span class="k">return</span> <span class="p">{</span><span class="n">form</span> <span class="k">for</span> <span class="n">form</span> <span class="ow">in</span> <span class="n">forms</span> <span class="k">if</span> <span class="n">form</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">load_court_crosswalk</span><span class="p">(</span><span class="n">curation</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">CURATION</span><span class="p">,</span>
+                         <span class="n">districts</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="n">DISTRICTS</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``{German name form: Czech court name}`` for every court in the backbone.</span>
+
+<span class="sd">    Two sources, and a form both claim for **different** courts is dropped</span>
+<span class="sd">    rather than given to either — a German name that is two Czech courts is a</span>
+<span class="sd">    question, not an answer.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">pairs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">with</span> <span class="n">Path</span><span class="p">(</span><span class="n">curation</span><span class="p">)</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictReader</span><span class="p">(</span><span class="n">fh</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;level&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="s2">&quot;court&quot;</span> <span class="ow">and</span> <span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;cs&quot;</span><span class="p">):</span>
+                <span class="n">pairs</span> <span class="o">+=</span> <span class="p">[(</span><span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;key&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;cs&quot;</span><span class="p">]),</span> <span class="p">(</span><span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;de&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;cs&quot;</span><span class="p">])]</span>
+    <span class="k">if</span> <span class="n">districts</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">Path</span><span class="p">(</span><span class="n">districts</span><span class="p">)</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="k">with</span> <span class="n">Path</span><span class="p">(</span><span class="n">districts</span><span class="p">)</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictReader</span><span class="p">(</span><span class="n">fh</span><span class="p">):</span>
+                <span class="k">if</span> <span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;gerichtsbezirk_cs&quot;</span><span class="p">):</span>
+                    <span class="n">pairs</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;gerichtsbezirk_de&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span>
+                                  <span class="n">row</span><span class="p">[</span><span class="s2">&quot;gerichtsbezirk_cs&quot;</span><span class="p">]))</span>
+    <span class="n">out</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">clash</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">german</span><span class="p">,</span> <span class="n">czech</span> <span class="ow">in</span> <span class="n">pairs</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">form</span> <span class="ow">in</span> <span class="n">name_forms</span><span class="p">(</span><span class="n">german</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">form</span> <span class="ow">in</span> <span class="n">out</span> <span class="ow">and</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">normalise</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="n">form</span><span class="p">])</span> <span class="o">!=</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">normalise</span><span class="p">(</span><span class="n">czech</span><span class="p">):</span>
+                <span class="n">clash</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">form</span><span class="p">)</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">form</span><span class="p">,</span> <span class="n">czech</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">form</span> <span class="ow">in</span> <span class="n">clash</span><span class="p">:</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">form</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="c1">#: A heading read that is not an exact form of any court is matched only when one</span>
+<span class="c1">#: court scores at least this (rapidfuzz ratio on the folded name) and the next</span>
+<span class="c1">#: different court at least :data:`COURT_MARGIN` below it. Otherwise unmapped.</span>
+<span class="n">COURT_FUZZY</span> <span class="o">=</span> <span class="mi">90</span>
+<span class="n">COURT_MARGIN</span> <span class="o">=</span> <span class="mi">5</span>
+
+<span class="c1">#: The fewest letters a shortened court name must keep to be matched by prefix.</span>
+<span class="n">PREFIX_MIN</span> <span class="o">=</span> <span class="mi">6</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">court_name</span><span class="p">(</span><span class="n">german</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">crosswalk</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``(Czech court name, how)`` for a court named in a German heading.</span>
+
+<span class="sd">    ``how`` is ``exact``, ``prefix``, ``fuzzy`` or ``unmapped``. ``prefix`` is a</span>
+<span class="sd">    heading that prints a court&#39;s name short (``Gablonz`` for *Gablonz an der</span>
+<span class="sd">    Neiße*): the read begins exactly one court&#39;s name, by at least</span>
+<span class="sd">    :data:`PREFIX_MIN` letters. An unmapped court returns ``&quot;&quot;`` and the caller</span>
+<span class="sd">    keeps the German name: its entries then share no key with the gold and are</span>
+<span class="sd">    reported, never guessed onto a neighbour.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">rapidfuzz</span><span class="w"> </span><span class="kn">import</span> <span class="n">fuzz</span>
+
+    <span class="k">for</span> <span class="n">form</span> <span class="ow">in</span> <span class="n">name_forms</span><span class="p">(</span><span class="n">german</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">form</span> <span class="ow">in</span> <span class="n">crosswalk</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">crosswalk</span><span class="p">[</span><span class="n">form</span><span class="p">],</span> <span class="s2">&quot;exact&quot;</span>
+    <span class="n">key</span> <span class="o">=</span> <span class="n">fold</span><span class="p">(</span><span class="n">expand_court_abbreviations</span><span class="p">(</span><span class="n">german</span><span class="p">))</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">key</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">3</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;unmapped&quot;</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">key</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="n">PREFIX_MIN</span><span class="p">:</span>
+        <span class="n">begun</span> <span class="o">=</span> <span class="p">{</span><span class="n">lxnt</span><span class="o">.</span><span class="n">normalise</span><span class="p">(</span><span class="n">czech</span><span class="p">)</span> <span class="k">for</span> <span class="n">form</span><span class="p">,</span> <span class="n">czech</span> <span class="ow">in</span> <span class="n">crosswalk</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+                 <span class="k">if</span> <span class="n">form</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">key</span><span class="p">)}</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">begun</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="k">return</span> <span class="nb">next</span><span class="p">(</span><span class="n">czech</span> <span class="k">for</span> <span class="n">form</span><span class="p">,</span> <span class="n">czech</span> <span class="ow">in</span> <span class="n">crosswalk</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+                        <span class="k">if</span> <span class="n">form</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">key</span><span class="p">)),</span> <span class="s2">&quot;prefix&quot;</span>
+    <span class="n">best</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">form</span><span class="p">,</span> <span class="n">czech</span> <span class="ow">in</span> <span class="n">crosswalk</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">score</span> <span class="o">=</span> <span class="n">fuzz</span><span class="o">.</span><span class="n">ratio</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">form</span><span class="p">)</span>
+        <span class="n">best</span><span class="p">[</span><span class="n">czech</span><span class="p">]</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">best</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">czech</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">),</span> <span class="n">score</span><span class="p">)</span>
+    <span class="n">ranked</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">best</span><span class="o">.</span><span class="n">items</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">kv</span><span class="p">:</span> <span class="o">-</span><span class="n">kv</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+    <span class="k">if</span> <span class="n">ranked</span> <span class="ow">and</span> <span class="n">ranked</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">COURT_FUZZY</span> <span class="ow">and</span> <span class="p">(</span>
+            <span class="nb">len</span><span class="p">(</span><span class="n">ranked</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span> <span class="ow">or</span> <span class="n">ranked</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">ranked</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">COURT_MARGIN</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">ranked</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">],</span> <span class="s2">&quot;fuzzy&quot;</span>
+    <span class="k">return</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;unmapped&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">relabel_sections</span><span class="p">(</span><span class="n">sections</span><span class="p">,</span> <span class="n">crosswalk</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Put each section under its Czech court name; return what was done.</span>
+
+<span class="sd">    The decoder keys an entry on ``normalise(section.district)``, and the gold</span>
+<span class="sd">    sheets key it on the Czech court (``soudní okres Trutnov`` -&gt; ``trutnov``),</span>
+<span class="sd">    so this is the step that makes a German entry and a gold entry the same</span>
+<span class="sd">    entry. The German name read off the heading is kept in the returned rows.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">log</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">section</span> <span class="ow">in</span> <span class="n">sections</span><span class="p">:</span>
+        <span class="n">czech</span><span class="p">,</span> <span class="n">how</span> <span class="o">=</span> <span class="n">court_name</span><span class="p">(</span><span class="n">section</span><span class="o">.</span><span class="n">district</span><span class="p">,</span> <span class="n">crosswalk</span><span class="p">)</span>
+        <span class="n">log</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;page&quot;</span><span class="p">:</span> <span class="n">section</span><span class="o">.</span><span class="n">page</span><span class="p">,</span> <span class="s2">&quot;kind&quot;</span><span class="p">:</span> <span class="n">section</span><span class="o">.</span><span class="n">kind</span><span class="p">,</span>
+                    <span class="s2">&quot;court_de&quot;</span><span class="p">:</span> <span class="n">section</span><span class="o">.</span><span class="n">district</span><span class="p">,</span> <span class="s2">&quot;court_cs&quot;</span><span class="p">:</span> <span class="n">czech</span><span class="p">,</span> <span class="s2">&quot;how&quot;</span><span class="p">:</span> <span class="n">how</span><span class="p">})</span>
+        <span class="k">if</span> <span class="n">czech</span><span class="p">:</span>
+            <span class="n">section</span><span class="o">.</span><span class="n">district</span> <span class="o">=</span> <span class="n">czech</span>
+    <span class="k">return</span> <span class="n">log</span>
+</pre></div></td></tr></table></div>
+</details>

@@ -1,0 +1,1045 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Validate a human transcription worksheet, and turn it into a reader.</p><p class="tldr-facts"><b>1910 register</b> · v— · 312 lines · 3 public functions · 7 constants · used by <code>utils/lexikon_1910/build_token_review.py</code>, <code>utils/lexikon_1910/read_transcription_md.py</code>, <code>utils/lexikon_1910/score_certification.py</code> +2 · <code>utils/lexikon_1910/check_transcription.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-lexikon_1910-check_transcription-split_entries">split_entries</a><a class="chip" href="#fn-utils-lexikon_1910-check_transcription-parse">parse</a><a class="chip" href="#fn-utils-lexikon_1910-check_transcription-main">main</a><a class="chip const" href="#c-utils-lexikon_1910-check_transcription-ROOT">ROOT</a><a class="chip const" href="#c-utils-lexikon_1910-check_transcription-SHEET">SHEET</a><a class="chip const" href="#c-utils-lexikon_1910-check_transcription-ABBREVIATIONS">ABBREVIATIONS</a><a class="chip const" href="#c-utils-lexikon_1910-check_transcription-OUT">OUT</a><a class="chip const" href="#c-utils-lexikon_1910-check_transcription-TOPOGRAPHIC">TOPOGRAPHIC</a><a class="chip const" href="#c-utils-lexikon_1910-check_transcription-UNREADABLE">UNREADABLE</a><a class="chip const" href="#c-utils-lexikon_1910-check_transcription-OFF_ATLAS">OFF_ATLAS</a></div>
+<h2>How it works</h2><p>Run it while transcribing, as often as you like. It reports typos against the
+curated token list, keys that no longer match the register, and how much of the
+worksheet is filled — and once it is clean it writes
+<code>inventory_human_freeform.csv</code>, in exactly the shape the model passes produce.</p>
+<p>That last part is the point. The human becomes the fourth reader, so
+<code>compare_symbol_passes.py</code> and the family collapse consume it unchanged, and
+every figure the pilot reports stops being <em>agreement between readers</em> and becomes
+<strong>accuracy against a person</strong>. Nothing in this project has had that before.</p>
+<p>The confidence marks are kept, not normalised away:</p>
+<p><code>[school]</code>   certain
+<code>[school]?</code>  probably this — recorded as <code>confidence="unsure"</code>
+<code>[?]</code>        a symbol is printed and could not be identified
+<code>[!]</code>        clearly a symbol, and not on the atlas</p>
+<p>The trailing <code>?</code> is what decides an argument the models cannot settle. If they
+fail where the transcriber was unsure, the limit is the 399 DPI scan and
+collapsing near-identical symbols into families is the correct resolution of the
+source; if they fail where the transcriber was confident, the limit is the readers
+and it is worth attacking. Same for <code>[?]</code>: a high rate says the distinction is
+not on the paper at the size it was printed.</p>
+<h4>Usage</h4>
+<pre><code>python utils/lexikon_1910/check_transcription.py
+python utils/lexikon_1910/check_transcription.py --write
+</code></pre>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-lexikon_1910-check_transcription-split_entries">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">split_entries</span><span class="p">(</span><span class="n">body</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span></pre>
+<div class="fndoc"><p><code>[(name, muni_seq, settlement_seq, symbols), …]</code> for one worksheet line.</p>
+<p>The name of an entry is whatever stands between the previous entry's symbols
+and this entry's key. The two are separated on the <strong>last full stop</strong> before
+the key, which is the convention the transcriber used and the one the register
+itself uses — every entry's symbol list is closed with a period before the next
+place is named.</p>
+<p>Where there is no full stop the whole span is taken as the name, not as
+symbols: a missing name costs a join, an invented symbol list corrupts the
+inventory, and between the two failures only one is recoverable later.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/parsing/vua_courts.py</code></p>
+<details><summary>source · lines 116–149 (34 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">split_entries</span><span class="p">(</span><span class="n">body</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``[(name, muni_seq, settlement_seq, symbols), …]`` for one worksheet line.</span>
+
+<span class="sd">    The name of an entry is whatever stands between the previous entry&#39;s symbols</span>
+<span class="sd">    and this entry&#39;s key. The two are separated on the **last full stop** before</span>
+<span class="sd">    the key, which is the convention the transcriber used and the one the register</span>
+<span class="sd">    itself uses — every entry&#39;s symbol list is closed with a period before the next</span>
+<span class="sd">    place is named.</span>
+
+<span class="sd">    Where there is no full stop the whole span is taken as the name, not as</span>
+<span class="sd">    symbols: a missing name costs a join, an invented symbol list corrupts the</span>
+<span class="sd">    inventory, and between the two failures only one is recoverable later.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">masked</span> <span class="o">=</span> <span class="n">_mask_parens</span><span class="p">(</span><span class="n">body</span><span class="p">)</span>
+    <span class="n">keys</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">_KEY_RE</span><span class="o">.</span><span class="n">finditer</span><span class="p">(</span><span class="n">masked</span><span class="p">))</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">carried</span> <span class="o">=</span> <span class="n">body</span><span class="p">[:</span><span class="n">keys</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">start</span><span class="p">()]</span> <span class="k">if</span> <span class="n">keys</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">key</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">keys</span><span class="p">):</span>
+        <span class="n">end</span> <span class="o">=</span> <span class="n">keys</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">start</span><span class="p">()</span> <span class="k">if</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">keys</span><span class="p">)</span> <span class="k">else</span> <span class="nb">len</span><span class="p">(</span><span class="n">body</span><span class="p">)</span>
+        <span class="n">span</span> <span class="o">=</span> <span class="n">body</span><span class="p">[</span><span class="n">key</span><span class="o">.</span><span class="n">end</span><span class="p">():</span><span class="n">end</span><span class="p">]</span>
+        <span class="c1"># The span between this key and the next holds this entry&#39;s symbols *and*</span>
+        <span class="c1"># the next entry&#39;s place name. Cut them apart on the last full stop and</span>
+        <span class="c1"># carry the name forward — assigning the whole span to this entry instead</span>
+        <span class="c1"># files the next place&#39;s topographic symbol as an institution of this one,</span>
+        <span class="c1"># which is how `[ves]` first appeared as something Humburky *had*.</span>
+        <span class="k">if</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">keys</span><span class="p">):</span>
+            <span class="n">cut</span> <span class="o">=</span> <span class="n">span</span><span class="o">.</span><span class="n">rfind</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)</span>
+            <span class="n">symbols</span><span class="p">,</span> <span class="n">carry</span> <span class="o">=</span> <span class="p">(</span><span class="n">span</span><span class="p">[:</span><span class="n">cut</span> <span class="o">+</span> <span class="mi">1</span><span class="p">],</span> <span class="n">span</span><span class="p">[</span><span class="n">cut</span> <span class="o">+</span> <span class="mi">1</span><span class="p">:])</span> <span class="k">if</span> <span class="n">cut</span> <span class="o">&gt;=</span> <span class="mi">0</span> <span class="k">else</span> <span class="p">(</span><span class="n">span</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">symbols</span><span class="p">,</span> <span class="n">carry</span> <span class="o">=</span> <span class="n">span</span><span class="p">,</span> <span class="s2">&quot;&quot;</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">carried</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span> <span class="nb">int</span><span class="p">(</span><span class="n">key</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)),</span>
+                    <span class="p">(</span><span class="n">key</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s2">&quot; ,—-–&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;0&quot;</span><span class="p">,</span> <span class="n">symbols</span><span class="p">))</span>
+        <span class="n">carried</span> <span class="o">=</span> <span class="n">carry</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-check_transcription-parse">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">parse</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">allowed</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">])</span></pre>
+<div class="fndoc"><p><code>(rows, problems, blank)</code> from the worksheet.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 169–234 (66 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">parse</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">allowed</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``(rows, problems, blank)`` from the worksheet.&quot;&quot;&quot;</span>
+    <span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">problems</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">blank</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">number</span><span class="p">,</span> <span class="n">raw</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">path</span><span class="o">.</span><span class="n">read_text</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">splitlines</span><span class="p">(),</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">raw</span><span class="o">.</span><span class="n">lstrip</span><span class="p">()</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;#&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">raw</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+            <span class="k">continue</span>
+        <span class="n">match</span> <span class="o">=</span> <span class="n">_LINE_RE</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">match</span><span class="p">:</span>
+            <span class="n">problems</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  line </span><span class="si">{</span><span class="n">number</span><span class="si">}</span><span class="s2">: not a worksheet row: </span><span class="si">{</span><span class="n">raw</span><span class="o">.</span><span class="n">strip</span><span class="p">()[:</span><span class="mi">60</span><span class="p">]</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">continue</span>
+        <span class="n">page</span><span class="p">,</span> <span class="n">district</span><span class="p">,</span> <span class="n">body</span> <span class="o">=</span> <span class="n">match</span><span class="o">.</span><span class="n">groups</span><span class="p">()</span>
+        <span class="n">entries</span> <span class="o">=</span> <span class="n">split_entries</span><span class="p">(</span><span class="n">body</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">entries</span><span class="p">:</span>
+            <span class="n">blank</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">continue</span>
+        <span class="n">municipality</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">name_field</span><span class="p">,</span> <span class="n">muni</span><span class="p">,</span> <span class="n">settlement</span><span class="p">,</span> <span class="n">symbols</span> <span class="ow">in</span> <span class="n">entries</span><span class="p">:</span>
+            <span class="n">muni_name</span><span class="p">,</span> <span class="n">settlement_name</span><span class="p">,</span> <span class="n">topographic</span> <span class="o">=</span> <span class="n">_names</span><span class="p">(</span><span class="n">name_field</span><span class="p">)</span>
+            <span class="c1"># The municipality is stated once, on the line&#39;s first entry; later</span>
+            <span class="c1"># entries name only their own osada and inherit it.</span>
+            <span class="k">if</span> <span class="n">muni_name</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">settlement_name</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">municipality</span><span class="p">:</span>
+                <span class="n">municipality</span><span class="p">,</span> <span class="n">settlement_name</span> <span class="o">=</span> <span class="n">muni_name</span><span class="p">,</span> <span class="n">muni_name</span>
+            <span class="k">elif</span> <span class="n">muni_name</span> <span class="ow">and</span> <span class="n">settlement_name</span><span class="p">:</span>
+                <span class="n">municipality</span> <span class="o">=</span> <span class="n">muni_name</span>
+            <span class="k">elif</span> <span class="ow">not</span> <span class="n">settlement_name</span><span class="p">:</span>
+                <span class="n">settlement_name</span> <span class="o">=</span> <span class="n">muni_name</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">symbols</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+                <span class="n">blank</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="k">continue</span>
+            <span class="n">position</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="k">for</span> <span class="n">count</span><span class="p">,</span> <span class="n">token</span><span class="p">,</span> <span class="n">unsure</span> <span class="ow">in</span> <span class="n">_TOKEN_RE</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="n">symbols</span><span class="p">):</span>
+                <span class="n">canonical</span> <span class="o">=</span> <span class="n">lxv</span><span class="o">.</span><span class="n">canonical</span><span class="p">(</span><span class="n">token</span><span class="p">)</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">token</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">3</span> <span class="k">else</span> <span class="n">token</span>
+                <span class="k">if</span> <span class="n">canonical</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">allowed</span> <span class="ow">and</span> <span class="n">token</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="n">UNREADABLE</span><span class="p">,</span> <span class="n">OFF_ATLAS</span><span class="p">):</span>
+                    <span class="n">problems</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;  line </span><span class="si">{</span><span class="n">number</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">token</span><span class="si">!r}</span><span class="s2"> is not on the atlas — check &quot;</span>
+                        <span class="sa">f</span><span class="s2">&quot;the spelling against symbols/manifest.csv, or write &quot;</span>
+                        <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">OFF_ATLAS</span><span class="si">}</span><span class="s2"> if the symbol is genuinely not there&quot;</span><span class="p">)</span>
+                    <span class="k">continue</span>
+                <span class="k">if</span> <span class="n">canonical</span> <span class="ow">in</span> <span class="n">TOPOGRAPHIC</span><span class="p">:</span>
+                    <span class="c1"># Printed in the symbol list rather than against the name. It</span>
+                    <span class="c1"># says what the place *is*; it is not an institution and must</span>
+                    <span class="c1"># not be counted as one.</span>
+                    <span class="n">problems</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;  line </span><span class="si">{</span><span class="n">number</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">canonical</span><span class="si">}</span><span class="s2"> is a topographic symbol in &quot;</span>
+                        <span class="sa">f</span><span class="s2">&quot;the institution list of </span><span class="si">{</span><span class="n">muni</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">settlement</span><span class="si">}</span><span class="s2"> — should it &quot;</span>
+                        <span class="sa">f</span><span class="s2">&quot;be against the name?&quot;</span><span class="p">)</span>
+                    <span class="k">continue</span>
+                <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
+                    <span class="s2">&quot;check&quot;</span><span class="p">:</span> <span class="s2">&quot;I13_inventory&quot;</span><span class="p">,</span> <span class="s2">&quot;page&quot;</span><span class="p">:</span> <span class="n">page</span><span class="o">.</span><span class="n">zfill</span><span class="p">(</span><span class="mi">4</span><span class="p">),</span>
+                    <span class="s2">&quot;district&quot;</span><span class="p">:</span> <span class="n">district</span><span class="p">,</span> <span class="s2">&quot;muni_seq&quot;</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">muni</span><span class="p">),</span>
+                    <span class="s2">&quot;settlement_seq&quot;</span><span class="p">:</span> <span class="n">settlement</span><span class="p">,</span> <span class="s2">&quot;entry_index&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;municipality&quot;</span><span class="p">:</span> <span class="n">municipality</span><span class="p">,</span> <span class="s2">&quot;settlement&quot;</span><span class="p">:</span> <span class="n">settlement_name</span><span class="p">,</span>
+                    <span class="s2">&quot;topographic&quot;</span><span class="p">:</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">topographic</span><span class="p">),</span>
+                    <span class="s2">&quot;code&quot;</span><span class="p">:</span> <span class="n">canonical</span><span class="p">,</span> <span class="s2">&quot;count&quot;</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">count</span><span class="p">)</span> <span class="k">if</span> <span class="n">count</span> <span class="k">else</span> <span class="mi">1</span><span class="p">,</span>
+                    <span class="s2">&quot;position&quot;</span><span class="p">:</span> <span class="n">position</span><span class="p">,</span> <span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;human&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;confidence&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;unsure&quot;</span> <span class="k">if</span> <span class="n">unsure</span> <span class="k">else</span>
+                                   <span class="s2">&quot;unreadable&quot;</span> <span class="k">if</span> <span class="n">token</span> <span class="o">==</span> <span class="n">UNREADABLE</span> <span class="k">else</span>
+                                   <span class="s2">&quot;off-atlas&quot;</span> <span class="k">if</span> <span class="n">token</span> <span class="o">==</span> <span class="n">OFF_ATLAS</span> <span class="k">else</span> <span class="s2">&quot;certain&quot;</span><span class="p">),</span>
+                    <span class="s2">&quot;english&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;corroborated&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;count_text&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;glyph&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;context&quot;</span><span class="p">:</span> <span class="n">symbols</span><span class="o">.</span><span class="n">strip</span><span class="p">()[:</span><span class="mi">80</span><span class="p">],</span>
+                <span class="p">})</span>
+                <span class="n">position</span> <span class="o">+=</span> <span class="mi">1</span>
+    <span class="k">return</span> <span class="n">rows</span><span class="p">,</span> <span class="n">problems</span><span class="p">,</span> <span class="n">blank</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-check_transcription-main">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 237–308 (72 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="p">,</span>
+                                 <span class="n">formatter_class</span><span class="o">=</span><span class="n">argparse</span><span class="o">.</span><span class="n">RawDescriptionHelpFormatter</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--sheet&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">SHEET</span><span class="p">))</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--write&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;write inventory_human.csv for the comparison tools&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+
+    <span class="n">path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">sheet</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;no worksheet at </span><span class="si">{</span><span class="n">path</span><span class="si">}</span><span class="s2">; run make_transcription_worksheet.py first&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="mi">1</span>
+
+    <span class="n">abbreviations</span> <span class="o">=</span> <span class="n">lxin</span><span class="o">.</span><span class="n">load_abbreviations</span><span class="p">(</span><span class="n">ABBREVIATIONS</span><span class="p">,</span> <span class="n">lang</span><span class="o">=</span><span class="s2">&quot;cs&quot;</span><span class="p">)</span>
+    <span class="n">allowed</span> <span class="o">=</span> <span class="n">lxv</span><span class="o">.</span><span class="n">vocabulary</span><span class="p">(</span><span class="n">abbreviations</span><span class="p">)</span> <span class="o">|</span> <span class="p">{</span><span class="n">OFF_ATLAS</span><span class="p">}</span>
+    <span class="n">meaning</span> <span class="o">=</span> <span class="p">{</span><span class="n">a</span><span class="o">.</span><span class="n">code</span><span class="p">:</span> <span class="p">(</span><span class="n">a</span><span class="o">.</span><span class="n">english</span><span class="p">,</span> <span class="n">a</span><span class="o">.</span><span class="n">category</span><span class="p">)</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">abbreviations</span><span class="p">}</span>
+
+    <span class="n">rows</span><span class="p">,</span> <span class="n">problems</span><span class="p">,</span> <span class="n">blank</span> <span class="o">=</span> <span class="n">parse</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">allowed</span><span class="p">)</span>
+    <span class="c1"># Keyed on the settlement too. Without it every osada of one municipality</span>
+    <span class="c1"># collapses into a single &quot;entry&quot; and the sheet looks a fifth smaller than it</span>
+    <span class="c1"># is — 47 municipalities standing in for 55 entries.</span>
+    <span class="n">entries</span> <span class="o">=</span> <span class="p">{(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;district&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;muni_seq&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;settlement_seq&quot;</span><span class="p">])</span>
+               <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">}</span>
+    <span class="n">places</span> <span class="o">=</span> <span class="p">{(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;district&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;settlement&quot;</span><span class="p">])</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span>
+              <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;settlement&quot;</span><span class="p">]}</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span><span class="si">}</span><span class="s2"> symbols over </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">entries</span><span class="p">)</span><span class="si">}</span><span class="s2"> entries &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">places</span><span class="p">)</span><span class="si">}</span><span class="s2"> named places); </span><span class="si">{</span><span class="n">blank</span><span class="si">}</span><span class="s2"> entries still blank&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">problems</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">problems</span><span class="p">)</span><span class="si">}</span><span class="s2"> problems:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">problem</span> <span class="ow">in</span> <span class="n">problems</span><span class="p">[:</span><span class="mi">20</span><span class="p">]:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">problem</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">problems</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">20</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  ... </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">problems</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">20</span><span class="si">}</span><span class="s2"> more&quot;</span><span class="p">)</span>
+
+    <span class="n">confidence</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;confidence&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">rows</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">kind</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;certain&quot;</span><span class="p">,</span> <span class="s2">&quot;unsure&quot;</span><span class="p">,</span> <span class="s2">&quot;unreadable&quot;</span><span class="p">,</span> <span class="s2">&quot;off-atlas&quot;</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">confidence</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">kind</span><span class="p">):</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">kind</span><span class="si">:</span><span class="s2">11s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">confidence</span><span class="p">[</span><span class="n">kind</span><span class="p">]</span><span class="si">:</span><span class="s2">5d</span><span class="si">}</span><span class="s2">  &quot;</span>
+                      <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">confidence</span><span class="p">[</span><span class="n">kind</span><span class="p">]</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span><span class="si">:</span><span class="s2">5.1%</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">unreadable</span> <span class="o">=</span> <span class="n">confidence</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;unreadable&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="n">confidence</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;unsure&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">unreadable</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mf">0.25</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">()</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  Over a quarter of the marks could not be read with &quot;</span>
+                  <span class="s2">&quot;certainty by a person.&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  That is a finding about the source, not about the &quot;</span>
+                  <span class="s2">&quot;transcription: it says the&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  distinction is not on the paper at this size, and the &quot;</span>
+                  <span class="s2">&quot;family collapse is the&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  right resolution rather than a compromise.&quot;</span><span class="p">)</span>
+
+        <span class="n">top</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;code&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">()</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  most frequent:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">code</span><span class="p">,</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">top</span><span class="o">.</span><span class="n">most_common</span><span class="p">(</span><span class="mi">10</span><span class="p">):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">n</span><span class="si">:</span><span class="s2">4d</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">code</span><span class="si">:</span><span class="s2">22s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">meaning</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">code</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="p">))[</span><span class="mi">0</span><span class="p">][:</span><span class="mi">30</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">write</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">problems</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  not writing: fix the problems above first&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="mi">1</span>
+        <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+            <span class="n">row</span><span class="p">[</span><span class="s2">&quot;english&quot;</span><span class="p">],</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;category&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">meaning</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;code&quot;</span><span class="p">],</span> <span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+        <span class="n">OUT</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">with</span> <span class="n">OUT</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;w&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+            <span class="n">writer</span> <span class="o">=</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictWriter</span><span class="p">(</span><span class="n">fh</span><span class="p">,</span> <span class="n">fieldnames</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="n">rows</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+            <span class="n">writer</span><span class="o">.</span><span class="n">writeheader</span><span class="p">()</span>
+            <span class="n">writer</span><span class="o">.</span><span class="n">writerows</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  wrote </span><span class="si">{</span><span class="n">OUT</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  now: python utils/lexikon_1910/_archive/compare_symbol_passes.py&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-lexikon_1910-check_transcription-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-check_transcription-SHEET"><pre class="sig">SHEET<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;reference&#39;</span> <span class="o">/</span> <span class="s1">&#39;places&#39;</span> <span class="o">/</span> <span class="s1">&#39;transcription_gold&#39;</span> <span class="o">/</span> <span class="s1">&#39;_superseded&#39;</span> <span class="o">/</span> <span class="s1">&#39;freeform_2026-08&#39;</span> <span class="o">/</span> <span class="s1">&#39;worksheet.txt&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-check_transcription-ABBREVIATIONS"><pre class="sig">ABBREVIATIONS<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;reference&#39;</span> <span class="o">/</span> <span class="s1">&#39;places&#39;</span> <span class="o">/</span> <span class="s1">&#39;institution_abbreviations.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-check_transcription-OUT"><pre class="sig">OUT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;output&#39;</span> <span class="o">/</span> <span class="s1">&#39;lexikon_1910_pilot&#39;</span> <span class="o">/</span> <span class="s1">&#39;inventory_human_freeform.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-check_transcription-TOPOGRAPHIC"><pre class="sig">TOPOGRAPHIC<span class="kind">set · 17 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;[obec]&#39;</span><span class="p">,</span> <span class="s1">&#39;[osada]&#39;</span><span class="p">,</span> <span class="s1">&#39;[cadastral]&#39;</span><span class="p">,</span> <span class="s1">&#39;[mesto]&#39;</span><span class="p">,</span> <span class="s1">&#39;[mestys]&#39;</span><span class="p">,</span> <span class="s1">&#39;[ves]&#39;</span><span class="p">,</span> <span class="s1">&#39;[city-part]&#39;</span><span class="p">,</span> <span class="s1">&#39;[suburb]&#39;</span><span class="p">,</span> <span class="s1">&#39;[mestys-part]&#39;</span><span class="p">,</span> <span class="s1">&#39;[hamlet]&#39;</span><span class="p">,</span> <span class="s1">&#39;[manor-farm]&#39;</span><span class="p">,</span> <span class="s1">&#39;[cottage-group]&#39;</span><span class="p">,</span> <span class="s1">&#39;[house-group]&#39;</span><span class="p">,</span> <span class="s1">&#39;[colony]&#39;</span><span class="p">,</span> <span class="s1">&#39;[scattered]&#39;</span><span class="p">,</span> <span class="s1">&#39;[solitary]&#39;</span><span class="p">,</span> <span class="s1">&#39;[single-house]&#39;</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-check_transcription-UNREADABLE"><pre class="sig">UNREADABLE<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;[?]&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-check_transcription-OFF_ATLAS"><pre class="sig">OFF_ATLAS<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;[!]&#39;</span>
+</pre></div>
+</details></div>
+<h2>Used by</h2><p><code>utils/lexikon_1910/build_token_review.py</code> <code>utils/lexikon_1910/read_transcription_md.py</code> <code>utils/lexikon_1910/score_certification.py</code> <code>utils/lexikon_1910/score_r5_german_notes.py</code> <code>utils/lexikon_1910/score_table_passes.py</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/lexikon_1910/check_transcription.py · 312 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;Validate a human transcription worksheet, and turn it into a reader.</span>
+
+<span class="sd">Run it while transcribing, as often as you like. It reports typos against the</span>
+<span class="sd">curated token list, keys that no longer match the register, and how much of the</span>
+<span class="sd">worksheet is filled — and once it is clean it writes</span>
+<span class="sd">``inventory_human_freeform.csv``, in exactly the shape the model passes produce.</span>
+
+<span class="sd">That last part is the point. The human becomes the fourth reader, so</span>
+<span class="sd">``compare_symbol_passes.py`` and the family collapse consume it unchanged, and</span>
+<span class="sd">every figure the pilot reports stops being *agreement between readers* and becomes</span>
+<span class="sd">**accuracy against a person**. Nothing in this project has had that before.</span>
+
+<span class="sd">The confidence marks are kept, not normalised away:</span>
+
+<span class="sd">``[school]``   certain</span>
+<span class="sd">``[school]?``  probably this — recorded as ``confidence=&quot;unsure&quot;``</span>
+<span class="sd">``[?]``        a symbol is printed and could not be identified</span>
+<span class="sd">``[!]``        clearly a symbol, and not on the atlas</span>
+
+<span class="sd">The trailing ``?`` is what decides an argument the models cannot settle. If they</span>
+<span class="sd">fail where the transcriber was unsure, the limit is the 399 DPI scan and</span>
+<span class="sd">collapsing near-identical symbols into families is the correct resolution of the</span>
+<span class="sd">source; if they fail where the transcriber was confident, the limit is the readers</span>
+<span class="sd">and it is worth attacking. Same for ``[?]``: a high rate says the distinction is</span>
+<span class="sd">not on the paper at the size it was printed.</span>
+
+<span class="sd">Usage</span>
+<span class="sd">-----</span>
+<span class="sd">    python utils/lexikon_1910/check_transcription.py</span>
+<span class="sd">    python utils/lexikon_1910/check_transcription.py --write</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">csv</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">Counter</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">))</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_institutions</span> <span class="k">as</span> <span class="n">lxin</span>    <span class="c1"># noqa: E402</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_vision</span> <span class="k">as</span> <span class="n">lxv</span>           <span class="c1"># noqa: E402</span>
+
+<span class="n">SHEET</span> <span class="o">=</span> <span class="p">(</span><span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;places&quot;</span> <span class="o">/</span> <span class="s2">&quot;transcription_gold&quot;</span>
+         <span class="o">/</span> <span class="s2">&quot;_superseded&quot;</span> <span class="o">/</span> <span class="s2">&quot;freeform_2026-08&quot;</span> <span class="o">/</span> <span class="s2">&quot;worksheet.txt&quot;</span><span class="p">)</span>
+<span class="n">ABBREVIATIONS</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;places&quot;</span> <span class="o">/</span> <span class="s2">&quot;institution_abbreviations.csv&quot;</span>
+<span class="c1">#: Its own file since 2026-10-05. This is the FIRST reading of the four development</span>
+<span class="c1">#: pages; the scored gold, ``inventory_human.csv``, is now written from the</span>
+<span class="c1">#: whole-page sheets by ``read_transcription_md.py --write``. Both used to write</span>
+<span class="c1">#: that one name, so whichever ran last silently became the gold.</span>
+<span class="n">OUT</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;output&quot;</span> <span class="o">/</span> <span class="s2">&quot;lexikon_1910_pilot&quot;</span> <span class="o">/</span> <span class="s2">&quot;inventory_human_freeform.csv&quot;</span>
+
+<span class="c1">#: ``118  jirkov: &lt;names and keys and symbols&gt;`` — the line&#39;s page and district.</span>
+<span class="c1">#:</span>
+<span class="c1">#: The transcriber went **past** the sheet that was handed over, and the extra is</span>
+<span class="c1">#: worth more than the part that was asked for. The generated sheet pre-filled one</span>
+<span class="c1">#: key per line and nothing else; what came back carries, per line, the bold</span>
+<span class="c1">#: municipality, then a colon, then each non-bold osada named immediately before</span>
+<span class="c1">#: the key that belongs to it:</span>
+<span class="c1">#:</span>
+<span class="c1">#:     118  jirkov: Albrechtice, Ulbersdorf: Albrechtice, Ulbersdorf 1, 1) …</span>
+<span class="c1">#:                  Černice, Tschernitz 1, 2) … Eisenberk, Eisenberg 1, 3) …</span>
+<span class="c1">#:</span>
+<span class="c1">#: That is the join the pipeline could not make on its own. An entry keyed ``1, 3)``</span>
+<span class="c1">#: is meaningless without knowing that osada 3 of municipality 1 is Eisenberk, and</span>
+<span class="c1">#: the OCR of the table&#39;s name column is exactly where that is least reliable. The</span>
+<span class="c1">#: Návod (p. VII) confirms the convention is the source&#39;s own: &quot;Nalézá-li se ústav</span>
+<span class="c1">#: v části místa, která nesdílí jména osady, jest jméno oné části místa výslovně</span>
+<span class="c1">#: uvedeno.&quot;</span>
+<span class="n">_LINE_RE</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;^\s*(\d{3,4})\s+([^\s:]+)\s*:\s*(.*)$&quot;</span><span class="p">)</span>
+
+<span class="c1">#: ``12, 3)`` — a municipality and settlement key.</span>
+<span class="c1">#:</span>
+<span class="c1">#: Parenthesised groups are **masked before this runs**. The register prints the</span>
+<span class="c1">#: cadastral symbol with the osada numbers it covers — ``[cadastral] (3,5)``,</span>
+<span class="c1">#: ``(1,3,4)`` — and those are digit-comma-digit-paren, which is exactly this</span>
+<span class="c1">#: pattern. Unmasked, ``(1,3,4)`` yields a phantom entry &quot;municipality 3,</span>
+<span class="c1">#: settlement 4&quot; that would be filed under a municipality that is not on the page.</span>
+<span class="n">_KEY_RE</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;(\d{1,3})\s*,\s*([^)]{0,4})\)&quot;</span><span class="p">)</span>
+
+<span class="c1">#: A token as written by hand, with its optional count and trailing uncertainty mark.</span>
+<span class="n">_TOKEN_RE</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;(\d{1,2}\s+)?(\[[^\]]*\])(\?)?&quot;</span><span class="p">)</span>
+
+<span class="c1">#: Tokens that describe **what a place is**, not what it has. In the name region</span>
+<span class="c1">#: they are the source&#39;s topographic characteristic (Návod p. VII); they must never</span>
+<span class="c1">#: reach the institution inventory, where ``[ves]`` would read as a village having</span>
+<span class="c1">#: been *built* in the village.</span>
+<span class="n">TOPOGRAPHIC</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;[obec]&quot;</span><span class="p">,</span> <span class="s2">&quot;[osada]&quot;</span><span class="p">,</span> <span class="s2">&quot;[cadastral]&quot;</span><span class="p">,</span> <span class="s2">&quot;[mesto]&quot;</span><span class="p">,</span> <span class="s2">&quot;[mestys]&quot;</span><span class="p">,</span> <span class="s2">&quot;[ves]&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;[city-part]&quot;</span><span class="p">,</span> <span class="s2">&quot;[suburb]&quot;</span><span class="p">,</span> <span class="s2">&quot;[mestys-part]&quot;</span><span class="p">,</span> <span class="s2">&quot;[hamlet]&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;[manor-farm]&quot;</span><span class="p">,</span> <span class="s2">&quot;[cottage-group]&quot;</span><span class="p">,</span> <span class="s2">&quot;[house-group]&quot;</span><span class="p">,</span> <span class="s2">&quot;[colony]&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;[scattered]&quot;</span><span class="p">,</span> <span class="s2">&quot;[solitary]&quot;</span><span class="p">,</span> <span class="s2">&quot;[single-house]&quot;</span><span class="p">}</span>
+
+<span class="c1">#: Printed but unidentifiable, and printed but not on the atlas.</span>
+<span class="n">UNREADABLE</span> <span class="o">=</span> <span class="s2">&quot;[?]&quot;</span>
+<span class="n">OFF_ATLAS</span> <span class="o">=</span> <span class="s2">&quot;[!]&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_mask_parens</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Blank out ``(...)`` spans, preserving length so offsets still line up.&quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="n">depth</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">char</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">text</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">char</span> <span class="o">==</span> <span class="s2">&quot;(&quot;</span><span class="p">:</span>
+            <span class="n">depth</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="k">if</span> <span class="n">depth</span><span class="p">:</span>
+            <span class="n">out</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot; &quot;</span>
+        <span class="k">if</span> <span class="n">char</span> <span class="o">==</span> <span class="s2">&quot;)&quot;</span> <span class="ow">and</span> <span class="n">depth</span><span class="p">:</span>
+            <span class="n">depth</span> <span class="o">-=</span> <span class="mi">1</span>
+    <span class="k">return</span> <span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">out</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">split_entries</span><span class="p">(</span><span class="n">body</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``[(name, muni_seq, settlement_seq, symbols), …]`` for one worksheet line.</span>
+
+<span class="sd">    The name of an entry is whatever stands between the previous entry&#39;s symbols</span>
+<span class="sd">    and this entry&#39;s key. The two are separated on the **last full stop** before</span>
+<span class="sd">    the key, which is the convention the transcriber used and the one the register</span>
+<span class="sd">    itself uses — every entry&#39;s symbol list is closed with a period before the next</span>
+<span class="sd">    place is named.</span>
+
+<span class="sd">    Where there is no full stop the whole span is taken as the name, not as</span>
+<span class="sd">    symbols: a missing name costs a join, an invented symbol list corrupts the</span>
+<span class="sd">    inventory, and between the two failures only one is recoverable later.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">masked</span> <span class="o">=</span> <span class="n">_mask_parens</span><span class="p">(</span><span class="n">body</span><span class="p">)</span>
+    <span class="n">keys</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">_KEY_RE</span><span class="o">.</span><span class="n">finditer</span><span class="p">(</span><span class="n">masked</span><span class="p">))</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">carried</span> <span class="o">=</span> <span class="n">body</span><span class="p">[:</span><span class="n">keys</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">start</span><span class="p">()]</span> <span class="k">if</span> <span class="n">keys</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">key</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">keys</span><span class="p">):</span>
+        <span class="n">end</span> <span class="o">=</span> <span class="n">keys</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">start</span><span class="p">()</span> <span class="k">if</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">keys</span><span class="p">)</span> <span class="k">else</span> <span class="nb">len</span><span class="p">(</span><span class="n">body</span><span class="p">)</span>
+        <span class="n">span</span> <span class="o">=</span> <span class="n">body</span><span class="p">[</span><span class="n">key</span><span class="o">.</span><span class="n">end</span><span class="p">():</span><span class="n">end</span><span class="p">]</span>
+        <span class="c1"># The span between this key and the next holds this entry&#39;s symbols *and*</span>
+        <span class="c1"># the next entry&#39;s place name. Cut them apart on the last full stop and</span>
+        <span class="c1"># carry the name forward — assigning the whole span to this entry instead</span>
+        <span class="c1"># files the next place&#39;s topographic symbol as an institution of this one,</span>
+        <span class="c1"># which is how `[ves]` first appeared as something Humburky *had*.</span>
+        <span class="k">if</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">keys</span><span class="p">):</span>
+            <span class="n">cut</span> <span class="o">=</span> <span class="n">span</span><span class="o">.</span><span class="n">rfind</span><span class="p">(</span><span class="s2">&quot;.&quot;</span><span class="p">)</span>
+            <span class="n">symbols</span><span class="p">,</span> <span class="n">carry</span> <span class="o">=</span> <span class="p">(</span><span class="n">span</span><span class="p">[:</span><span class="n">cut</span> <span class="o">+</span> <span class="mi">1</span><span class="p">],</span> <span class="n">span</span><span class="p">[</span><span class="n">cut</span> <span class="o">+</span> <span class="mi">1</span><span class="p">:])</span> <span class="k">if</span> <span class="n">cut</span> <span class="o">&gt;=</span> <span class="mi">0</span> <span class="k">else</span> <span class="p">(</span><span class="n">span</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">symbols</span><span class="p">,</span> <span class="n">carry</span> <span class="o">=</span> <span class="n">span</span><span class="p">,</span> <span class="s2">&quot;&quot;</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">carried</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span> <span class="nb">int</span><span class="p">(</span><span class="n">key</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)),</span>
+                    <span class="p">(</span><span class="n">key</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s2">&quot; ,—-–&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;0&quot;</span><span class="p">,</span> <span class="n">symbols</span><span class="p">))</span>
+        <span class="n">carried</span> <span class="o">=</span> <span class="n">carry</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_names</span><span class="p">(</span><span class="n">name_field</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``(municipality, settlement, topographic tokens)`` from an entry&#39;s name.</span>
+
+<span class="sd">    Only the first entry of a line carries both, separated by a colon: the bold</span>
+<span class="sd">    municipality, then the osada the key belongs to. Later entries name the osada</span>
+<span class="sd">    alone and inherit the municipality from the line.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">tokens</span> <span class="o">=</span> <span class="p">[</span><span class="n">lxv</span><span class="o">.</span><span class="n">canonical</span><span class="p">(</span><span class="n">t</span><span class="p">)</span> <span class="k">for</span> <span class="n">_c</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="n">_u</span> <span class="ow">in</span> <span class="n">_TOKEN_RE</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="n">name_field</span><span class="p">)]</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">_TOKEN_RE</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">name_field</span><span class="p">)</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\([^)]*\)&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">text</span><span class="p">)</span>
+    <span class="n">parts</span> <span class="o">=</span> <span class="p">[</span><span class="n">p</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s2">&quot; </span><span class="se">\t</span><span class="s2">*)(,;.&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">text</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;:&quot;</span><span class="p">)]</span>
+    <span class="n">parts</span> <span class="o">=</span> <span class="p">[</span><span class="n">p</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">parts</span> <span class="k">if</span> <span class="n">p</span><span class="p">]</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">2</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">parts</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">parts</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">tokens</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">parts</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">if</span> <span class="n">parts</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">),</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">tokens</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">parse</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">allowed</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``(rows, problems, blank)`` from the worksheet.&quot;&quot;&quot;</span>
+    <span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">problems</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">blank</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">number</span><span class="p">,</span> <span class="n">raw</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">path</span><span class="o">.</span><span class="n">read_text</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">splitlines</span><span class="p">(),</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">raw</span><span class="o">.</span><span class="n">lstrip</span><span class="p">()</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;#&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">raw</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+            <span class="k">continue</span>
+        <span class="n">match</span> <span class="o">=</span> <span class="n">_LINE_RE</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">match</span><span class="p">:</span>
+            <span class="n">problems</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  line </span><span class="si">{</span><span class="n">number</span><span class="si">}</span><span class="s2">: not a worksheet row: </span><span class="si">{</span><span class="n">raw</span><span class="o">.</span><span class="n">strip</span><span class="p">()[:</span><span class="mi">60</span><span class="p">]</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">continue</span>
+        <span class="n">page</span><span class="p">,</span> <span class="n">district</span><span class="p">,</span> <span class="n">body</span> <span class="o">=</span> <span class="n">match</span><span class="o">.</span><span class="n">groups</span><span class="p">()</span>
+        <span class="n">entries</span> <span class="o">=</span> <span class="n">split_entries</span><span class="p">(</span><span class="n">body</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">entries</span><span class="p">:</span>
+            <span class="n">blank</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">continue</span>
+        <span class="n">municipality</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">name_field</span><span class="p">,</span> <span class="n">muni</span><span class="p">,</span> <span class="n">settlement</span><span class="p">,</span> <span class="n">symbols</span> <span class="ow">in</span> <span class="n">entries</span><span class="p">:</span>
+            <span class="n">muni_name</span><span class="p">,</span> <span class="n">settlement_name</span><span class="p">,</span> <span class="n">topographic</span> <span class="o">=</span> <span class="n">_names</span><span class="p">(</span><span class="n">name_field</span><span class="p">)</span>
+            <span class="c1"># The municipality is stated once, on the line&#39;s first entry; later</span>
+            <span class="c1"># entries name only their own osada and inherit it.</span>
+            <span class="k">if</span> <span class="n">muni_name</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">settlement_name</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">municipality</span><span class="p">:</span>
+                <span class="n">municipality</span><span class="p">,</span> <span class="n">settlement_name</span> <span class="o">=</span> <span class="n">muni_name</span><span class="p">,</span> <span class="n">muni_name</span>
+            <span class="k">elif</span> <span class="n">muni_name</span> <span class="ow">and</span> <span class="n">settlement_name</span><span class="p">:</span>
+                <span class="n">municipality</span> <span class="o">=</span> <span class="n">muni_name</span>
+            <span class="k">elif</span> <span class="ow">not</span> <span class="n">settlement_name</span><span class="p">:</span>
+                <span class="n">settlement_name</span> <span class="o">=</span> <span class="n">muni_name</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">symbols</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+                <span class="n">blank</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="k">continue</span>
+            <span class="n">position</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="k">for</span> <span class="n">count</span><span class="p">,</span> <span class="n">token</span><span class="p">,</span> <span class="n">unsure</span> <span class="ow">in</span> <span class="n">_TOKEN_RE</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="n">symbols</span><span class="p">):</span>
+                <span class="n">canonical</span> <span class="o">=</span> <span class="n">lxv</span><span class="o">.</span><span class="n">canonical</span><span class="p">(</span><span class="n">token</span><span class="p">)</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">token</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">3</span> <span class="k">else</span> <span class="n">token</span>
+                <span class="k">if</span> <span class="n">canonical</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">allowed</span> <span class="ow">and</span> <span class="n">token</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="n">UNREADABLE</span><span class="p">,</span> <span class="n">OFF_ATLAS</span><span class="p">):</span>
+                    <span class="n">problems</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;  line </span><span class="si">{</span><span class="n">number</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">token</span><span class="si">!r}</span><span class="s2"> is not on the atlas — check &quot;</span>
+                        <span class="sa">f</span><span class="s2">&quot;the spelling against symbols/manifest.csv, or write &quot;</span>
+                        <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">OFF_ATLAS</span><span class="si">}</span><span class="s2"> if the symbol is genuinely not there&quot;</span><span class="p">)</span>
+                    <span class="k">continue</span>
+                <span class="k">if</span> <span class="n">canonical</span> <span class="ow">in</span> <span class="n">TOPOGRAPHIC</span><span class="p">:</span>
+                    <span class="c1"># Printed in the symbol list rather than against the name. It</span>
+                    <span class="c1"># says what the place *is*; it is not an institution and must</span>
+                    <span class="c1"># not be counted as one.</span>
+                    <span class="n">problems</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;  line </span><span class="si">{</span><span class="n">number</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">canonical</span><span class="si">}</span><span class="s2"> is a topographic symbol in &quot;</span>
+                        <span class="sa">f</span><span class="s2">&quot;the institution list of </span><span class="si">{</span><span class="n">muni</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">settlement</span><span class="si">}</span><span class="s2"> — should it &quot;</span>
+                        <span class="sa">f</span><span class="s2">&quot;be against the name?&quot;</span><span class="p">)</span>
+                    <span class="k">continue</span>
+                <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
+                    <span class="s2">&quot;check&quot;</span><span class="p">:</span> <span class="s2">&quot;I13_inventory&quot;</span><span class="p">,</span> <span class="s2">&quot;page&quot;</span><span class="p">:</span> <span class="n">page</span><span class="o">.</span><span class="n">zfill</span><span class="p">(</span><span class="mi">4</span><span class="p">),</span>
+                    <span class="s2">&quot;district&quot;</span><span class="p">:</span> <span class="n">district</span><span class="p">,</span> <span class="s2">&quot;muni_seq&quot;</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">muni</span><span class="p">),</span>
+                    <span class="s2">&quot;settlement_seq&quot;</span><span class="p">:</span> <span class="n">settlement</span><span class="p">,</span> <span class="s2">&quot;entry_index&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;municipality&quot;</span><span class="p">:</span> <span class="n">municipality</span><span class="p">,</span> <span class="s2">&quot;settlement&quot;</span><span class="p">:</span> <span class="n">settlement_name</span><span class="p">,</span>
+                    <span class="s2">&quot;topographic&quot;</span><span class="p">:</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">topographic</span><span class="p">),</span>
+                    <span class="s2">&quot;code&quot;</span><span class="p">:</span> <span class="n">canonical</span><span class="p">,</span> <span class="s2">&quot;count&quot;</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">count</span><span class="p">)</span> <span class="k">if</span> <span class="n">count</span> <span class="k">else</span> <span class="mi">1</span><span class="p">,</span>
+                    <span class="s2">&quot;position&quot;</span><span class="p">:</span> <span class="n">position</span><span class="p">,</span> <span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="s2">&quot;human&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;confidence&quot;</span><span class="p">:</span> <span class="p">(</span><span class="s2">&quot;unsure&quot;</span> <span class="k">if</span> <span class="n">unsure</span> <span class="k">else</span>
+                                   <span class="s2">&quot;unreadable&quot;</span> <span class="k">if</span> <span class="n">token</span> <span class="o">==</span> <span class="n">UNREADABLE</span> <span class="k">else</span>
+                                   <span class="s2">&quot;off-atlas&quot;</span> <span class="k">if</span> <span class="n">token</span> <span class="o">==</span> <span class="n">OFF_ATLAS</span> <span class="k">else</span> <span class="s2">&quot;certain&quot;</span><span class="p">),</span>
+                    <span class="s2">&quot;english&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;corroborated&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;count_text&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;glyph&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;context&quot;</span><span class="p">:</span> <span class="n">symbols</span><span class="o">.</span><span class="n">strip</span><span class="p">()[:</span><span class="mi">80</span><span class="p">],</span>
+                <span class="p">})</span>
+                <span class="n">position</span> <span class="o">+=</span> <span class="mi">1</span>
+    <span class="k">return</span> <span class="n">rows</span><span class="p">,</span> <span class="n">problems</span><span class="p">,</span> <span class="n">blank</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="p">,</span>
+                                 <span class="n">formatter_class</span><span class="o">=</span><span class="n">argparse</span><span class="o">.</span><span class="n">RawDescriptionHelpFormatter</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--sheet&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">SHEET</span><span class="p">))</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--write&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;write inventory_human.csv for the comparison tools&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+
+    <span class="n">path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">sheet</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;no worksheet at </span><span class="si">{</span><span class="n">path</span><span class="si">}</span><span class="s2">; run make_transcription_worksheet.py first&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="mi">1</span>
+
+    <span class="n">abbreviations</span> <span class="o">=</span> <span class="n">lxin</span><span class="o">.</span><span class="n">load_abbreviations</span><span class="p">(</span><span class="n">ABBREVIATIONS</span><span class="p">,</span> <span class="n">lang</span><span class="o">=</span><span class="s2">&quot;cs&quot;</span><span class="p">)</span>
+    <span class="n">allowed</span> <span class="o">=</span> <span class="n">lxv</span><span class="o">.</span><span class="n">vocabulary</span><span class="p">(</span><span class="n">abbreviations</span><span class="p">)</span> <span class="o">|</span> <span class="p">{</span><span class="n">OFF_ATLAS</span><span class="p">}</span>
+    <span class="n">meaning</span> <span class="o">=</span> <span class="p">{</span><span class="n">a</span><span class="o">.</span><span class="n">code</span><span class="p">:</span> <span class="p">(</span><span class="n">a</span><span class="o">.</span><span class="n">english</span><span class="p">,</span> <span class="n">a</span><span class="o">.</span><span class="n">category</span><span class="p">)</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">abbreviations</span><span class="p">}</span>
+
+    <span class="n">rows</span><span class="p">,</span> <span class="n">problems</span><span class="p">,</span> <span class="n">blank</span> <span class="o">=</span> <span class="n">parse</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">allowed</span><span class="p">)</span>
+    <span class="c1"># Keyed on the settlement too. Without it every osada of one municipality</span>
+    <span class="c1"># collapses into a single &quot;entry&quot; and the sheet looks a fifth smaller than it</span>
+    <span class="c1"># is — 47 municipalities standing in for 55 entries.</span>
+    <span class="n">entries</span> <span class="o">=</span> <span class="p">{(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;district&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;muni_seq&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;settlement_seq&quot;</span><span class="p">])</span>
+               <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">}</span>
+    <span class="n">places</span> <span class="o">=</span> <span class="p">{(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;district&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;settlement&quot;</span><span class="p">])</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span>
+              <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;settlement&quot;</span><span class="p">]}</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span><span class="si">}</span><span class="s2"> symbols over </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">entries</span><span class="p">)</span><span class="si">}</span><span class="s2"> entries &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">places</span><span class="p">)</span><span class="si">}</span><span class="s2"> named places); </span><span class="si">{</span><span class="n">blank</span><span class="si">}</span><span class="s2"> entries still blank&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">problems</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">problems</span><span class="p">)</span><span class="si">}</span><span class="s2"> problems:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">problem</span> <span class="ow">in</span> <span class="n">problems</span><span class="p">[:</span><span class="mi">20</span><span class="p">]:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">problem</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">problems</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">20</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  ... </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">problems</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">20</span><span class="si">}</span><span class="s2"> more&quot;</span><span class="p">)</span>
+
+    <span class="n">confidence</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;confidence&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">rows</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">kind</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;certain&quot;</span><span class="p">,</span> <span class="s2">&quot;unsure&quot;</span><span class="p">,</span> <span class="s2">&quot;unreadable&quot;</span><span class="p">,</span> <span class="s2">&quot;off-atlas&quot;</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">confidence</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">kind</span><span class="p">):</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">kind</span><span class="si">:</span><span class="s2">11s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">confidence</span><span class="p">[</span><span class="n">kind</span><span class="p">]</span><span class="si">:</span><span class="s2">5d</span><span class="si">}</span><span class="s2">  &quot;</span>
+                      <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">confidence</span><span class="p">[</span><span class="n">kind</span><span class="p">]</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span><span class="si">:</span><span class="s2">5.1%</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">unreadable</span> <span class="o">=</span> <span class="n">confidence</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;unreadable&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="n">confidence</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;unsure&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">unreadable</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mf">0.25</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">()</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  Over a quarter of the marks could not be read with &quot;</span>
+                  <span class="s2">&quot;certainty by a person.&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  That is a finding about the source, not about the &quot;</span>
+                  <span class="s2">&quot;transcription: it says the&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  distinction is not on the paper at this size, and the &quot;</span>
+                  <span class="s2">&quot;family collapse is the&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  right resolution rather than a compromise.&quot;</span><span class="p">)</span>
+
+        <span class="n">top</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;code&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">()</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  most frequent:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">code</span><span class="p">,</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">top</span><span class="o">.</span><span class="n">most_common</span><span class="p">(</span><span class="mi">10</span><span class="p">):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">n</span><span class="si">:</span><span class="s2">4d</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">code</span><span class="si">:</span><span class="s2">22s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">meaning</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">code</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="s1">&#39;&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="p">))[</span><span class="mi">0</span><span class="p">][:</span><span class="mi">30</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">write</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">problems</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  not writing: fix the problems above first&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="mi">1</span>
+        <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+            <span class="n">row</span><span class="p">[</span><span class="s2">&quot;english&quot;</span><span class="p">],</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;category&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">meaning</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;code&quot;</span><span class="p">],</span> <span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+        <span class="n">OUT</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">with</span> <span class="n">OUT</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;w&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+            <span class="n">writer</span> <span class="o">=</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictWriter</span><span class="p">(</span><span class="n">fh</span><span class="p">,</span> <span class="n">fieldnames</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="n">rows</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+            <span class="n">writer</span><span class="o">.</span><span class="n">writeheader</span><span class="p">()</span>
+            <span class="n">writer</span><span class="o">.</span><span class="n">writerows</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  wrote </span><span class="si">{</span><span class="n">OUT</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  now: python utils/lexikon_1910/_archive/compare_symbol_passes.py&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>

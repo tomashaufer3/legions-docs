@@ -1,0 +1,1208 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Cut the German edition's own symbol legend into a labelled atlas (D-92).</p><p class="tldr-facts"><b>1910 register</b> · v1.0.0 · 327 lines · 10 public functions · 13 constants · used by nothing else · <code>utils/lexikon_1910/build_symbol_atlas_de.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-lexikon_1910-build_symbol_atlas_de-load_targets">load_targets</a><a class="chip" href="#fn-utils-lexikon_1910-build_symbol_atlas_de-plate_words">plate_words</a><a class="chip" href="#fn-utils-lexikon_1910-build_symbol_atlas_de-dark_mask">dark_mask</a><a class="chip" href="#fn-utils-lexikon_1910-build_symbol_atlas_de-plate_ink">plate_ink</a><a class="chip" href="#fn-utils-lexikon_1910-build_symbol_atlas_de-ink_columns">ink_columns</a><a class="chip" href="#fn-utils-lexikon_1910-build_symbol_atlas_de-plate_entries">plate_entries</a><a class="chip" href="#fn-utils-lexikon_1910-build_symbol_atlas_de-body_rows">body_rows</a><a class="chip" href="#fn-utils-lexikon_1910-build_symbol_atlas_de-build">build</a><a class="chip" href="#fn-utils-lexikon_1910-build_symbol_atlas_de-report">report</a><a class="chip" href="#fn-utils-lexikon_1910-build_symbol_atlas_de-main">main</a><a class="chip const" href="#c-utils-lexikon_1910-build_symbol_atlas_de-HERE">HERE</a><a class="chip const" href="#c-utils-lexikon_1910-build_symbol_atlas_de-ROOT">ROOT</a><a class="chip const" href="#c-utils-lexikon_1910-build_symbol_atlas_de-PROFILE">PROFILE</a><a class="chip const" href="#c-utils-lexikon_1910-build_symbol_atlas_de-OUT_DIR">OUT_DIR</a><a class="chip const" href="#c-utils-lexikon_1910-build_symbol_atlas_de-LEGEND_SCAN">LEGEND_SCAN</a><a class="chip const" href="#c-utils-lexikon_1910-build_symbol_atlas_de-RENDER_WIDTH">RENDER_WIDTH</a><a class="chip const" href="#c-utils-lexikon_1910-build_symbol_atlas_de-TITLE">TITLE</a><a class="chip const" href="#c-utils-lexikon_1910-build_symbol_atlas_de-BLANK_MIN">BLANK_MIN</a><a class="chip const" href="#c-utils-lexikon_1910-build_symbol_atlas_de-SYMBOL_MAX">SYMBOL_MAX</a><a class="chip const" href="#c-utils-lexikon_1910-build_symbol_atlas_de-GLOSS_MIN">GLOSS_MIN</a><a class="chip const" href="#c-utils-lexikon_1910-build_symbol_atlas_de-BAND_INK">BAND_INK</a><a class="chip const" href="#c-utils-lexikon_1910-build_symbol_atlas_de-PAPER_SHARE">PAPER_SHARE</a><a class="chip const" href="#c-utils-lexikon_1910-build_symbol_atlas_de-COLUMN_SHARE">COLUMN_SHARE</a></div>
+<h2>How it works</h2><p>The German twin of <code>build_symbol_atlas</code>. The <em>Spezialortsrepertorium von
+Böhmen</em> explains its pictograms on the plate <em>Zeichenerklärung</em>, p. XI — scan
+0012 of the UBW scan — three columns wide, one symbol to a line with its German
+meaning beside it, exactly as the Czech <em>Výklad značek</em> does on its p. XI.</p>
+<p><strong>The German reader is shown its own volume's plate, not the Czech one.</strong> The two
+plates are not the same list: the German one prints <strong>80</strong> symbols, and the three
+the Czech plate has beyond them — <code>[cooperative]</code>, <code>[port]</code> and
+<code>[rc-parish-exp]</code> — are not on it (the German volume writes cooperatives as
+letters only, and a parish expositure as the word <code>Exp.</code>). The prompt tells the
+reader that the key "is the whole of what this volume prints", so a Czech key
+would be a false statement to a German reader, three times over.</p>
+<p>How it works is the Czech builder's, reused rather than copied: the plate is
+self-labelling, so each printed gloss names its token through the <code>de</code>
+pictogram rows of <code>institution_abbreviations.csv</code> (whose expansions were read
+off this same plate), and the layout — symbol band, gutter, gloss — gives the
+crop. The one difference is the text layer: this PDF has no ALTO, so the words
+come from the PDF's own positional OCR layer (<code>pymupdf</code> <code>get_text("words")</code>),
+scaled onto a render at the Czech plate's width so the Czech builder's pixel
+constants keep their meaning.</p>
+<p>What comes out, in <code>reference/places/symbols/de/</code>:</p>
+<p><code>&amp;lt;token&amp;gt;.png</code>       one crop per pictogram
+<code>manifest.csv</code>      token, printed gloss, match score, source box
+<code>atlas.png</code>         the crops with their tokens, for a person
+<code>atlas_prompt.png</code>  the dense sheet a reader is sent (<code>--atlas</code> arms)</p>
+<h4>Usage</h4>
+<pre><code>python utils/lexikon_1910/build_symbol_atlas_de.py
+python utils/lexikon_1910/build_symbol_atlas_de.py --show
+</code></pre>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-lexikon_1910-build_symbol_atlas_de-load_targets">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">load_targets</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">]</span></pre>
+<div class="fndoc"><p><code>[(token, printed gloss, english, category)]</code> for every German pictogram.</p>
+<p>The gloss is the expansion <strong>plus the qualifier printed with it</strong>, which the
+table keeps in <code>note</code> after the plate reference (<code>Rotte</code> + <code>Häuser in
+loserer Verteilung …</code>). The plate prints both on one entry, and the OCR
+damages short words worst — it reads <em>Rotte</em> as <code>Hotte</code> — so the long
+qualifier is what lets the entry be matched at all.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/lexikon_1910/build_symbol_atlas.py</code></p>
+<details><summary>source · lines 73–90 (18 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">73</span>
+<span class="normal">74</span>
+<span class="normal">75</span>
+<span class="normal">76</span>
+<span class="normal">77</span>
+<span class="normal">78</span>
+<span class="normal">79</span>
+<span class="normal">80</span>
+<span class="normal">81</span>
+<span class="normal">82</span>
+<span class="normal">83</span>
+<span class="normal">84</span>
+<span class="normal">85</span>
+<span class="normal">86</span>
+<span class="normal">87</span>
+<span class="normal">88</span>
+<span class="normal">89</span>
+<span class="normal">90</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">load_targets</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``[(token, printed gloss, english, category)]`` for every German pictogram.</span>
+
+<span class="sd">    The gloss is the expansion **plus the qualifier printed with it**, which the</span>
+<span class="sd">    table keeps in ``note`` after the plate reference (``Rotte`` + ``Häuser in</span>
+<span class="sd">    loserer Verteilung …``). The plate prints both on one entry, and the OCR</span>
+<span class="sd">    damages short words worst — it reads *Rotte* as ``Hotte`` — so the long</span>
+<span class="sd">    qualifier is what lets the entry be matched at all.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="n">lxin</span><span class="o">.</span><span class="n">load_abbreviations</span><span class="p">(</span><span class="n">bsa</span><span class="o">.</span><span class="n">ABBREVIATIONS</span><span class="p">,</span> <span class="n">lang</span><span class="o">=</span><span class="s2">&quot;de&quot;</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">a</span><span class="o">.</span><span class="n">kind</span> <span class="o">!=</span> <span class="s2">&quot;pictogram&quot;</span> <span class="ow">or</span> <span class="n">a</span><span class="o">.</span><span class="n">lang</span> <span class="o">!=</span> <span class="s2">&quot;de&quot;</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">a</span><span class="o">.</span><span class="n">expansion</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">qualifier</span> <span class="o">=</span> <span class="n">a</span><span class="o">.</span><span class="n">note</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;;&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="k">if</span> <span class="s2">&quot;;&quot;</span> <span class="ow">in</span> <span class="n">a</span><span class="o">.</span><span class="n">note</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+        <span class="n">printed</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">a</span><span class="o">.</span><span class="n">expansion</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">qualifier</span><span class="si">}</span><span class="s2">)&quot;</span> <span class="k">if</span> <span class="n">qualifier</span> <span class="ow">and</span> <span class="s2">&quot;connector&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">qualifier</span>             <span class="k">else</span> <span class="n">a</span><span class="o">.</span><span class="n">expansion</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">a</span><span class="o">.</span><span class="n">code</span><span class="p">,</span> <span class="n">printed</span><span class="p">,</span> <span class="n">a</span><span class="o">.</span><span class="n">english</span><span class="p">,</span> <span class="n">a</span><span class="o">.</span><span class="n">category</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-build_symbol_atlas_de-plate_words">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">plate_words</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">scan</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">width</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">]</span></pre>
+<div class="fndoc"><p>The plate's OCR words as ALTO-shaped <code>(top, left, width, height, text)</code>.</p>
+<p>That is the tuple <code>build_symbol_atlas.cluster_lines</code> and
+<code>build_symbol_atlas.columns_of</code> index into, so the Czech layout code
+reads the German plate unchanged.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 93–111 (19 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">plate_words</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">scan</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">width</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The plate&#39;s OCR words as ALTO-shaped ``(top, left, width, height, text)``.</span>
+
+<span class="sd">    That is the tuple :func:`build_symbol_atlas.cluster_lines` and</span>
+<span class="sd">    :func:`~build_symbol_atlas.columns_of` index into, so the Czech layout code</span>
+<span class="sd">    reads the German plate unchanged.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">fitz</span>
+
+    <span class="k">with</span> <span class="n">fitz</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">))</span> <span class="k">as</span> <span class="n">doc</span><span class="p">:</span>
+        <span class="n">page</span> <span class="o">=</span> <span class="n">doc</span><span class="p">[</span><span class="n">scan</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span>
+        <span class="n">zoom</span> <span class="o">=</span> <span class="n">width</span> <span class="o">/</span> <span class="n">page</span><span class="o">.</span><span class="n">rect</span><span class="o">.</span><span class="n">width</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">x0</span><span class="p">,</span> <span class="n">y0</span><span class="p">,</span> <span class="n">x1</span><span class="p">,</span> <span class="n">y1</span><span class="p">,</span> <span class="n">text</span><span class="p">,</span> <span class="o">*</span><span class="n">_rest</span> <span class="ow">in</span> <span class="n">page</span><span class="o">.</span><span class="n">get_text</span><span class="p">(</span><span class="s2">&quot;words&quot;</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">text</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+                <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="nb">int</span><span class="p">(</span><span class="n">y0</span> <span class="o">*</span> <span class="n">zoom</span><span class="p">),</span> <span class="nb">int</span><span class="p">(</span><span class="n">x0</span> <span class="o">*</span> <span class="n">zoom</span><span class="p">),</span>
+                            <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">int</span><span class="p">((</span><span class="n">x1</span> <span class="o">-</span> <span class="n">x0</span><span class="p">)</span> <span class="o">*</span> <span class="n">zoom</span><span class="p">)),</span>
+                            <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">int</span><span class="p">((</span><span class="n">y1</span> <span class="o">-</span> <span class="n">y0</span><span class="p">)</span> <span class="o">*</span> <span class="n">zoom</span><span class="p">)),</span> <span class="n">text</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-build_symbol_atlas_de-dark_mask">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">dark_mask</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">share</span><span class="p">:</span> <span class="nb">float</span><span class="o">=</span><span class="n">PAPER_SHARE</span><span class="p">)</span></pre>
+<div class="fndoc"><p>Pixels darker than <code>share</code> of the plate's paper (its 90th percentile).</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 144–149 (6 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">dark_mask</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">share</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">PAPER_SHARE</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Pixels darker than ``share`` of the plate&#39;s paper (its 90th percentile).&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+    <span class="n">grey</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">image</span><span class="o">.</span><span class="n">convert</span><span class="p">(</span><span class="s2">&quot;L&quot;</span><span class="p">))</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">grey</span> <span class="o">&lt;</span> <span class="n">np</span><span class="o">.</span><span class="n">percentile</span><span class="p">(</span><span class="n">grey</span><span class="p">,</span> <span class="mi">90</span><span class="p">)</span> <span class="o">*</span> <span class="n">share</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-build_symbol_atlas_de-plate_ink">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">plate_ink</span><span class="p">(</span><span class="n">dark</span><span class="p">,</span> <span class="n">box</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span></pre>
+<div class="fndoc"><p>Share of <code>box</code> that is ink in the plate's own mask.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 152–156 (5 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">plate_ink</span><span class="p">(</span><span class="n">dark</span><span class="p">,</span> <span class="n">box</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Share of ``box`` that is ink in the plate&#39;s own mask.&quot;&quot;&quot;</span>
+    <span class="n">left</span><span class="p">,</span> <span class="n">top</span><span class="p">,</span> <span class="n">right</span><span class="p">,</span> <span class="n">bottom</span> <span class="o">=</span> <span class="n">box</span>
+    <span class="n">cell</span> <span class="o">=</span> <span class="n">dark</span><span class="p">[</span><span class="n">top</span><span class="p">:</span><span class="n">bottom</span><span class="p">,</span> <span class="n">left</span><span class="p">:</span><span class="n">right</span><span class="p">]</span>
+    <span class="k">return</span> <span class="nb">float</span><span class="p">(</span><span class="n">cell</span><span class="o">.</span><span class="n">mean</span><span class="p">())</span> <span class="k">if</span> <span class="n">cell</span><span class="o">.</span><span class="n">size</span> <span class="k">else</span> <span class="mf">0.0</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-build_symbol_atlas_de-ink_columns">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">ink_columns</span><span class="p">(</span><span class="n">dark</span><span class="p">,</span> <span class="n">top</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">bottom</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]]</span></pre>
+<div class="fndoc"><p><code>(column_left, gloss_left, column_right)</code> for each printed column.</p>
+<p>Ink runs between blank vertical bands of rows <code>top..bottom</code>; a run under
+<code>SYMBOL_MAX</code> followed directly by one over <code>GLOSS_MIN</code> opens a
+column, and a column ends where the next one starts.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 159–186 (28 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">ink_columns</span><span class="p">(</span><span class="n">dark</span><span class="p">,</span> <span class="n">top</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">bottom</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``(column_left, gloss_left, column_right)`` for each printed column.</span>
+
+<span class="sd">    Ink runs between blank vertical bands of rows ``top..bottom``; a run under</span>
+<span class="sd">    :data:`SYMBOL_MAX` followed directly by one over :data:`GLOSS_MIN` opens a</span>
+<span class="sd">    column, and a column ends where the next one starts.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">profile</span> <span class="o">=</span> <span class="n">dark</span><span class="p">[</span><span class="n">top</span><span class="p">:</span><span class="n">bottom</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">runs</span><span class="p">,</span> <span class="n">start</span> <span class="o">=</span> <span class="p">[],</span> <span class="kc">None</span>
+    <span class="k">for</span> <span class="n">x</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">profile</span><span class="p">)</span> <span class="o">+</span> <span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="n">BLANK_MIN</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">value</span> <span class="o">&gt;</span> <span class="mi">2</span> <span class="ow">and</span> <span class="n">start</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">start</span> <span class="o">=</span> <span class="n">x</span>
+        <span class="k">elif</span> <span class="n">value</span> <span class="o">&lt;=</span> <span class="mi">2</span> <span class="ow">and</span> <span class="n">start</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">end</span> <span class="o">=</span> <span class="n">x</span>
+            <span class="c1"># A blank band shorter than BLANK_MIN does not end the run.</span>
+            <span class="k">if</span> <span class="n">x</span> <span class="o">+</span> <span class="n">BLANK_MIN</span> <span class="o">&lt;=</span> <span class="nb">len</span><span class="p">(</span><span class="n">profile</span><span class="p">)</span> <span class="ow">and</span> <span class="n">profile</span><span class="p">[</span><span class="n">x</span><span class="p">:</span><span class="n">x</span> <span class="o">+</span> <span class="n">BLANK_MIN</span><span class="p">]</span><span class="o">.</span><span class="n">max</span><span class="p">()</span> <span class="o">&gt;</span> <span class="mi">2</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">runs</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">start</span><span class="p">,</span> <span class="n">end</span><span class="p">))</span>
+            <span class="n">start</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">columns</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">),</span> <span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">runs</span><span class="p">,</span> <span class="n">runs</span><span class="p">[</span><span class="mi">1</span><span class="p">:]):</span>
+        <span class="k">if</span> <span class="n">b</span> <span class="o">-</span> <span class="n">a</span> <span class="o">&lt;</span> <span class="n">SYMBOL_MAX</span> <span class="ow">and</span> <span class="n">d</span> <span class="o">-</span> <span class="n">c</span> <span class="o">&gt;=</span> <span class="n">GLOSS_MIN</span><span class="p">:</span>
+            <span class="n">columns</span><span class="o">.</span><span class="n">append</span><span class="p">([</span><span class="n">a</span><span class="p">,</span> <span class="n">c</span><span class="p">,</span> <span class="kc">None</span><span class="p">])</span>
+    <span class="k">for</span> <span class="n">here</span><span class="p">,</span> <span class="n">after</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">columns</span><span class="p">,</span> <span class="n">columns</span><span class="p">[</span><span class="mi">1</span><span class="p">:]):</span>
+        <span class="n">here</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">after</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">-</span> <span class="mi">1</span>
+    <span class="k">if</span> <span class="n">columns</span><span class="p">:</span>
+        <span class="n">columns</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">runs</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span>
+    <span class="k">return</span> <span class="p">[</span><span class="nb">tuple</span><span class="p">(</span><span class="n">c</span><span class="p">)</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">columns</span><span class="p">]</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-build_symbol_atlas_de-plate_entries">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">plate_entries</span><span class="p">(</span><span class="n">words</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">],</span> <span class="n">bounds</span><span class="p">,</span> <span class="n">dark</span><span class="p">,</span> <span class="n">top_row</span><span class="p">:</span> <span class="nb">int</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span></pre>
+<div class="fndoc"><p><code>[{gloss, top, bottom, left, gloss_left}]</code>, one per printed meaning.</p>
+<p>The wrap rule is the Czech builder's — a line continues the meaning above
+when that meaning is unclosed and the line is adjacent (the long note in
+<code>build_symbol_atlas.build</code>) — except that "nothing in the symbol band"
+is read off the ink rather than off the OCR's symbol words, which on this
+plate are glued to the gloss or missing.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 189–218 (30 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">plate_entries</span><span class="p">(</span><span class="n">words</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">],</span> <span class="n">bounds</span><span class="p">,</span> <span class="n">dark</span><span class="p">,</span> <span class="n">top_row</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``[{gloss, top, bottom, left, gloss_left}]``, one per printed meaning.</span>
+
+<span class="sd">    The wrap rule is the Czech builder&#39;s — a line continues the meaning above</span>
+<span class="sd">    when that meaning is unclosed and the line is adjacent (the long note in</span>
+<span class="sd">    :func:`build_symbol_atlas.build`) — except that &quot;nothing in the symbol band&quot;</span>
+<span class="sd">    is read off the ink rather than off the OCR&#39;s symbol words, which on this</span>
+<span class="sd">    plate are glued to the gloss or missing.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">entries</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">left</span><span class="p">,</span> <span class="n">gloss_left</span><span class="p">,</span> <span class="n">right</span> <span class="ow">in</span> <span class="n">bounds</span><span class="p">:</span>
+        <span class="c1"># Below the title only: the running head ``XI`` and the title itself</span>
+        <span class="c1"># sit inside a column&#39;s x range.</span>
+        <span class="n">column</span> <span class="o">=</span> <span class="p">[</span><span class="n">w</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">words</span> <span class="k">if</span> <span class="n">gloss_left</span> <span class="o">-</span> <span class="mi">6</span> <span class="o">&lt;=</span> <span class="n">w</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="n">w</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">//</span> <span class="mi">2</span> <span class="o">&lt;=</span> <span class="n">right</span>
+                  <span class="ow">and</span> <span class="n">w</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">top_row</span><span class="p">]</span>
+        <span class="n">mine</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">gloss</span><span class="p">,</span> <span class="n">_line</span><span class="p">,</span> <span class="n">top</span><span class="p">,</span> <span class="n">bottom</span><span class="p">,</span> <span class="n">_x0</span><span class="p">,</span> <span class="n">_x1</span> <span class="ow">in</span> <span class="n">bsa</span><span class="o">.</span><span class="n">cluster_lines</span><span class="p">(</span><span class="n">column</span><span class="p">):</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">gloss</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+                <span class="k">continue</span>
+            <span class="n">band</span> <span class="o">=</span> <span class="n">dark</span><span class="p">[</span><span class="n">top</span><span class="p">:</span><span class="n">bottom</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">left</span><span class="p">:</span><span class="nb">max</span><span class="p">(</span><span class="n">left</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">gloss_left</span> <span class="o">-</span> <span class="mi">4</span><span class="p">)]</span>
+            <span class="n">has_symbol</span> <span class="o">=</span> <span class="n">band</span><span class="o">.</span><span class="n">size</span> <span class="ow">and</span> <span class="n">band</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span> <span class="o">&gt;=</span> <span class="n">BAND_INK</span>
+            <span class="k">if</span> <span class="p">(</span><span class="ow">not</span> <span class="n">has_symbol</span> <span class="ow">and</span> <span class="n">mine</span> <span class="ow">and</span> <span class="n">top</span> <span class="o">-</span> <span class="n">mine</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="s2">&quot;bottom&quot;</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">bsa</span><span class="o">.</span><span class="n">MAX_WRAP_GAP</span>
+                    <span class="ow">and</span> <span class="ow">not</span> <span class="n">bsa</span><span class="o">.</span><span class="n">_ENTRY_END_RE</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">mine</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="s2">&quot;gloss&quot;</span><span class="p">])):</span>
+                <span class="n">mine</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="s2">&quot;gloss&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="s2">&quot; &quot;</span> <span class="o">+</span> <span class="n">gloss</span>
+                <span class="n">mine</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="s2">&quot;bottom&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">bottom</span>
+                <span class="k">continue</span>
+            <span class="n">mine</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;gloss&quot;</span><span class="p">:</span> <span class="n">gloss</span><span class="p">,</span> <span class="s2">&quot;top&quot;</span><span class="p">:</span> <span class="n">top</span><span class="p">,</span> <span class="s2">&quot;bottom&quot;</span><span class="p">:</span> <span class="n">bottom</span><span class="p">,</span>
+                         <span class="s2">&quot;left&quot;</span><span class="p">:</span> <span class="n">left</span><span class="p">,</span> <span class="s2">&quot;gloss_left&quot;</span><span class="p">:</span> <span class="n">gloss_left</span><span class="p">})</span>
+        <span class="n">entries</span> <span class="o">+=</span> <span class="n">mine</span>
+    <span class="k">return</span> <span class="n">entries</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-build_symbol_atlas_de-body_rows">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">body_rows</span><span class="p">(</span><span class="n">words</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">],</span> <span class="n">height</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span></pre>
+<div class="fndoc"><p>The rows the legend occupies: under its title, down to its last word.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 221–228 (8 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">body_rows</span><span class="p">(</span><span class="n">words</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">],</span> <span class="n">height</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The rows the legend occupies: under its title, down to its last word.&quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910.lexikon_1910_notes</span><span class="w"> </span><span class="kn">import</span> <span class="n">normalise</span>
+
+    <span class="n">title</span> <span class="o">=</span> <span class="p">[</span><span class="n">w</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">words</span> <span class="k">if</span> <span class="s2">&quot;zeichenerk&quot;</span> <span class="ow">in</span> <span class="n">normalise</span><span class="p">(</span><span class="n">w</span><span class="p">[</span><span class="mi">4</span><span class="p">])]</span>
+    <span class="n">top</span> <span class="o">=</span> <span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="n">w</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="n">w</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">title</span><span class="p">)</span> <span class="o">+</span> <span class="mi">20</span><span class="p">)</span> <span class="k">if</span> <span class="n">title</span> <span class="k">else</span> <span class="n">height</span> <span class="o">//</span> <span class="mi">5</span>
+    <span class="n">below</span> <span class="o">=</span> <span class="p">[</span><span class="n">w</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="n">w</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">words</span> <span class="k">if</span> <span class="n">w</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">top</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">top</span><span class="p">,</span> <span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="n">below</span><span class="p">)</span> <span class="k">if</span> <span class="n">below</span> <span class="k">else</span> <span class="n">height</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-build_symbol_atlas_de-build">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">build</span><span class="p">(</span><span class="n">scan</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">show</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 231–284 (54 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">build</span><span class="p">(</span><span class="n">scan</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">show</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">PIL</span><span class="w"> </span><span class="kn">import</span> <span class="n">Image</span><span class="p">,</span> <span class="n">ImageDraw</span><span class="p">,</span> <span class="n">ImageFont</span>
+
+    <span class="n">profile</span> <span class="o">=</span> <span class="n">lxvol</span><span class="o">.</span><span class="n">load_profile</span><span class="p">(</span><span class="n">PROFILE</span><span class="p">)</span>
+    <span class="n">image</span> <span class="o">=</span> <span class="n">lx</span><span class="o">.</span><span class="n">render_page</span><span class="p">(</span><span class="n">profile</span><span class="o">.</span><span class="n">source_pdf</span><span class="p">,</span> <span class="n">scan</span><span class="p">,</span> <span class="n">RENDER_WIDTH</span><span class="p">)</span>
+    <span class="n">words</span> <span class="o">=</span> <span class="n">plate_words</span><span class="p">(</span><span class="n">profile</span><span class="o">.</span><span class="n">source_pdf</span><span class="p">,</span> <span class="n">scan</span><span class="p">,</span> <span class="n">RENDER_WIDTH</span><span class="p">)</span>
+    <span class="n">targets</span> <span class="o">=</span> <span class="n">load_targets</span><span class="p">()</span>
+    <span class="n">dark</span> <span class="o">=</span> <span class="n">dark_mask</span><span class="p">(</span><span class="n">image</span><span class="p">)</span>
+    <span class="n">top</span><span class="p">,</span> <span class="n">bottom</span> <span class="o">=</span> <span class="n">body_rows</span><span class="p">(</span><span class="n">words</span><span class="p">,</span> <span class="n">image</span><span class="o">.</span><span class="n">height</span><span class="p">)</span>
+    <span class="n">bounds</span> <span class="o">=</span> <span class="n">ink_columns</span><span class="p">(</span><span class="n">dark_mask</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">COLUMN_SHARE</span><span class="p">),</span> <span class="n">top</span><span class="p">,</span> <span class="n">bottom</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  plate: scan </span><span class="si">{</span><span class="n">scan</span><span class="si">:</span><span class="s2">04d</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="n">profile</span><span class="o">.</span><span class="n">slug</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">image</span><span class="o">.</span><span class="n">width</span><span class="si">}</span><span class="s2">x</span><span class="si">{</span><span class="n">image</span><span class="o">.</span><span class="n">height</span><span class="si">}</span><span class="s2">, &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">words</span><span class="p">)</span><span class="si">}</span><span class="s2"> words; </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">targets</span><span class="p">)</span><span class="si">}</span><span class="s2"> curated German pictograms; &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">bounds</span><span class="p">)</span><span class="si">}</span><span class="s2"> printed columns &quot;</span>
+          <span class="o">+</span> <span class="s2">&quot;, &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">a</span><span class="si">}</span><span class="s2">-</span><span class="si">{</span><span class="n">g</span><span class="si">}</span><span class="s2"> | </span><span class="si">{</span><span class="n">g</span><span class="si">}</span><span class="s2">-</span><span class="si">{</span><span class="n">b</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">g</span><span class="p">,</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">bounds</span><span class="p">))</span>
+
+    <span class="n">OUT_DIR</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">manifest</span><span class="p">,</span> <span class="n">unmatched</span><span class="p">,</span> <span class="n">used</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[],</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="n">plate_entries</span><span class="p">(</span><span class="n">words</span><span class="p">,</span> <span class="n">bounds</span><span class="p">,</span> <span class="n">dark</span><span class="p">,</span> <span class="n">top</span><span class="p">):</span>
+        <span class="n">token</span><span class="p">,</span> <span class="n">expansion</span><span class="p">,</span> <span class="n">score</span> <span class="o">=</span> <span class="n">bsa</span><span class="o">.</span><span class="n">match_gloss</span><span class="p">(</span><span class="n">entry</span><span class="p">[</span><span class="s2">&quot;gloss&quot;</span><span class="p">],</span> <span class="n">targets</span><span class="p">)</span>
+        <span class="n">box</span> <span class="o">=</span> <span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">entry</span><span class="p">[</span><span class="s2">&quot;left&quot;</span><span class="p">]</span> <span class="o">-</span> <span class="mi">10</span><span class="p">),</span> <span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">entry</span><span class="p">[</span><span class="s2">&quot;top&quot;</span><span class="p">]</span> <span class="o">-</span> <span class="mi">6</span><span class="p">),</span>
+               <span class="nb">min</span><span class="p">(</span><span class="n">image</span><span class="o">.</span><span class="n">width</span><span class="p">,</span> <span class="n">entry</span><span class="p">[</span><span class="s2">&quot;gloss_left&quot;</span><span class="p">]</span> <span class="o">-</span> <span class="mi">8</span><span class="p">),</span>
+               <span class="nb">min</span><span class="p">(</span><span class="n">image</span><span class="o">.</span><span class="n">height</span><span class="p">,</span> <span class="n">entry</span><span class="p">[</span><span class="s2">&quot;bottom&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="mi">6</span><span class="p">))</span>
+        <span class="n">record</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;token&quot;</span><span class="p">:</span> <span class="n">token</span><span class="p">,</span> <span class="s2">&quot;gloss_printed&quot;</span><span class="p">:</span> <span class="n">entry</span><span class="p">[</span><span class="s2">&quot;gloss&quot;</span><span class="p">][:</span><span class="mi">70</span><span class="p">],</span>
+                  <span class="s2">&quot;gloss_curated&quot;</span><span class="p">:</span> <span class="n">expansion</span><span class="p">,</span> <span class="s2">&quot;score&quot;</span><span class="p">:</span> <span class="nb">round</span><span class="p">(</span><span class="n">score</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span>
+                  <span class="s2">&quot;scan&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">scan</span><span class="si">:</span><span class="s2">04d</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;left&quot;</span><span class="p">:</span> <span class="n">box</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="s2">&quot;top&quot;</span><span class="p">:</span> <span class="n">box</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span>
+                  <span class="s2">&quot;right&quot;</span><span class="p">:</span> <span class="n">box</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="s2">&quot;bottom&quot;</span><span class="p">:</span> <span class="n">box</span><span class="p">[</span><span class="mi">3</span><span class="p">],</span> <span class="s2">&quot;file&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;ink&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">}</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">score</span> <span class="o">&lt;</span> <span class="n">bsa</span><span class="o">.</span><span class="n">_MIN_SCORE</span> <span class="ow">or</span> <span class="n">box</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">-</span> <span class="n">box</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">bsa</span><span class="o">.</span><span class="n">_MIN_SYMBOL_PX</span>
+                <span class="ow">or</span> <span class="n">box</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="o">-</span> <span class="n">box</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">bsa</span><span class="o">.</span><span class="n">_MIN_SYMBOL_PX</span><span class="p">):</span>
+            <span class="n">record</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;no curated token matches this printed meaning&quot;</span>
+                                 <span class="k">if</span> <span class="n">score</span> <span class="o">&lt;</span> <span class="n">bsa</span><span class="o">.</span><span class="n">_MIN_SCORE</span>
+                                 <span class="k">else</span> <span class="s2">&quot;no symbol region on this line&quot;</span><span class="p">)</span>
+            <span class="n">unmatched</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">record</span><span class="p">)</span>
+            <span class="k">continue</span>
+        <span class="n">crop</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">crop</span><span class="p">(</span><span class="n">box</span><span class="p">)</span>
+        <span class="n">record</span><span class="p">[</span><span class="s2">&quot;ink&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="n">plate_ink</span><span class="p">(</span><span class="n">dark</span><span class="p">,</span> <span class="n">box</span><span class="p">),</span> <span class="mi">4</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">record</span><span class="p">[</span><span class="s2">&quot;ink&quot;</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">bsa</span><span class="o">.</span><span class="n">_MIN_INK_SHARE</span><span class="p">:</span>
+            <span class="n">record</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;the crop holds no ink&quot;</span>
+            <span class="n">unmatched</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">record</span><span class="p">)</span>
+            <span class="k">continue</span>
+        <span class="n">used</span><span class="p">[</span><span class="n">token</span><span class="p">]</span> <span class="o">=</span> <span class="n">used</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="n">name</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s2">&quot;[]&quot;</span><span class="p">)</span> <span class="o">+</span> <span class="p">(</span><span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">used</span><span class="p">[</span><span class="n">token</span><span class="p">]</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">&quot;_</span><span class="si">{</span><span class="n">used</span><span class="p">[</span><span class="n">token</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">crop</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">OUT_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">.png&quot;</span><span class="p">)</span>
+        <span class="n">record</span><span class="p">[</span><span class="s2">&quot;file&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">.png&quot;</span>
+        <span class="n">record</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;ok&quot;</span> <span class="k">if</span> <span class="n">used</span><span class="p">[</span><span class="n">token</span><span class="p">]</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="s2">&quot;duplicate token&quot;</span>
+        <span class="n">manifest</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">record</span><span class="p">)</span>
+
+    <span class="n">manifest</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">r</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;token&quot;</span><span class="p">])</span>
+    <span class="k">with</span> <span class="p">(</span><span class="n">OUT_DIR</span> <span class="o">/</span> <span class="s2">&quot;manifest.csv&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;w&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+        <span class="n">writer</span> <span class="o">=</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictWriter</span><span class="p">(</span><span class="n">fh</span><span class="p">,</span> <span class="n">fieldnames</span><span class="o">=</span><span class="nb">list</span><span class="p">((</span><span class="n">manifest</span> <span class="ow">or</span> <span class="n">unmatched</span><span class="p">)[</span><span class="mi">0</span><span class="p">]))</span>
+        <span class="n">writer</span><span class="o">.</span><span class="n">writeheader</span><span class="p">()</span>
+        <span class="n">writer</span><span class="o">.</span><span class="n">writerows</span><span class="p">(</span><span class="n">manifest</span> <span class="o">+</span> <span class="n">unmatched</span><span class="p">)</span>
+    <span class="n">bsa</span><span class="o">.</span><span class="n">_montage</span><span class="p">([</span><span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">manifest</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;ok&quot;</span><span class="p">],</span> <span class="n">Image</span><span class="p">,</span> <span class="n">ImageDraw</span><span class="p">,</span>
+                 <span class="n">ImageFont</span><span class="p">,</span> <span class="n">out_dir</span><span class="o">=</span><span class="n">OUT_DIR</span><span class="p">,</span> <span class="n">title</span><span class="o">=</span><span class="n">TITLE</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">report</span><span class="p">(</span><span class="n">manifest</span><span class="p">,</span> <span class="n">unmatched</span><span class="p">,</span> <span class="n">targets</span><span class="p">,</span> <span class="n">show</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-build_symbol_atlas_de-report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">manifest</span><span class="p">,</span> <span class="n">unmatched</span><span class="p">,</span> <span class="n">targets</span><span class="p">,</span> <span class="n">show</span><span class="p">:</span> <span class="nb">bool</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<div class="fndoc"><p>What the plate gave, and which tokens it did not give a symbol for.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code> <code>03_visualisation.ipynb</code> <code>utils/lexikon_1910/build_de_page_map.py</code> <code>utils/lexikon_1910/build_mark_ledger.py</code> <code>utils/lexikon_1910/read_transcription_md.py</code> <code>utils/lexikon_1910/run_glyph_e3.py</code> <code>utils/lexikon_1910/score_certification.py</code> <code>utils/lexikon_1910/score_table_passes.py</code> <code>utils/linkage.py</code> <code>utils/parsing/clean.py</code> <code>utils/parsing/dates.py</code> <code>utils/parsing/exit_codes.py</code> <code>utils/parsing/habsburg.py</code> <code>utils/validation/data_checks.py</code></p>
+<details><summary>source · lines 287–309 (23 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">manifest</span><span class="p">,</span> <span class="n">unmatched</span><span class="p">,</span> <span class="n">targets</span><span class="p">,</span> <span class="n">show</span><span class="p">:</span> <span class="nb">bool</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;What the plate gave, and which tokens it did not give a symbol for.&quot;&quot;&quot;</span>
+    <span class="n">named</span> <span class="o">=</span> <span class="p">{</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;token&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">manifest</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;ok&quot;</span><span class="p">}</span>
+    <span class="n">missing</span> <span class="o">=</span> <span class="p">[</span><span class="n">t</span> <span class="k">for</span> <span class="n">t</span><span class="p">,</span> <span class="o">*</span><span class="n">_</span> <span class="ow">in</span> <span class="n">targets</span> <span class="k">if</span> <span class="n">t</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">named</span><span class="p">]</span>
+    <span class="n">dup</span> <span class="o">=</span> <span class="p">[</span><span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">manifest</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;duplicate token&quot;</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">named</span><span class="p">)</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">targets</span><span class="p">)</span><span class="si">}</span><span class="s2"> German pictograms cropped and &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;named -&gt; </span><span class="si">{</span><span class="n">OUT_DIR</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">rows</span> <span class="ow">in</span> <span class="p">((</span><span class="s2">&quot;tokens matched by more than one plate line&quot;</span><span class="p">,</span> <span class="n">dup</span><span class="p">),</span>
+                        <span class="p">(</span><span class="s2">&quot;plate lines no token matches&quot;</span><span class="p">,</span> <span class="p">[</span><span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">unmatched</span>
+                         <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;no curated&quot;</span><span class="p">)]),</span>
+                        <span class="p">(</span><span class="s2">&quot;crops rejected as blank paper&quot;</span><span class="p">,</span> <span class="p">[</span><span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">unmatched</span>
+                         <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;the crop&quot;</span><span class="p">)])):</span>
+        <span class="k">if</span> <span class="n">rows</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  ! </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">[:</span><span class="mi">12</span><span class="p">]:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;      </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;token&#39;</span><span class="p">]</span><span class="w"> </span><span class="ow">or</span><span class="w"> </span><span class="s1">&#39;-&#39;</span><span class="si">:</span><span class="s2">22s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;gloss_printed&#39;</span><span class="p">][:</span><span class="mi">50</span><span class="p">]</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">missing</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  ! curated tokens WITHOUT a symbol from the plate: &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">missing</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">show</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">manifest</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;token&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">22s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;score&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">5.1f</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;gloss_printed&#39;</span><span class="p">][:</span><span class="mi">44</span><span class="p">]</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">missing</span> <span class="k">else</span> <span class="mi">1</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-build_symbol_atlas_de-main">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 312–323 (12 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="k">for</span> <span class="n">stream</span> <span class="ow">in</span> <span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">stdout</span><span class="p">,</span> <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">stream</span><span class="o">.</span><span class="n">reconfigure</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;replace&quot;</span><span class="p">)</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">AttributeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">):</span>
+            <span class="k">pass</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="p">,</span>
+                                 <span class="n">formatter_class</span><span class="o">=</span><span class="n">argparse</span><span class="o">.</span><span class="n">RawDescriptionHelpFormatter</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--scan&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">LEGEND_SCAN</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--show&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;print the full manifest&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">build</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">scan</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">show</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-lexikon_1910-build_symbol_atlas_de-HERE"><pre class="sig">HERE<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-build_symbol_atlas_de-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">HERE</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-build_symbol_atlas_de-PROFILE"><pre class="sig">PROFILE<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;boehmen_de&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-build_symbol_atlas_de-OUT_DIR"><pre class="sig">OUT_DIR<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;reference&#39;</span> <span class="o">/</span> <span class="s1">&#39;places&#39;</span> <span class="o">/</span> <span class="s1">&#39;symbols&#39;</span> <span class="o">/</span> <span class="s1">&#39;de&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-build_symbol_atlas_de-LEGEND_SCAN"><pre class="sig">LEGEND_SCAN<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">12</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-build_symbol_atlas_de-RENDER_WIDTH"><pre class="sig">RENDER_WIDTH<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">2928</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-build_symbol_atlas_de-TITLE"><pre class="sig">TITLE<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;Printed symbols of the 1910 register, German edition (Zeichenerklaerung, p. XI) and their tokens&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-build_symbol_atlas_de-BLANK_MIN"><pre class="sig">BLANK_MIN<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">8</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-build_symbol_atlas_de-SYMBOL_MAX"><pre class="sig">SYMBOL_MAX<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">120</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-build_symbol_atlas_de-GLOSS_MIN"><pre class="sig">GLOSS_MIN<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">300</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-build_symbol_atlas_de-BAND_INK"><pre class="sig">BAND_INK<span class="kind">float</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mf">0.01</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-build_symbol_atlas_de-PAPER_SHARE"><pre class="sig">PAPER_SHARE<span class="kind">float</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mf">0.8</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-build_symbol_atlas_de-COLUMN_SHARE"><pre class="sig">COLUMN_SHARE<span class="kind">float</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mf">0.72</span>
+</pre></div>
+</details></div>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/lexikon_1910/build_symbol_atlas_de.py · 327 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;Cut the German edition&#39;s own symbol legend into a labelled atlas (D-92).</span>
+
+<span class="sd">The German twin of :mod:`build_symbol_atlas`. The *Spezialortsrepertorium von</span>
+<span class="sd">Böhmen* explains its pictograms on the plate *Zeichenerklärung*, p. XI — scan</span>
+<span class="sd">0012 of the UBW scan — three columns wide, one symbol to a line with its German</span>
+<span class="sd">meaning beside it, exactly as the Czech *Výklad značek* does on its p. XI.</span>
+
+<span class="sd">**The German reader is shown its own volume&#39;s plate, not the Czech one.** The two</span>
+<span class="sd">plates are not the same list: the German one prints **80** symbols, and the three</span>
+<span class="sd">the Czech plate has beyond them — ``[cooperative]``, ``[port]`` and</span>
+<span class="sd">``[rc-parish-exp]`` — are not on it (the German volume writes cooperatives as</span>
+<span class="sd">letters only, and a parish expositure as the word ``Exp.``). The prompt tells the</span>
+<span class="sd">reader that the key &quot;is the whole of what this volume prints&quot;, so a Czech key</span>
+<span class="sd">would be a false statement to a German reader, three times over.</span>
+
+<span class="sd">How it works is the Czech builder&#39;s, reused rather than copied: the plate is</span>
+<span class="sd">self-labelling, so each printed gloss names its token through the ``de``</span>
+<span class="sd">pictogram rows of ``institution_abbreviations.csv`` (whose expansions were read</span>
+<span class="sd">off this same plate), and the layout — symbol band, gutter, gloss — gives the</span>
+<span class="sd">crop. The one difference is the text layer: this PDF has no ALTO, so the words</span>
+<span class="sd">come from the PDF&#39;s own positional OCR layer (``pymupdf`` ``get_text(&quot;words&quot;)``),</span>
+<span class="sd">scaled onto a render at the Czech plate&#39;s width so the Czech builder&#39;s pixel</span>
+<span class="sd">constants keep their meaning.</span>
+
+<span class="sd">What comes out, in ``reference/places/symbols/de/``:</span>
+
+<span class="sd">``&lt;token&gt;.png``       one crop per pictogram</span>
+<span class="sd">``manifest.csv``      token, printed gloss, match score, source box</span>
+<span class="sd">``atlas.png``         the crops with their tokens, for a person</span>
+<span class="sd">``atlas_prompt.png``  the dense sheet a reader is sent (``--atlas`` arms)</span>
+
+<span class="sd">Usage</span>
+<span class="sd">-----</span>
+<span class="sd">    python utils/lexikon_1910/build_symbol_atlas_de.py</span>
+<span class="sd">    python utils/lexikon_1910/build_symbol_atlas_de.py --show</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.0.0&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">csv</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="n">HERE</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span>
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">HERE</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">))</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">HERE</span><span class="p">))</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">build_symbol_atlas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">bsa</span>                                <span class="c1"># noqa: E402</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910</span> <span class="k">as</span> <span class="n">lx</span>                   <span class="c1"># noqa: E402</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_institutions</span> <span class="k">as</span> <span class="n">lxin</span>    <span class="c1"># noqa: E402</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_volume</span> <span class="k">as</span> <span class="n">lxvol</span>         <span class="c1"># noqa: E402</span>
+
+<span class="n">PROFILE</span> <span class="o">=</span> <span class="s2">&quot;boehmen_de&quot;</span>
+<span class="n">OUT_DIR</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;places&quot;</span> <span class="o">/</span> <span class="s2">&quot;symbols&quot;</span> <span class="o">/</span> <span class="s2">&quot;de&quot;</span>
+
+<span class="c1">#: The plate: *Zeichenerklärung*, p. XI. Read off the scan by eye, 2026-10-19;</span>
+<span class="c1">#: the abbreviations that are words are on p. X (scan 0020) and need no atlas.</span>
+<span class="n">LEGEND_SCAN</span> <span class="o">=</span> <span class="mi">12</span>
+
+<span class="c1">#: The width the plate is rendered at: the Czech ALTO page width, so every pixel</span>
+<span class="c1">#: constant in :mod:`build_symbol_atlas` (column gap, gloss width, wrap gap, the</span>
+<span class="c1">#: crop&#39;s padding) means on this plate what it means on the Czech one.</span>
+<span class="n">RENDER_WIDTH</span> <span class="o">=</span> <span class="mi">2928</span>
+
+<span class="n">TITLE</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;Printed symbols of the 1910 register, German edition &quot;</span>
+         <span class="s2">&quot;(Zeichenerklaerung, p. XI) and their tokens&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">load_targets</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``[(token, printed gloss, english, category)]`` for every German pictogram.</span>
+
+<span class="sd">    The gloss is the expansion **plus the qualifier printed with it**, which the</span>
+<span class="sd">    table keeps in ``note`` after the plate reference (``Rotte`` + ``Häuser in</span>
+<span class="sd">    loserer Verteilung …``). The plate prints both on one entry, and the OCR</span>
+<span class="sd">    damages short words worst — it reads *Rotte* as ``Hotte`` — so the long</span>
+<span class="sd">    qualifier is what lets the entry be matched at all.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="n">lxin</span><span class="o">.</span><span class="n">load_abbreviations</span><span class="p">(</span><span class="n">bsa</span><span class="o">.</span><span class="n">ABBREVIATIONS</span><span class="p">,</span> <span class="n">lang</span><span class="o">=</span><span class="s2">&quot;de&quot;</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">a</span><span class="o">.</span><span class="n">kind</span> <span class="o">!=</span> <span class="s2">&quot;pictogram&quot;</span> <span class="ow">or</span> <span class="n">a</span><span class="o">.</span><span class="n">lang</span> <span class="o">!=</span> <span class="s2">&quot;de&quot;</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">a</span><span class="o">.</span><span class="n">expansion</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">qualifier</span> <span class="o">=</span> <span class="n">a</span><span class="o">.</span><span class="n">note</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;;&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="k">if</span> <span class="s2">&quot;;&quot;</span> <span class="ow">in</span> <span class="n">a</span><span class="o">.</span><span class="n">note</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+        <span class="n">printed</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">a</span><span class="o">.</span><span class="n">expansion</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">qualifier</span><span class="si">}</span><span class="s2">)&quot;</span> <span class="k">if</span> <span class="n">qualifier</span> <span class="ow">and</span> <span class="s2">&quot;connector&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">qualifier</span>             <span class="k">else</span> <span class="n">a</span><span class="o">.</span><span class="n">expansion</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">a</span><span class="o">.</span><span class="n">code</span><span class="p">,</span> <span class="n">printed</span><span class="p">,</span> <span class="n">a</span><span class="o">.</span><span class="n">english</span><span class="p">,</span> <span class="n">a</span><span class="o">.</span><span class="n">category</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">plate_words</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">scan</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">width</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The plate&#39;s OCR words as ALTO-shaped ``(top, left, width, height, text)``.</span>
+
+<span class="sd">    That is the tuple :func:`build_symbol_atlas.cluster_lines` and</span>
+<span class="sd">    :func:`~build_symbol_atlas.columns_of` index into, so the Czech layout code</span>
+<span class="sd">    reads the German plate unchanged.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">fitz</span>
+
+    <span class="k">with</span> <span class="n">fitz</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">pdf_path</span><span class="p">))</span> <span class="k">as</span> <span class="n">doc</span><span class="p">:</span>
+        <span class="n">page</span> <span class="o">=</span> <span class="n">doc</span><span class="p">[</span><span class="n">scan</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span>
+        <span class="n">zoom</span> <span class="o">=</span> <span class="n">width</span> <span class="o">/</span> <span class="n">page</span><span class="o">.</span><span class="n">rect</span><span class="o">.</span><span class="n">width</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">x0</span><span class="p">,</span> <span class="n">y0</span><span class="p">,</span> <span class="n">x1</span><span class="p">,</span> <span class="n">y1</span><span class="p">,</span> <span class="n">text</span><span class="p">,</span> <span class="o">*</span><span class="n">_rest</span> <span class="ow">in</span> <span class="n">page</span><span class="o">.</span><span class="n">get_text</span><span class="p">(</span><span class="s2">&quot;words&quot;</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">text</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+                <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="nb">int</span><span class="p">(</span><span class="n">y0</span> <span class="o">*</span> <span class="n">zoom</span><span class="p">),</span> <span class="nb">int</span><span class="p">(</span><span class="n">x0</span> <span class="o">*</span> <span class="n">zoom</span><span class="p">),</span>
+                            <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">int</span><span class="p">((</span><span class="n">x1</span> <span class="o">-</span> <span class="n">x0</span><span class="p">)</span> <span class="o">*</span> <span class="n">zoom</span><span class="p">)),</span>
+                            <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">int</span><span class="p">((</span><span class="n">y1</span> <span class="o">-</span> <span class="n">y0</span><span class="p">)</span> <span class="o">*</span> <span class="n">zoom</span><span class="p">)),</span> <span class="n">text</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="c1">#: Columns are found in the plate&#39;s ink, not in its words. Measured on the</span>
+<span class="c1">#: render (2026-10-19): the German plate&#39;s gutters are ~30 px where the Czech</span>
+<span class="c1">#: plate&#39;s are 62-81, under the Czech builder&#39;s 50 px column gap, and its OCR</span>
+<span class="c1">#: glues a symbol to its gloss in one word (``(SA)ev.``), so the word-based</span>
+<span class="c1">#: split of :func:`build_symbol_atlas.columns_of` found two columns of three.</span>
+<span class="c1">#: The ink is unambiguous: a narrow band of symbols, a blank gap, a wide gloss.</span>
+<span class="n">BLANK_MIN</span> <span class="o">=</span> <span class="mi">8</span>               <span class="c1"># a vertical blank band at least this wide separates</span>
+<span class="n">SYMBOL_MAX</span> <span class="o">=</span> <span class="mi">120</span>            <span class="c1"># a symbol band is narrower than this ...</span>
+<span class="n">GLOSS_MIN</span> <span class="o">=</span> <span class="mi">300</span>             <span class="c1"># ... and is followed by a gloss at least this wide</span>
+
+<span class="c1">#: The share of a line&#39;s symbol band that must be ink for the line to carry a</span>
+<span class="c1">#: symbol. A wrapped gloss has none; a printed symbol is several per cent.</span>
+<span class="n">BAND_INK</span> <span class="o">=</span> <span class="mf">0.01</span>
+
+<span class="c1">#: What counts as ink: darker than this share of the paper&#39;s brightness. **Not</span>
+<span class="c1">#: the Czech builder&#39;s 0.72.** This scan prints faint grey (~147 on paper ~178,</span>
+<span class="c1">#: the profile&#39;s note, i.e. 0.83 of paper), so at 0.72 the thin outline symbols</span>
+<span class="c1">#: — ○ *Dorf*, ⊙ *Markt*, † *Filialkirche* — held 0.2-1.4 % ink and were</span>
+<span class="c1">#: rejected as blank paper, twelve of them. At 0.80 the faintest real symbol on</span>
+<span class="c1">#: the plate holds 1.7 % and a blank band of the same size 0.0 % (measured</span>
+<span class="c1">#: 2026-10-19); the Czech minimum share, ``_MIN_INK_SHARE``, is kept.</span>
+<span class="n">PAPER_SHARE</span> <span class="o">=</span> <span class="mf">0.80</span>
+
+<span class="c1">#: Where the columns are is read on the strict cut, the Czech one. At</span>
+<span class="c1">#: :data:`PAPER_SHARE` the faint grey between a symbol and its gloss bridges the</span>
+<span class="c1">#: ~17 px gap in the middle column and the symbol band merges into the gloss;</span>
+<span class="c1">#: at 0.72 the three columns come out exactly as measured on the render.</span>
+<span class="n">COLUMN_SHARE</span> <span class="o">=</span> <span class="mf">0.72</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">dark_mask</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">share</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">PAPER_SHARE</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Pixels darker than ``share`` of the plate&#39;s paper (its 90th percentile).&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+    <span class="n">grey</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">image</span><span class="o">.</span><span class="n">convert</span><span class="p">(</span><span class="s2">&quot;L&quot;</span><span class="p">))</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">grey</span> <span class="o">&lt;</span> <span class="n">np</span><span class="o">.</span><span class="n">percentile</span><span class="p">(</span><span class="n">grey</span><span class="p">,</span> <span class="mi">90</span><span class="p">)</span> <span class="o">*</span> <span class="n">share</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">plate_ink</span><span class="p">(</span><span class="n">dark</span><span class="p">,</span> <span class="n">box</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Share of ``box`` that is ink in the plate&#39;s own mask.&quot;&quot;&quot;</span>
+    <span class="n">left</span><span class="p">,</span> <span class="n">top</span><span class="p">,</span> <span class="n">right</span><span class="p">,</span> <span class="n">bottom</span> <span class="o">=</span> <span class="n">box</span>
+    <span class="n">cell</span> <span class="o">=</span> <span class="n">dark</span><span class="p">[</span><span class="n">top</span><span class="p">:</span><span class="n">bottom</span><span class="p">,</span> <span class="n">left</span><span class="p">:</span><span class="n">right</span><span class="p">]</span>
+    <span class="k">return</span> <span class="nb">float</span><span class="p">(</span><span class="n">cell</span><span class="o">.</span><span class="n">mean</span><span class="p">())</span> <span class="k">if</span> <span class="n">cell</span><span class="o">.</span><span class="n">size</span> <span class="k">else</span> <span class="mf">0.0</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">ink_columns</span><span class="p">(</span><span class="n">dark</span><span class="p">,</span> <span class="n">top</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">bottom</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``(column_left, gloss_left, column_right)`` for each printed column.</span>
+
+<span class="sd">    Ink runs between blank vertical bands of rows ``top..bottom``; a run under</span>
+<span class="sd">    :data:`SYMBOL_MAX` followed directly by one over :data:`GLOSS_MIN` opens a</span>
+<span class="sd">    column, and a column ends where the next one starts.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">profile</span> <span class="o">=</span> <span class="n">dark</span><span class="p">[</span><span class="n">top</span><span class="p">:</span><span class="n">bottom</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">runs</span><span class="p">,</span> <span class="n">start</span> <span class="o">=</span> <span class="p">[],</span> <span class="kc">None</span>
+    <span class="k">for</span> <span class="n">x</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">profile</span><span class="p">)</span> <span class="o">+</span> <span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="n">BLANK_MIN</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">value</span> <span class="o">&gt;</span> <span class="mi">2</span> <span class="ow">and</span> <span class="n">start</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">start</span> <span class="o">=</span> <span class="n">x</span>
+        <span class="k">elif</span> <span class="n">value</span> <span class="o">&lt;=</span> <span class="mi">2</span> <span class="ow">and</span> <span class="n">start</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">end</span> <span class="o">=</span> <span class="n">x</span>
+            <span class="c1"># A blank band shorter than BLANK_MIN does not end the run.</span>
+            <span class="k">if</span> <span class="n">x</span> <span class="o">+</span> <span class="n">BLANK_MIN</span> <span class="o">&lt;=</span> <span class="nb">len</span><span class="p">(</span><span class="n">profile</span><span class="p">)</span> <span class="ow">and</span> <span class="n">profile</span><span class="p">[</span><span class="n">x</span><span class="p">:</span><span class="n">x</span> <span class="o">+</span> <span class="n">BLANK_MIN</span><span class="p">]</span><span class="o">.</span><span class="n">max</span><span class="p">()</span> <span class="o">&gt;</span> <span class="mi">2</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">runs</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">start</span><span class="p">,</span> <span class="n">end</span><span class="p">))</span>
+            <span class="n">start</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">columns</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">),</span> <span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">runs</span><span class="p">,</span> <span class="n">runs</span><span class="p">[</span><span class="mi">1</span><span class="p">:]):</span>
+        <span class="k">if</span> <span class="n">b</span> <span class="o">-</span> <span class="n">a</span> <span class="o">&lt;</span> <span class="n">SYMBOL_MAX</span> <span class="ow">and</span> <span class="n">d</span> <span class="o">-</span> <span class="n">c</span> <span class="o">&gt;=</span> <span class="n">GLOSS_MIN</span><span class="p">:</span>
+            <span class="n">columns</span><span class="o">.</span><span class="n">append</span><span class="p">([</span><span class="n">a</span><span class="p">,</span> <span class="n">c</span><span class="p">,</span> <span class="kc">None</span><span class="p">])</span>
+    <span class="k">for</span> <span class="n">here</span><span class="p">,</span> <span class="n">after</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">columns</span><span class="p">,</span> <span class="n">columns</span><span class="p">[</span><span class="mi">1</span><span class="p">:]):</span>
+        <span class="n">here</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">after</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">-</span> <span class="mi">1</span>
+    <span class="k">if</span> <span class="n">columns</span><span class="p">:</span>
+        <span class="n">columns</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">runs</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span>
+    <span class="k">return</span> <span class="p">[</span><span class="nb">tuple</span><span class="p">(</span><span class="n">c</span><span class="p">)</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">columns</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">plate_entries</span><span class="p">(</span><span class="n">words</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">],</span> <span class="n">bounds</span><span class="p">,</span> <span class="n">dark</span><span class="p">,</span> <span class="n">top_row</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``[{gloss, top, bottom, left, gloss_left}]``, one per printed meaning.</span>
+
+<span class="sd">    The wrap rule is the Czech builder&#39;s — a line continues the meaning above</span>
+<span class="sd">    when that meaning is unclosed and the line is adjacent (the long note in</span>
+<span class="sd">    :func:`build_symbol_atlas.build`) — except that &quot;nothing in the symbol band&quot;</span>
+<span class="sd">    is read off the ink rather than off the OCR&#39;s symbol words, which on this</span>
+<span class="sd">    plate are glued to the gloss or missing.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">entries</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">left</span><span class="p">,</span> <span class="n">gloss_left</span><span class="p">,</span> <span class="n">right</span> <span class="ow">in</span> <span class="n">bounds</span><span class="p">:</span>
+        <span class="c1"># Below the title only: the running head ``XI`` and the title itself</span>
+        <span class="c1"># sit inside a column&#39;s x range.</span>
+        <span class="n">column</span> <span class="o">=</span> <span class="p">[</span><span class="n">w</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">words</span> <span class="k">if</span> <span class="n">gloss_left</span> <span class="o">-</span> <span class="mi">6</span> <span class="o">&lt;=</span> <span class="n">w</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="n">w</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">//</span> <span class="mi">2</span> <span class="o">&lt;=</span> <span class="n">right</span>
+                  <span class="ow">and</span> <span class="n">w</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">top_row</span><span class="p">]</span>
+        <span class="n">mine</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">gloss</span><span class="p">,</span> <span class="n">_line</span><span class="p">,</span> <span class="n">top</span><span class="p">,</span> <span class="n">bottom</span><span class="p">,</span> <span class="n">_x0</span><span class="p">,</span> <span class="n">_x1</span> <span class="ow">in</span> <span class="n">bsa</span><span class="o">.</span><span class="n">cluster_lines</span><span class="p">(</span><span class="n">column</span><span class="p">):</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">gloss</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+                <span class="k">continue</span>
+            <span class="n">band</span> <span class="o">=</span> <span class="n">dark</span><span class="p">[</span><span class="n">top</span><span class="p">:</span><span class="n">bottom</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">left</span><span class="p">:</span><span class="nb">max</span><span class="p">(</span><span class="n">left</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">gloss_left</span> <span class="o">-</span> <span class="mi">4</span><span class="p">)]</span>
+            <span class="n">has_symbol</span> <span class="o">=</span> <span class="n">band</span><span class="o">.</span><span class="n">size</span> <span class="ow">and</span> <span class="n">band</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span> <span class="o">&gt;=</span> <span class="n">BAND_INK</span>
+            <span class="k">if</span> <span class="p">(</span><span class="ow">not</span> <span class="n">has_symbol</span> <span class="ow">and</span> <span class="n">mine</span> <span class="ow">and</span> <span class="n">top</span> <span class="o">-</span> <span class="n">mine</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="s2">&quot;bottom&quot;</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="n">bsa</span><span class="o">.</span><span class="n">MAX_WRAP_GAP</span>
+                    <span class="ow">and</span> <span class="ow">not</span> <span class="n">bsa</span><span class="o">.</span><span class="n">_ENTRY_END_RE</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">mine</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="s2">&quot;gloss&quot;</span><span class="p">])):</span>
+                <span class="n">mine</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="s2">&quot;gloss&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="s2">&quot; &quot;</span> <span class="o">+</span> <span class="n">gloss</span>
+                <span class="n">mine</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="s2">&quot;bottom&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">bottom</span>
+                <span class="k">continue</span>
+            <span class="n">mine</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;gloss&quot;</span><span class="p">:</span> <span class="n">gloss</span><span class="p">,</span> <span class="s2">&quot;top&quot;</span><span class="p">:</span> <span class="n">top</span><span class="p">,</span> <span class="s2">&quot;bottom&quot;</span><span class="p">:</span> <span class="n">bottom</span><span class="p">,</span>
+                         <span class="s2">&quot;left&quot;</span><span class="p">:</span> <span class="n">left</span><span class="p">,</span> <span class="s2">&quot;gloss_left&quot;</span><span class="p">:</span> <span class="n">gloss_left</span><span class="p">})</span>
+        <span class="n">entries</span> <span class="o">+=</span> <span class="n">mine</span>
+    <span class="k">return</span> <span class="n">entries</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">body_rows</span><span class="p">(</span><span class="n">words</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">],</span> <span class="n">height</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The rows the legend occupies: under its title, down to its last word.&quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910.lexikon_1910_notes</span><span class="w"> </span><span class="kn">import</span> <span class="n">normalise</span>
+
+    <span class="n">title</span> <span class="o">=</span> <span class="p">[</span><span class="n">w</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">words</span> <span class="k">if</span> <span class="s2">&quot;zeichenerk&quot;</span> <span class="ow">in</span> <span class="n">normalise</span><span class="p">(</span><span class="n">w</span><span class="p">[</span><span class="mi">4</span><span class="p">])]</span>
+    <span class="n">top</span> <span class="o">=</span> <span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="n">w</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="n">w</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">title</span><span class="p">)</span> <span class="o">+</span> <span class="mi">20</span><span class="p">)</span> <span class="k">if</span> <span class="n">title</span> <span class="k">else</span> <span class="n">height</span> <span class="o">//</span> <span class="mi">5</span>
+    <span class="n">below</span> <span class="o">=</span> <span class="p">[</span><span class="n">w</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="n">w</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">words</span> <span class="k">if</span> <span class="n">w</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">top</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">top</span><span class="p">,</span> <span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="n">below</span><span class="p">)</span> <span class="k">if</span> <span class="n">below</span> <span class="k">else</span> <span class="n">height</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">build</span><span class="p">(</span><span class="n">scan</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">show</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">PIL</span><span class="w"> </span><span class="kn">import</span> <span class="n">Image</span><span class="p">,</span> <span class="n">ImageDraw</span><span class="p">,</span> <span class="n">ImageFont</span>
+
+    <span class="n">profile</span> <span class="o">=</span> <span class="n">lxvol</span><span class="o">.</span><span class="n">load_profile</span><span class="p">(</span><span class="n">PROFILE</span><span class="p">)</span>
+    <span class="n">image</span> <span class="o">=</span> <span class="n">lx</span><span class="o">.</span><span class="n">render_page</span><span class="p">(</span><span class="n">profile</span><span class="o">.</span><span class="n">source_pdf</span><span class="p">,</span> <span class="n">scan</span><span class="p">,</span> <span class="n">RENDER_WIDTH</span><span class="p">)</span>
+    <span class="n">words</span> <span class="o">=</span> <span class="n">plate_words</span><span class="p">(</span><span class="n">profile</span><span class="o">.</span><span class="n">source_pdf</span><span class="p">,</span> <span class="n">scan</span><span class="p">,</span> <span class="n">RENDER_WIDTH</span><span class="p">)</span>
+    <span class="n">targets</span> <span class="o">=</span> <span class="n">load_targets</span><span class="p">()</span>
+    <span class="n">dark</span> <span class="o">=</span> <span class="n">dark_mask</span><span class="p">(</span><span class="n">image</span><span class="p">)</span>
+    <span class="n">top</span><span class="p">,</span> <span class="n">bottom</span> <span class="o">=</span> <span class="n">body_rows</span><span class="p">(</span><span class="n">words</span><span class="p">,</span> <span class="n">image</span><span class="o">.</span><span class="n">height</span><span class="p">)</span>
+    <span class="n">bounds</span> <span class="o">=</span> <span class="n">ink_columns</span><span class="p">(</span><span class="n">dark_mask</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">COLUMN_SHARE</span><span class="p">),</span> <span class="n">top</span><span class="p">,</span> <span class="n">bottom</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  plate: scan </span><span class="si">{</span><span class="n">scan</span><span class="si">:</span><span class="s2">04d</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="n">profile</span><span class="o">.</span><span class="n">slug</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">image</span><span class="o">.</span><span class="n">width</span><span class="si">}</span><span class="s2">x</span><span class="si">{</span><span class="n">image</span><span class="o">.</span><span class="n">height</span><span class="si">}</span><span class="s2">, &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">words</span><span class="p">)</span><span class="si">}</span><span class="s2"> words; </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">targets</span><span class="p">)</span><span class="si">}</span><span class="s2"> curated German pictograms; &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">bounds</span><span class="p">)</span><span class="si">}</span><span class="s2"> printed columns &quot;</span>
+          <span class="o">+</span> <span class="s2">&quot;, &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">a</span><span class="si">}</span><span class="s2">-</span><span class="si">{</span><span class="n">g</span><span class="si">}</span><span class="s2"> | </span><span class="si">{</span><span class="n">g</span><span class="si">}</span><span class="s2">-</span><span class="si">{</span><span class="n">b</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">g</span><span class="p">,</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">bounds</span><span class="p">))</span>
+
+    <span class="n">OUT_DIR</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">manifest</span><span class="p">,</span> <span class="n">unmatched</span><span class="p">,</span> <span class="n">used</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[],</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="n">plate_entries</span><span class="p">(</span><span class="n">words</span><span class="p">,</span> <span class="n">bounds</span><span class="p">,</span> <span class="n">dark</span><span class="p">,</span> <span class="n">top</span><span class="p">):</span>
+        <span class="n">token</span><span class="p">,</span> <span class="n">expansion</span><span class="p">,</span> <span class="n">score</span> <span class="o">=</span> <span class="n">bsa</span><span class="o">.</span><span class="n">match_gloss</span><span class="p">(</span><span class="n">entry</span><span class="p">[</span><span class="s2">&quot;gloss&quot;</span><span class="p">],</span> <span class="n">targets</span><span class="p">)</span>
+        <span class="n">box</span> <span class="o">=</span> <span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">entry</span><span class="p">[</span><span class="s2">&quot;left&quot;</span><span class="p">]</span> <span class="o">-</span> <span class="mi">10</span><span class="p">),</span> <span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">entry</span><span class="p">[</span><span class="s2">&quot;top&quot;</span><span class="p">]</span> <span class="o">-</span> <span class="mi">6</span><span class="p">),</span>
+               <span class="nb">min</span><span class="p">(</span><span class="n">image</span><span class="o">.</span><span class="n">width</span><span class="p">,</span> <span class="n">entry</span><span class="p">[</span><span class="s2">&quot;gloss_left&quot;</span><span class="p">]</span> <span class="o">-</span> <span class="mi">8</span><span class="p">),</span>
+               <span class="nb">min</span><span class="p">(</span><span class="n">image</span><span class="o">.</span><span class="n">height</span><span class="p">,</span> <span class="n">entry</span><span class="p">[</span><span class="s2">&quot;bottom&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="mi">6</span><span class="p">))</span>
+        <span class="n">record</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;token&quot;</span><span class="p">:</span> <span class="n">token</span><span class="p">,</span> <span class="s2">&quot;gloss_printed&quot;</span><span class="p">:</span> <span class="n">entry</span><span class="p">[</span><span class="s2">&quot;gloss&quot;</span><span class="p">][:</span><span class="mi">70</span><span class="p">],</span>
+                  <span class="s2">&quot;gloss_curated&quot;</span><span class="p">:</span> <span class="n">expansion</span><span class="p">,</span> <span class="s2">&quot;score&quot;</span><span class="p">:</span> <span class="nb">round</span><span class="p">(</span><span class="n">score</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span>
+                  <span class="s2">&quot;scan&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">scan</span><span class="si">:</span><span class="s2">04d</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;left&quot;</span><span class="p">:</span> <span class="n">box</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="s2">&quot;top&quot;</span><span class="p">:</span> <span class="n">box</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span>
+                  <span class="s2">&quot;right&quot;</span><span class="p">:</span> <span class="n">box</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="s2">&quot;bottom&quot;</span><span class="p">:</span> <span class="n">box</span><span class="p">[</span><span class="mi">3</span><span class="p">],</span> <span class="s2">&quot;file&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;ink&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">}</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">score</span> <span class="o">&lt;</span> <span class="n">bsa</span><span class="o">.</span><span class="n">_MIN_SCORE</span> <span class="ow">or</span> <span class="n">box</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">-</span> <span class="n">box</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">bsa</span><span class="o">.</span><span class="n">_MIN_SYMBOL_PX</span>
+                <span class="ow">or</span> <span class="n">box</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="o">-</span> <span class="n">box</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">bsa</span><span class="o">.</span><span class="n">_MIN_SYMBOL_PX</span><span class="p">):</span>
+            <span class="n">record</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;no curated token matches this printed meaning&quot;</span>
+                                 <span class="k">if</span> <span class="n">score</span> <span class="o">&lt;</span> <span class="n">bsa</span><span class="o">.</span><span class="n">_MIN_SCORE</span>
+                                 <span class="k">else</span> <span class="s2">&quot;no symbol region on this line&quot;</span><span class="p">)</span>
+            <span class="n">unmatched</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">record</span><span class="p">)</span>
+            <span class="k">continue</span>
+        <span class="n">crop</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">crop</span><span class="p">(</span><span class="n">box</span><span class="p">)</span>
+        <span class="n">record</span><span class="p">[</span><span class="s2">&quot;ink&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="n">plate_ink</span><span class="p">(</span><span class="n">dark</span><span class="p">,</span> <span class="n">box</span><span class="p">),</span> <span class="mi">4</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">record</span><span class="p">[</span><span class="s2">&quot;ink&quot;</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">bsa</span><span class="o">.</span><span class="n">_MIN_INK_SHARE</span><span class="p">:</span>
+            <span class="n">record</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;the crop holds no ink&quot;</span>
+            <span class="n">unmatched</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">record</span><span class="p">)</span>
+            <span class="k">continue</span>
+        <span class="n">used</span><span class="p">[</span><span class="n">token</span><span class="p">]</span> <span class="o">=</span> <span class="n">used</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">token</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="n">name</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s2">&quot;[]&quot;</span><span class="p">)</span> <span class="o">+</span> <span class="p">(</span><span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">used</span><span class="p">[</span><span class="n">token</span><span class="p">]</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">&quot;_</span><span class="si">{</span><span class="n">used</span><span class="p">[</span><span class="n">token</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">crop</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">OUT_DIR</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">.png&quot;</span><span class="p">)</span>
+        <span class="n">record</span><span class="p">[</span><span class="s2">&quot;file&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">.png&quot;</span>
+        <span class="n">record</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;ok&quot;</span> <span class="k">if</span> <span class="n">used</span><span class="p">[</span><span class="n">token</span><span class="p">]</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="s2">&quot;duplicate token&quot;</span>
+        <span class="n">manifest</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">record</span><span class="p">)</span>
+
+    <span class="n">manifest</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">r</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;token&quot;</span><span class="p">])</span>
+    <span class="k">with</span> <span class="p">(</span><span class="n">OUT_DIR</span> <span class="o">/</span> <span class="s2">&quot;manifest.csv&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;w&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+        <span class="n">writer</span> <span class="o">=</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictWriter</span><span class="p">(</span><span class="n">fh</span><span class="p">,</span> <span class="n">fieldnames</span><span class="o">=</span><span class="nb">list</span><span class="p">((</span><span class="n">manifest</span> <span class="ow">or</span> <span class="n">unmatched</span><span class="p">)[</span><span class="mi">0</span><span class="p">]))</span>
+        <span class="n">writer</span><span class="o">.</span><span class="n">writeheader</span><span class="p">()</span>
+        <span class="n">writer</span><span class="o">.</span><span class="n">writerows</span><span class="p">(</span><span class="n">manifest</span> <span class="o">+</span> <span class="n">unmatched</span><span class="p">)</span>
+    <span class="n">bsa</span><span class="o">.</span><span class="n">_montage</span><span class="p">([</span><span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">manifest</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;ok&quot;</span><span class="p">],</span> <span class="n">Image</span><span class="p">,</span> <span class="n">ImageDraw</span><span class="p">,</span>
+                 <span class="n">ImageFont</span><span class="p">,</span> <span class="n">out_dir</span><span class="o">=</span><span class="n">OUT_DIR</span><span class="p">,</span> <span class="n">title</span><span class="o">=</span><span class="n">TITLE</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">report</span><span class="p">(</span><span class="n">manifest</span><span class="p">,</span> <span class="n">unmatched</span><span class="p">,</span> <span class="n">targets</span><span class="p">,</span> <span class="n">show</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">manifest</span><span class="p">,</span> <span class="n">unmatched</span><span class="p">,</span> <span class="n">targets</span><span class="p">,</span> <span class="n">show</span><span class="p">:</span> <span class="nb">bool</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;What the plate gave, and which tokens it did not give a symbol for.&quot;&quot;&quot;</span>
+    <span class="n">named</span> <span class="o">=</span> <span class="p">{</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;token&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">manifest</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;ok&quot;</span><span class="p">}</span>
+    <span class="n">missing</span> <span class="o">=</span> <span class="p">[</span><span class="n">t</span> <span class="k">for</span> <span class="n">t</span><span class="p">,</span> <span class="o">*</span><span class="n">_</span> <span class="ow">in</span> <span class="n">targets</span> <span class="k">if</span> <span class="n">t</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">named</span><span class="p">]</span>
+    <span class="n">dup</span> <span class="o">=</span> <span class="p">[</span><span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">manifest</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;duplicate token&quot;</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">named</span><span class="p">)</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">targets</span><span class="p">)</span><span class="si">}</span><span class="s2"> German pictograms cropped and &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;named -&gt; </span><span class="si">{</span><span class="n">OUT_DIR</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">rows</span> <span class="ow">in</span> <span class="p">((</span><span class="s2">&quot;tokens matched by more than one plate line&quot;</span><span class="p">,</span> <span class="n">dup</span><span class="p">),</span>
+                        <span class="p">(</span><span class="s2">&quot;plate lines no token matches&quot;</span><span class="p">,</span> <span class="p">[</span><span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">unmatched</span>
+                         <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;no curated&quot;</span><span class="p">)]),</span>
+                        <span class="p">(</span><span class="s2">&quot;crops rejected as blank paper&quot;</span><span class="p">,</span> <span class="p">[</span><span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">unmatched</span>
+                         <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;the crop&quot;</span><span class="p">)])):</span>
+        <span class="k">if</span> <span class="n">rows</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  ! </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">[:</span><span class="mi">12</span><span class="p">]:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;      </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;token&#39;</span><span class="p">]</span><span class="w"> </span><span class="ow">or</span><span class="w"> </span><span class="s1">&#39;-&#39;</span><span class="si">:</span><span class="s2">22s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;gloss_printed&#39;</span><span class="p">][:</span><span class="mi">50</span><span class="p">]</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">missing</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  ! curated tokens WITHOUT a symbol from the plate: &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">missing</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">show</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">manifest</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;token&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">22s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;score&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">5.1f</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;gloss_printed&#39;</span><span class="p">][:</span><span class="mi">44</span><span class="p">]</span><span class="si">!r}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">missing</span> <span class="k">else</span> <span class="mi">1</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="k">for</span> <span class="n">stream</span> <span class="ow">in</span> <span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">stdout</span><span class="p">,</span> <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">stream</span><span class="o">.</span><span class="n">reconfigure</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;replace&quot;</span><span class="p">)</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">AttributeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">):</span>
+            <span class="k">pass</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="p">,</span>
+                                 <span class="n">formatter_class</span><span class="o">=</span><span class="n">argparse</span><span class="o">.</span><span class="n">RawDescriptionHelpFormatter</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--scan&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="n">LEGEND_SCAN</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--show&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;print the full manifest&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">build</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">scan</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">show</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>

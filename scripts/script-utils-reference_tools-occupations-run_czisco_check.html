@@ -1,0 +1,858 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Matches each curated Czech key against the <strong>head noun</strong> of a CZ-ISCO label and writes the
+official Czech-statistical-office English label beside our HISCO label, so the two can be
+compared. Nothing here changes <code>hisco</code> — the script asserts the column is byte-identical
+before and after.</p><p class="tldr-facts"><b>Reference tools</b> · v1.0.0 · 259 lines · 5 public functions · 5 constants · used by nothing else · <code>utils/reference_tools/occupations/run_czisco_check.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-reference_tools-occupations-run_czisco_check-load_bridge">load_bridge</a><a class="chip" href="#fn-utils-reference_tools-occupations-run_czisco_check-best_match">best_match</a><a class="chip" href="#fn-utils-reference_tools-occupations-run_czisco_check-check">check</a><a class="chip" href="#fn-utils-reference_tools-occupations-run_czisco_check-tail_candidates">tail_candidates</a><a class="chip" href="#fn-utils-reference_tools-occupations-run_czisco_check-main">main</a><a class="chip const" href="#c-utils-reference_tools-occupations-run_czisco_check-ROOT">ROOT</a><a class="chip const" href="#c-utils-reference_tools-occupations-run_czisco_check-CURATION">CURATION</a><a class="chip const" href="#c-utils-reference_tools-occupations-run_czisco_check-BRIDGE">BRIDGE</a><a class="chip const" href="#c-utils-reference_tools-occupations-run_czisco_check-AUTHORITY">AUTHORITY</a><a class="chip const" href="#c-utils-reference_tools-occupations-run_czisco_check-TAIL_OUT">TAIL_OUT</a></div>
+<h2>How it works</h2><p>What this check adds that the other two cannot. The German link bridge and OccCANINE both
+begin from a German gloss <em>this project wrote</em>, so neither can test the step that actually
+carries the risk: whether the Czech word means what we said it means. CZ-ISCO is Czech→
+English under one code, authored by ČSÚ, so it tests exactly that step and nothing else.</p>
+<p>What it cannot do, and the write-up must keep saying so:</p>
+<ul>
+<li><strong>It is the 2025 classification.</strong> The historical core of this corpus is absent at every
+    level — <code>rolník</code>, <code>hajný</code>, <code>příručí</code>, <code>tkadlec</code>, <code>mlynář</code>, <code>kolář</code>,
+    <code>bednář</code>, <code>cihlář</code>, <code>havíř</code>, <code>soustružník</code>. Roughly two thirds of records are
+    reachable; the words that carry the biggest coding decisions are not.</li>
+<li><strong>It cannot corroborate a residual.</strong> Where our code is HSN's "no further information"
+    (99900/99910/99920) or a sentinel, no ISCO code can agree or disagree, because ISCO has
+    no residual category. Those keys are scored <code>n/a</code> rather than counted as failures.</li>
+<li><strong>It reaches no HISCO code.</strong> See <code>build_czisco_bridge.py</code> for why the ISCO-08 → 88 →
+    68 chain is not attempted.</li>
+</ul>
+<p>Run:  python utils/reference_tools/occupations/run_czisco_check.py            # curated keys
+      python utils/reference_tools/occupations/run_czisco_check.py --tail     # + uncoded-tail candidates
+Emits: updates reference/occupations/occupation_hisco_curation.csv
+       (czisco_code, czisco_cs, czisco_en, czisco_isco08, czisco_agree)
+       and, with --tail, reference/occupations/czisco_tail_candidates.csv
+Prerequisite: python utils/reference_tools/occupations/build_czisco_bridge.py</p>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-reference_tools-occupations-run_czisco_check-load_bridge">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">load_bridge</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 90–100 (11 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">load_bridge</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">BRIDGE</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">BRIDGE</span><span class="si">}</span><span class="s2"> not found — run: &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;python utils/reference_tools/occupations/build_czisco_bridge.py&quot;</span><span class="p">)</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">BRIDGE</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span>
+    <span class="n">b</span><span class="p">[</span><span class="s2">&quot;heads&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">b</span><span class="p">[</span><span class="s2">&quot;head_cs&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot; | &quot;</span><span class="p">)</span>
+    <span class="n">b</span><span class="p">[</span><span class="s2">&quot;bare&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">b</span><span class="p">[</span><span class="s2">&quot;head_bare&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot; | &quot;</span><span class="p">)</span>
+    <span class="n">b</span><span class="p">[</span><span class="s2">&quot;n_heads&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">b</span><span class="p">[</span><span class="s2">&quot;heads&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="nb">len</span><span class="p">)</span>
+    <span class="n">b</span><span class="p">[</span><span class="s2">&quot;n_tok&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">b</span><span class="p">[</span><span class="s2">&quot;cs&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">s</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">re</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;[^\W\d_]+&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">s</span><span class="p">),</span> <span class="n">re</span><span class="o">.</span><span class="n">UNICODE</span><span class="p">)))</span>
+    <span class="k">return</span> <span class="n">b</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-run_czisco_check-best_match">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">best_match</span><span class="p">(</span><span class="n">key</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">b</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="nb">tuple</span><span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span></pre>
+<div class="fndoc"><p>The most on-point CZ-ISCO row whose head noun is an inflection of <code>key</code>.</p>
+<p>Ranked by, in order: whether the head carries a qualifying adjective, how many
+occupations the label names, how long it is, and finally specificity of level. That
+ordering is what puts <code>malíř</code> on <code>Malíři interiérů</code> rather than <code>Umělečtí
+malíři</code> — both have head <em>malíři</em>, but the qualified one is a different trade — and
+what prefers <code>Zedníci</code> (71121, a single token once its "(kromě …)" exclusion is
+stripped) over <code>Kamnáři, zedníci ohnivzdorného zdiva</code>.</p>
+<p>Also returns how many codes matched at all, so an ambiguous key is visible as such.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 103–122 (20 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">best_match</span><span class="p">(</span><span class="n">key</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">b</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="nb">tuple</span><span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The most on-point CZ-ISCO row whose head noun is an inflection of ``key``.</span>
+
+<span class="sd">    Ranked by, in order: whether the head carries a qualifying adjective, how many</span>
+<span class="sd">    occupations the label names, how long it is, and finally specificity of level. That</span>
+<span class="sd">    ordering is what puts ``malíř`` on ``Malíři interiérů`` rather than ``Umělečtí</span>
+<span class="sd">    malíři`` — both have head *malíři*, but the qualified one is a different trade — and</span>
+<span class="sd">    what prefers ``Zedníci`` (71121, a single token once its &quot;(kromě …)&quot; exclusion is</span>
+<span class="sd">    stripped) over ``Kamnáři, zedníci ohnivzdorného zdiva``.</span>
+
+<span class="sd">    Also returns how many codes matched at all, so an ambiguous key is visible as such.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">hit</span> <span class="o">=</span> <span class="n">b</span><span class="p">[</span><span class="n">b</span><span class="p">[</span><span class="s2">&quot;heads&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">hs</span><span class="p">:</span> <span class="nb">any</span><span class="p">(</span><span class="n">matches_head</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">h</span><span class="p">)</span> <span class="k">for</span> <span class="n">h</span> <span class="ow">in</span> <span class="n">hs</span><span class="p">))]</span>
+    <span class="k">if</span> <span class="n">hit</span><span class="o">.</span><span class="n">empty</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="mi">0</span>
+    <span class="n">hit</span> <span class="o">=</span> <span class="n">hit</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">hit</span><span class="p">[</span><span class="s2">&quot;qualified&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="o">~</span><span class="n">hit</span><span class="p">[</span><span class="s2">&quot;bare&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">hs</span><span class="p">:</span> <span class="nb">any</span><span class="p">(</span><span class="n">matches_head</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">h</span><span class="p">)</span> <span class="k">for</span> <span class="n">h</span> <span class="ow">in</span> <span class="n">hs</span><span class="p">))</span>
+    <span class="n">ranked</span> <span class="o">=</span> <span class="n">hit</span><span class="o">.</span><span class="n">sort_values</span><span class="p">([</span><span class="s2">&quot;qualified&quot;</span><span class="p">,</span> <span class="s2">&quot;n_heads&quot;</span><span class="p">,</span> <span class="s2">&quot;n_tok&quot;</span><span class="p">,</span> <span class="s2">&quot;level&quot;</span><span class="p">],</span>
+                             <span class="n">ascending</span><span class="o">=</span><span class="p">[</span><span class="kc">True</span><span class="p">,</span> <span class="kc">True</span><span class="p">,</span> <span class="kc">True</span><span class="p">,</span> <span class="kc">False</span><span class="p">])</span>
+    <span class="k">return</span> <span class="n">ranked</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="nb">len</span><span class="p">(</span><span class="n">hit</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-run_czisco_check-check">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">check</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<p class="calls"><b>Called by</b> <code>15_frozen_run.ipynb</code> <code>tests/test_court_key.py</code> <code>utils/docs/build_docs.py</code> <code>utils/lexikon_1910/draw_gold_sample.py</code> <code>utils/lexikon_1910/lexikon_1910_courts.py</code> <code>utils/lexikon_1910/reader_batches.py</code> <code>utils/lexikon_1910/run_frozen.py</code> <code>utils/reference_tools/occupations/run_occcanine_check.py</code></p>
+<details><summary>source · lines 132–174 (43 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">check</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+    <span class="n">cur</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">CURATION</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">hisco_before</span> <span class="o">=</span> <span class="n">cur</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="n">load_bridge</span><span class="p">()</span>
+    <span class="n">label_of</span> <span class="o">=</span> <span class="n">_our_labels</span><span class="p">()</span>
+
+    <span class="n">coded</span> <span class="o">=</span> <span class="n">cur</span><span class="p">[</span><span class="n">cur</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">coded</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> curated keys with a code; </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">b</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> CZ-ISCO codes&quot;</span><span class="p">)</span>
+
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">coded</span><span class="o">.</span><span class="n">iterrows</span><span class="p">():</span>
+        <span class="n">m</span><span class="p">,</span> <span class="n">n_hits</span> <span class="o">=</span> <span class="n">best_match</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;key&quot;</span><span class="p">],</span> <span class="n">b</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">m</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">ours</span> <span class="o">=</span> <span class="n">label_of</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">],</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+        <span class="c1"># A residual cannot be corroborated: ISCO has no &quot;no further information&quot; group, so</span>
+        <span class="c1"># `dělník` -&gt; 99900 meeting `Kvalifikovaní stavební dělníci` is neither agreement</span>
+        <span class="c1"># nor disagreement. Score it n/a rather than let it depress the headline.</span>
+        <span class="n">residual</span> <span class="o">=</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;999&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;-&quot;</span><span class="p">)</span>
+        <span class="n">hb</span><span class="p">,</span> <span class="n">ib</span> <span class="o">=</span> <span class="n">_band</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">],</span> <span class="n">m</span><span class="p">[</span><span class="s2">&quot;code&quot;</span><span class="p">])</span>
+        <span class="k">if</span> <span class="n">residual</span><span class="p">:</span>
+            <span class="n">agree</span> <span class="o">=</span> <span class="s2">&quot;n/a&quot;</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">overlap</span> <span class="o">=</span> <span class="nb">bool</span><span class="p">(</span><span class="n">_content</span><span class="p">(</span><span class="n">ours</span><span class="p">)</span> <span class="o">&amp;</span> <span class="n">_content</span><span class="p">(</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;en&quot;</span><span class="p">]))</span>
+            <span class="n">agree</span> <span class="o">=</span> <span class="s2">&quot;1&quot;</span> <span class="k">if</span> <span class="n">overlap</span> <span class="k">else</span> <span class="p">(</span><span class="s2">&quot;band&quot;</span> <span class="k">if</span> <span class="p">(</span><span class="n">hb</span> <span class="ow">and</span> <span class="n">hb</span> <span class="o">==</span> <span class="n">ib</span><span class="p">)</span> <span class="k">else</span> <span class="s2">&quot;0&quot;</span><span class="p">)</span>
+        <span class="n">rows</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">czisco_code</span><span class="o">=</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;code&quot;</span><span class="p">],</span> <span class="n">czisco_cs</span><span class="o">=</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;cs&quot;</span><span class="p">],</span> <span class="n">czisco_en</span><span class="o">=</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;en&quot;</span><span class="p">],</span>
+                       <span class="n">czisco_isco08</span><span class="o">=</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;isco08_4d&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;isco08_4d&quot;</span><span class="p">])</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+                       <span class="n">czisco_agree</span><span class="o">=</span><span class="n">agree</span><span class="p">,</span> <span class="n">czisco_n_hits</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">n_hits</span><span class="p">))</span>
+
+    <span class="n">add</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">orient</span><span class="o">=</span><span class="s2">&quot;index&quot;</span><span class="p">)</span>
+    <span class="c1"># Blank the whole family first. Writing only the rows that matched would leave a key</span>
+    <span class="c1"># that *stopped* matching — because the rule was tightened, say — holding the hit it</span>
+    <span class="c1"># got on an earlier run, and the report would still show it. Derived columns must be</span>
+    <span class="c1"># rebuilt, never patched.</span>
+    <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;czisco_code&quot;</span><span class="p">,</span> <span class="s2">&quot;czisco_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;czisco_en&quot;</span><span class="p">,</span> <span class="s2">&quot;czisco_isco08&quot;</span><span class="p">,</span> <span class="s2">&quot;czisco_agree&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;czisco_n_hits&quot;</span><span class="p">):</span>
+        <span class="n">cur</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">add</span><span class="p">):</span>
+            <span class="n">cur</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">add</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="n">col</span><span class="p">]</span> <span class="o">=</span> <span class="n">add</span><span class="p">[</span><span class="n">col</span><span class="p">]</span>
+
+    <span class="k">assert</span> <span class="n">cur</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">equals</span><span class="p">(</span><span class="n">hisco_before</span><span class="p">),</span> <span class="s2">&quot;run_czisco_check must never change `hisco`&quot;</span>
+    <span class="n">_report</span><span class="p">(</span><span class="n">cur</span><span class="p">,</span> <span class="n">add</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">cur</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-run_czisco_check-tail_candidates">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">tail_candidates</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>CZ-ISCO hits among the enrolment strings nothing currently codes.</p>
+<p>Emitted for hand adjudication only. Accepted rows are hand-entered into
+<code>czech_glosses.py</code>'s <code>HISCO_OVERRIDE</code> like every other code, and the HISCO code is
+still read off <code>hisco_authority.csv</code> — never off CZ-ISCO.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 200–237 (38 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">tail_candidates</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;CZ-ISCO hits among the enrolment strings nothing currently codes.</span>
+
+<span class="sd">    Emitted for hand adjudication only. Accepted rows are hand-entered into</span>
+<span class="sd">    ``czech_glosses.py``&#39;s ``HISCO_OVERRIDE`` like every other code, and the HISCO code is</span>
+<span class="sd">    still read off ``hisco_authority.csv`` — never off CZ-ISCO.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing.occupations</span><span class="w"> </span><span class="kn">import</span> <span class="n">_norm</span>
+
+    <span class="n">final</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;data&quot;</span> <span class="o">/</span> <span class="s2">&quot;final&quot;</span> <span class="o">/</span> <span class="s2">&quot;persons&quot;</span> <span class="o">/</span> <span class="s2">&quot;legionnaires_clean.parquet&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">final</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">final</span><span class="si">}</span><span class="s2"> not found — run notebook 02 first.&quot;</span><span class="p">)</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">final</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;occupation&quot;</span><span class="p">,</span> <span class="s2">&quot;occupation_hisco&quot;</span><span class="p">])</span>
+    <span class="n">un</span> <span class="o">=</span> <span class="n">d</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">d</span><span class="p">[</span><span class="s2">&quot;occupation&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">d</span><span class="p">[</span><span class="s2">&quot;occupation_hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isna</span><span class="p">(),</span> <span class="s2">&quot;occupation&quot;</span><span class="p">]</span>
+    <span class="n">vc</span> <span class="o">=</span> <span class="n">un</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  uncoded tail: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">un</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> records over </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">vc</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> distinct strings&quot;</span><span class="p">)</span>
+
+    <span class="n">b</span> <span class="o">=</span> <span class="n">load_bridge</span><span class="p">()</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">raw</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">vc</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">key</span> <span class="o">=</span> <span class="n">_norm</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">key</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">m</span><span class="p">,</span> <span class="n">n_hits</span> <span class="o">=</span> <span class="n">best_match</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">m</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">dict</span><span class="p">(</span><span class="n">raw</span><span class="o">=</span><span class="n">raw</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">key</span><span class="p">,</span> <span class="n">n</span><span class="o">=</span><span class="n">c</span><span class="p">,</span> <span class="n">czisco_code</span><span class="o">=</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;code&quot;</span><span class="p">],</span>
+                        <span class="n">czisco_cs</span><span class="o">=</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;cs&quot;</span><span class="p">],</span> <span class="n">czisco_en</span><span class="o">=</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;en&quot;</span><span class="p">],</span>
+                        <span class="n">czisco_isco08</span><span class="o">=</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;isco08_4d&quot;</span><span class="p">],</span> <span class="n">czisco_n_hits</span><span class="o">=</span><span class="n">n_hits</span><span class="p">,</span>
+                        <span class="n">accept</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">hisco</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">note</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">))</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">out</span><span class="p">)</span><span class="o">.</span><span class="n">sort_values</span><span class="p">(</span><span class="s2">&quot;n&quot;</span><span class="p">,</span> <span class="n">ascending</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">ignore_index</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  CZ-ISCO proposes a reading for </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> strings / &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">&#39;n&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> records&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  top candidates (nothing is applied — `accept` and `hisco` are yours to fill):&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">head</span><span class="p">(</span><span class="mi">20</span><span class="p">)</span><span class="o">.</span><span class="n">itertuples</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">r</span><span class="o">.</span><span class="n">n</span><span class="si">:</span><span class="s2">&gt;4</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">r</span><span class="o">.</span><span class="n">raw</span><span class="p">[:</span><span class="mi">24</span><span class="p">]</span><span class="si">:</span><span class="s2">&lt;24</span><span class="si">}</span><span class="s2"> -&gt; </span><span class="si">{</span><span class="n">r</span><span class="o">.</span><span class="n">czisco_code</span><span class="si">:</span><span class="s2">&lt;6</span><span class="si">}</span><span class="s2"> &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">r</span><span class="o">.</span><span class="n">czisco_cs</span><span class="p">[:</span><span class="mi">32</span><span class="p">]</span><span class="si">:</span><span class="s2">&lt;32</span><span class="si">}</span><span class="s2"> = </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">czisco_en</span><span class="p">)[:</span><span class="mi">40</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">df</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-run_czisco_check-main">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 240–255 (16 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()[</span><span class="mi">1</span><span class="p">])</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--tail&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;also emit candidates for the uncoded enrolment tail&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;CZ-ISCO third-coder check …&quot;</span><span class="p">)</span>
+    <span class="n">cur</span> <span class="o">=</span> <span class="n">check</span><span class="p">()</span>
+    <span class="n">cur</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">CURATION</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Updated </span><span class="si">{</span><span class="n">CURATION</span><span class="o">.</span><span class="n">relative_to</span><span class="p">(</span><span class="n">ROOT</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">tail</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Tail candidates …&quot;</span><span class="p">)</span>
+        <span class="n">tail_candidates</span><span class="p">()</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">TAIL_OUT</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Wrote </span><span class="si">{</span><span class="n">TAIL_OUT</span><span class="o">.</span><span class="n">relative_to</span><span class="p">(</span><span class="n">ROOT</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-reference_tools-occupations-run_czisco_check-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-run_czisco_check-CURATION"><pre class="sig">CURATION<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;reference&#39;</span> <span class="o">/</span> <span class="s1">&#39;occupations&#39;</span> <span class="o">/</span> <span class="s1">&#39;occupation_hisco_curation.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-run_czisco_check-BRIDGE"><pre class="sig">BRIDGE<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;reference&#39;</span> <span class="o">/</span> <span class="s1">&#39;occupations&#39;</span> <span class="o">/</span> <span class="s1">&#39;czisco_authority.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-run_czisco_check-AUTHORITY"><pre class="sig">AUTHORITY<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;reference&#39;</span> <span class="o">/</span> <span class="s1">&#39;occupations&#39;</span> <span class="o">/</span> <span class="s1">&#39;hisco_authority.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-run_czisco_check-TAIL_OUT"><pre class="sig">TAIL_OUT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;reference&#39;</span> <span class="o">/</span> <span class="s1">&#39;occupations&#39;</span> <span class="o">/</span> <span class="s1">&#39;czisco_tail_candidates.csv&#39;</span>
+</pre></div>
+</details></div>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/reference_tools/occupations/run_czisco_check.py · 259 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">run_czisco_check.py — CZ-ISCO as a third coder, on the Czech side</span>
+<span class="sd">=================================================================</span>
+<span class="sd">Matches each curated Czech key against the **head noun** of a CZ-ISCO label and writes the</span>
+<span class="sd">official Czech-statistical-office English label beside our HISCO label, so the two can be</span>
+<span class="sd">compared. Nothing here changes ``hisco`` — the script asserts the column is byte-identical</span>
+<span class="sd">before and after.</span>
+
+<span class="sd">What this check adds that the other two cannot. The German link bridge and OccCANINE both</span>
+<span class="sd">begin from a German gloss *this project wrote*, so neither can test the step that actually</span>
+<span class="sd">carries the risk: whether the Czech word means what we said it means. CZ-ISCO is Czech→</span>
+<span class="sd">English under one code, authored by ČSÚ, so it tests exactly that step and nothing else.</span>
+
+<span class="sd">What it cannot do, and the write-up must keep saying so:</span>
+
+<span class="sd">  * **It is the 2025 classification.** The historical core of this corpus is absent at every</span>
+<span class="sd">    level — ``rolník``, ``hajný``, ``příručí``, ``tkadlec``, ``mlynář``, ``kolář``,</span>
+<span class="sd">    ``bednář``, ``cihlář``, ``havíř``, ``soustružník``. Roughly two thirds of records are</span>
+<span class="sd">    reachable; the words that carry the biggest coding decisions are not.</span>
+<span class="sd">  * **It cannot corroborate a residual.** Where our code is HSN&#39;s &quot;no further information&quot;</span>
+<span class="sd">    (99900/99910/99920) or a sentinel, no ISCO code can agree or disagree, because ISCO has</span>
+<span class="sd">    no residual category. Those keys are scored ``n/a`` rather than counted as failures.</span>
+<span class="sd">  * **It reaches no HISCO code.** See ``build_czisco_bridge.py`` for why the ISCO-08 → 88 →</span>
+<span class="sd">    68 chain is not attempted.</span>
+
+<span class="sd">Run:  python utils/reference_tools/occupations/run_czisco_check.py            # curated keys</span>
+<span class="sd">      python utils/reference_tools/occupations/run_czisco_check.py --tail     # + uncoded-tail candidates</span>
+<span class="sd">Emits: updates reference/occupations/occupation_hisco_curation.csv</span>
+<span class="sd">       (czisco_code, czisco_cs, czisco_en, czisco_isco08, czisco_agree)</span>
+<span class="sd">       and, with --tail, reference/occupations/czisco_tail_candidates.csv</span>
+<span class="sd">Prerequisite: python utils/reference_tools/occupations/build_czisco_bridge.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">))</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.reference_tools.occupations.build_czisco_bridge</span><span class="w"> </span><span class="kn">import</span> <span class="n">_fold</span><span class="p">,</span> <span class="n">matches_head</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.0.0&quot;</span>
+
+<span class="n">CURATION</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;occupations&quot;</span> <span class="o">/</span> <span class="s2">&quot;occupation_hisco_curation.csv&quot;</span>
+<span class="n">BRIDGE</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;occupations&quot;</span> <span class="o">/</span> <span class="s2">&quot;czisco_authority.csv&quot;</span>
+<span class="n">AUTHORITY</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;occupations&quot;</span> <span class="o">/</span> <span class="s2">&quot;hisco_authority.csv&quot;</span>
+<span class="n">TAIL_OUT</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;occupations&quot;</span> <span class="o">/</span> <span class="s2">&quot;czisco_tail_candidates.csv&quot;</span>
+
+<span class="c1"># Words that carry no occupational content in either scheme&#39;s label style. Dropping them</span>
+<span class="c1"># before comparing is what lets &quot;Shoemakers and related workers&quot; meet &quot;Shoe-maker, General&quot;.</span>
+<span class="n">_STOP</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;and&quot;</span><span class="p">,</span> <span class="s2">&quot;or&quot;</span><span class="p">,</span> <span class="s2">&quot;of&quot;</span><span class="p">,</span> <span class="s2">&quot;the&quot;</span><span class="p">,</span> <span class="s2">&quot;in&quot;</span><span class="p">,</span> <span class="s2">&quot;not&quot;</span><span class="p">,</span> <span class="s2">&quot;elsewhere&quot;</span><span class="p">,</span> <span class="s2">&quot;classified&quot;</span><span class="p">,</span> <span class="s2">&quot;nec&quot;</span><span class="p">,</span> <span class="s2">&quot;other&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;others&quot;</span><span class="p">,</span> <span class="s2">&quot;related&quot;</span><span class="p">,</span> <span class="s2">&quot;worker&quot;</span><span class="p">,</span> <span class="s2">&quot;workers&quot;</span><span class="p">,</span> <span class="s2">&quot;general&quot;</span><span class="p">,</span> <span class="s2">&quot;specialisation&quot;</span><span class="p">,</span> <span class="s2">&quot;specialization&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;unknown&quot;</span><span class="p">,</span> <span class="s2">&quot;similar&quot;</span><span class="p">,</span> <span class="s2">&quot;trades&quot;</span><span class="p">,</span> <span class="s2">&quot;occupations&quot;</span><span class="p">,</span> <span class="s2">&quot;professional&quot;</span><span class="p">,</span> <span class="s2">&quot;professionals&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;associate&quot;</span><span class="p">,</span> <span class="s2">&quot;n&quot;</span><span class="p">,</span> <span class="s2">&quot;e&quot;</span><span class="p">,</span> <span class="s2">&quot;c&quot;</span><span class="p">,</span> <span class="s2">&quot;except&quot;</span><span class="p">,</span> <span class="s2">&quot;including&quot;</span><span class="p">,</span> <span class="s2">&quot;etc&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="c1"># HISCO major group -&gt; a band that is comparable with ISCO-08. The raw major digits are</span>
+<span class="c1"># **not** comparable: HISCO 7/8/9 are all production workers, while ISCO-08 splits the same</span>
+<span class="c1"># people across 7 craft, 8 operators, 9 elementary, and HISCO 4/5 (sales, service) both fall</span>
+<span class="c1"># in ISCO-08&#39;s single major 5. Only these coarse bands mean the same thing on both sides.</span>
+<span class="n">_HISCO_BAND</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;0&quot;</span><span class="p">:</span> <span class="s2">&quot;prof&quot;</span><span class="p">,</span> <span class="s2">&quot;1&quot;</span><span class="p">:</span> <span class="s2">&quot;prof&quot;</span><span class="p">,</span> <span class="s2">&quot;2&quot;</span><span class="p">:</span> <span class="s2">&quot;manage&quot;</span><span class="p">,</span> <span class="s2">&quot;3&quot;</span><span class="p">:</span> <span class="s2">&quot;clerk&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;4&quot;</span><span class="p">:</span> <span class="s2">&quot;sales&quot;</span><span class="p">,</span> <span class="s2">&quot;5&quot;</span><span class="p">:</span> <span class="s2">&quot;sales&quot;</span><span class="p">,</span> <span class="s2">&quot;6&quot;</span><span class="p">:</span> <span class="s2">&quot;agri&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;7&quot;</span><span class="p">:</span> <span class="s2">&quot;manual&quot;</span><span class="p">,</span> <span class="s2">&quot;8&quot;</span><span class="p">:</span> <span class="s2">&quot;manual&quot;</span><span class="p">,</span> <span class="s2">&quot;9&quot;</span><span class="p">:</span> <span class="s2">&quot;manual&quot;</span><span class="p">}</span>
+<span class="n">_ISCO_BAND</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;1&quot;</span><span class="p">:</span> <span class="s2">&quot;manage&quot;</span><span class="p">,</span> <span class="s2">&quot;2&quot;</span><span class="p">:</span> <span class="s2">&quot;prof&quot;</span><span class="p">,</span> <span class="s2">&quot;3&quot;</span><span class="p">:</span> <span class="s2">&quot;prof&quot;</span><span class="p">,</span> <span class="s2">&quot;4&quot;</span><span class="p">:</span> <span class="s2">&quot;clerk&quot;</span><span class="p">,</span> <span class="s2">&quot;5&quot;</span><span class="p">:</span> <span class="s2">&quot;sales&quot;</span><span class="p">,</span>
+              <span class="s2">&quot;6&quot;</span><span class="p">:</span> <span class="s2">&quot;agri&quot;</span><span class="p">,</span> <span class="s2">&quot;7&quot;</span><span class="p">:</span> <span class="s2">&quot;manual&quot;</span><span class="p">,</span> <span class="s2">&quot;8&quot;</span><span class="p">:</span> <span class="s2">&quot;manual&quot;</span><span class="p">,</span> <span class="s2">&quot;9&quot;</span><span class="p">:</span> <span class="s2">&quot;manual&quot;</span><span class="p">,</span> <span class="s2">&quot;0&quot;</span><span class="p">:</span> <span class="s2">&quot;protect&quot;</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_band</span><span class="p">(</span><span class="n">hisco</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">isco</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Coarse bands for our HISCO code and the CZ-ISCO code, or ``None`` where not scoreable.&quot;&quot;&quot;</span>
+    <span class="n">h</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">hisco</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="n">i</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">isco</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="n">hb</span> <span class="o">=</span> <span class="s2">&quot;protect&quot;</span> <span class="k">if</span> <span class="n">h</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;58&quot;</span><span class="p">)</span> <span class="k">else</span> <span class="n">_HISCO_BAND</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">h</span><span class="p">[:</span><span class="mi">1</span><span class="p">])</span>
+    <span class="n">ib</span> <span class="o">=</span> <span class="s2">&quot;protect&quot;</span> <span class="k">if</span> <span class="p">(</span><span class="n">i</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;0&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="n">i</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;541&quot;</span><span class="p">))</span> <span class="k">else</span> <span class="n">_ISCO_BAND</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">i</span><span class="p">[:</span><span class="mi">1</span><span class="p">])</span>
+    <span class="k">return</span> <span class="n">hb</span><span class="p">,</span> <span class="n">ib</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_content</span><span class="p">(</span><span class="n">label</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Content-word stems of an English occupational label, singularised crudely.&quot;&quot;&quot;</span>
+    <span class="n">words</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;[a-z]+&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">label</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;-&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">lower</span><span class="p">())</span>
+    <span class="k">return</span> <span class="p">{</span><span class="n">w</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">w</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">4</span> <span class="ow">and</span> <span class="n">w</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;s&quot;</span><span class="p">)</span> <span class="k">else</span> <span class="n">w</span>
+            <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">words</span> <span class="k">if</span> <span class="n">w</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">_STOP</span><span class="p">}</span> <span class="o">-</span> <span class="n">_STOP</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">load_bridge</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">BRIDGE</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">BRIDGE</span><span class="si">}</span><span class="s2"> not found — run: &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;python utils/reference_tools/occupations/build_czisco_bridge.py&quot;</span><span class="p">)</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">BRIDGE</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span>
+    <span class="n">b</span><span class="p">[</span><span class="s2">&quot;heads&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">b</span><span class="p">[</span><span class="s2">&quot;head_cs&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot; | &quot;</span><span class="p">)</span>
+    <span class="n">b</span><span class="p">[</span><span class="s2">&quot;bare&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">b</span><span class="p">[</span><span class="s2">&quot;head_bare&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot; | &quot;</span><span class="p">)</span>
+    <span class="n">b</span><span class="p">[</span><span class="s2">&quot;n_heads&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">b</span><span class="p">[</span><span class="s2">&quot;heads&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="nb">len</span><span class="p">)</span>
+    <span class="n">b</span><span class="p">[</span><span class="s2">&quot;n_tok&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">b</span><span class="p">[</span><span class="s2">&quot;cs&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">s</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">re</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;[^\W\d_]+&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">s</span><span class="p">),</span> <span class="n">re</span><span class="o">.</span><span class="n">UNICODE</span><span class="p">)))</span>
+    <span class="k">return</span> <span class="n">b</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">best_match</span><span class="p">(</span><span class="n">key</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">b</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="nb">tuple</span><span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The most on-point CZ-ISCO row whose head noun is an inflection of ``key``.</span>
+
+<span class="sd">    Ranked by, in order: whether the head carries a qualifying adjective, how many</span>
+<span class="sd">    occupations the label names, how long it is, and finally specificity of level. That</span>
+<span class="sd">    ordering is what puts ``malíř`` on ``Malíři interiérů`` rather than ``Umělečtí</span>
+<span class="sd">    malíři`` — both have head *malíři*, but the qualified one is a different trade — and</span>
+<span class="sd">    what prefers ``Zedníci`` (71121, a single token once its &quot;(kromě …)&quot; exclusion is</span>
+<span class="sd">    stripped) over ``Kamnáři, zedníci ohnivzdorného zdiva``.</span>
+
+<span class="sd">    Also returns how many codes matched at all, so an ambiguous key is visible as such.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">hit</span> <span class="o">=</span> <span class="n">b</span><span class="p">[</span><span class="n">b</span><span class="p">[</span><span class="s2">&quot;heads&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">hs</span><span class="p">:</span> <span class="nb">any</span><span class="p">(</span><span class="n">matches_head</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">h</span><span class="p">)</span> <span class="k">for</span> <span class="n">h</span> <span class="ow">in</span> <span class="n">hs</span><span class="p">))]</span>
+    <span class="k">if</span> <span class="n">hit</span><span class="o">.</span><span class="n">empty</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span><span class="p">,</span> <span class="mi">0</span>
+    <span class="n">hit</span> <span class="o">=</span> <span class="n">hit</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">hit</span><span class="p">[</span><span class="s2">&quot;qualified&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="o">~</span><span class="n">hit</span><span class="p">[</span><span class="s2">&quot;bare&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">hs</span><span class="p">:</span> <span class="nb">any</span><span class="p">(</span><span class="n">matches_head</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">h</span><span class="p">)</span> <span class="k">for</span> <span class="n">h</span> <span class="ow">in</span> <span class="n">hs</span><span class="p">))</span>
+    <span class="n">ranked</span> <span class="o">=</span> <span class="n">hit</span><span class="o">.</span><span class="n">sort_values</span><span class="p">([</span><span class="s2">&quot;qualified&quot;</span><span class="p">,</span> <span class="s2">&quot;n_heads&quot;</span><span class="p">,</span> <span class="s2">&quot;n_tok&quot;</span><span class="p">,</span> <span class="s2">&quot;level&quot;</span><span class="p">],</span>
+                             <span class="n">ascending</span><span class="o">=</span><span class="p">[</span><span class="kc">True</span><span class="p">,</span> <span class="kc">True</span><span class="p">,</span> <span class="kc">True</span><span class="p">,</span> <span class="kc">False</span><span class="p">])</span>
+    <span class="k">return</span> <span class="n">ranked</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="nb">len</span><span class="p">(</span><span class="n">hit</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_our_labels</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;HISCO code -&gt; our English label, at default modifiers.&quot;&quot;&quot;</span>
+    <span class="n">a</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">AUTHORITY</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;hisco&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">})</span>
+    <span class="n">base</span> <span class="o">=</span> <span class="n">a</span><span class="p">[(</span><span class="n">a</span><span class="p">[[</span><span class="s2">&quot;status&quot;</span><span class="p">,</span> <span class="s2">&quot;relation&quot;</span><span class="p">,</span> <span class="s2">&quot;product&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">str</span><span class="p">)</span> <span class="o">==</span> <span class="s2">&quot;-9&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)]</span>
+    <span class="k">return</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">base</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">],</span> <span class="n">base</span><span class="p">[</span><span class="s2">&quot;label_en&quot;</span><span class="p">]))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">check</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+    <span class="n">cur</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">CURATION</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">hisco_before</span> <span class="o">=</span> <span class="n">cur</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="n">load_bridge</span><span class="p">()</span>
+    <span class="n">label_of</span> <span class="o">=</span> <span class="n">_our_labels</span><span class="p">()</span>
+
+    <span class="n">coded</span> <span class="o">=</span> <span class="n">cur</span><span class="p">[</span><span class="n">cur</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">coded</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> curated keys with a code; </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">b</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> CZ-ISCO codes&quot;</span><span class="p">)</span>
+
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">coded</span><span class="o">.</span><span class="n">iterrows</span><span class="p">():</span>
+        <span class="n">m</span><span class="p">,</span> <span class="n">n_hits</span> <span class="o">=</span> <span class="n">best_match</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;key&quot;</span><span class="p">],</span> <span class="n">b</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">m</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">ours</span> <span class="o">=</span> <span class="n">label_of</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">],</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+        <span class="c1"># A residual cannot be corroborated: ISCO has no &quot;no further information&quot; group, so</span>
+        <span class="c1"># `dělník` -&gt; 99900 meeting `Kvalifikovaní stavební dělníci` is neither agreement</span>
+        <span class="c1"># nor disagreement. Score it n/a rather than let it depress the headline.</span>
+        <span class="n">residual</span> <span class="o">=</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;999&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;-&quot;</span><span class="p">)</span>
+        <span class="n">hb</span><span class="p">,</span> <span class="n">ib</span> <span class="o">=</span> <span class="n">_band</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">],</span> <span class="n">m</span><span class="p">[</span><span class="s2">&quot;code&quot;</span><span class="p">])</span>
+        <span class="k">if</span> <span class="n">residual</span><span class="p">:</span>
+            <span class="n">agree</span> <span class="o">=</span> <span class="s2">&quot;n/a&quot;</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">overlap</span> <span class="o">=</span> <span class="nb">bool</span><span class="p">(</span><span class="n">_content</span><span class="p">(</span><span class="n">ours</span><span class="p">)</span> <span class="o">&amp;</span> <span class="n">_content</span><span class="p">(</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;en&quot;</span><span class="p">]))</span>
+            <span class="n">agree</span> <span class="o">=</span> <span class="s2">&quot;1&quot;</span> <span class="k">if</span> <span class="n">overlap</span> <span class="k">else</span> <span class="p">(</span><span class="s2">&quot;band&quot;</span> <span class="k">if</span> <span class="p">(</span><span class="n">hb</span> <span class="ow">and</span> <span class="n">hb</span> <span class="o">==</span> <span class="n">ib</span><span class="p">)</span> <span class="k">else</span> <span class="s2">&quot;0&quot;</span><span class="p">)</span>
+        <span class="n">rows</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">czisco_code</span><span class="o">=</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;code&quot;</span><span class="p">],</span> <span class="n">czisco_cs</span><span class="o">=</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;cs&quot;</span><span class="p">],</span> <span class="n">czisco_en</span><span class="o">=</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;en&quot;</span><span class="p">],</span>
+                       <span class="n">czisco_isco08</span><span class="o">=</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;isco08_4d&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;isco08_4d&quot;</span><span class="p">])</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+                       <span class="n">czisco_agree</span><span class="o">=</span><span class="n">agree</span><span class="p">,</span> <span class="n">czisco_n_hits</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">n_hits</span><span class="p">))</span>
+
+    <span class="n">add</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">orient</span><span class="o">=</span><span class="s2">&quot;index&quot;</span><span class="p">)</span>
+    <span class="c1"># Blank the whole family first. Writing only the rows that matched would leave a key</span>
+    <span class="c1"># that *stopped* matching — because the rule was tightened, say — holding the hit it</span>
+    <span class="c1"># got on an earlier run, and the report would still show it. Derived columns must be</span>
+    <span class="c1"># rebuilt, never patched.</span>
+    <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;czisco_code&quot;</span><span class="p">,</span> <span class="s2">&quot;czisco_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;czisco_en&quot;</span><span class="p">,</span> <span class="s2">&quot;czisco_isco08&quot;</span><span class="p">,</span> <span class="s2">&quot;czisco_agree&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;czisco_n_hits&quot;</span><span class="p">):</span>
+        <span class="n">cur</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">add</span><span class="p">):</span>
+            <span class="n">cur</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">add</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="n">col</span><span class="p">]</span> <span class="o">=</span> <span class="n">add</span><span class="p">[</span><span class="n">col</span><span class="p">]</span>
+
+    <span class="k">assert</span> <span class="n">cur</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">equals</span><span class="p">(</span><span class="n">hisco_before</span><span class="p">),</span> <span class="s2">&quot;run_czisco_check must never change `hisco`&quot;</span>
+    <span class="n">_report</span><span class="p">(</span><span class="n">cur</span><span class="p">,</span> <span class="n">add</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">cur</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_report</span><span class="p">(</span><span class="n">cur</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">add</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_numeric</span><span class="p">(</span><span class="n">cur</span><span class="p">[</span><span class="s2">&quot;n&quot;</span><span class="p">],</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;coerce&quot;</span><span class="p">)</span>
+    <span class="n">coded</span> <span class="o">=</span> <span class="n">cur</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">matched</span> <span class="o">=</span> <span class="n">cur</span><span class="p">[</span><span class="s2">&quot;czisco_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  CZ-ISCO reached </span><span class="si">{</span><span class="nb">int</span><span class="p">((</span><span class="n">coded</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">matched</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">coded</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;coded keys — </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">n</span><span class="p">[</span><span class="n">coded</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">matched</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> of &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">n</span><span class="p">[</span><span class="n">coded</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> records (</span><span class="si">{</span><span class="n">n</span><span class="p">[</span><span class="n">coded</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">matched</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">n</span><span class="p">[</span><span class="n">coded</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">.1%</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  agreement on the English reading&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">lab</span><span class="p">,</span> <span class="n">val</span> <span class="ow">in</span> <span class="p">((</span><span class="s2">&quot;label words overlap&quot;</span><span class="p">,</span> <span class="s2">&quot;1&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;same broad band only&quot;</span><span class="p">,</span> <span class="s2">&quot;band&quot;</span><span class="p">),</span>
+                     <span class="p">(</span><span class="s2">&quot;disagree&quot;</span><span class="p">,</span> <span class="s2">&quot;0&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;residual, not comparable&quot;</span><span class="p">,</span> <span class="s2">&quot;n/a&quot;</span><span class="p">)):</span>
+        <span class="n">m</span> <span class="o">=</span> <span class="n">cur</span><span class="p">[</span><span class="s2">&quot;czisco_agree&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">eq</span><span class="p">(</span><span class="n">val</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">m</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">lab</span><span class="si">:</span><span class="s2">&lt;26</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">&gt;4</span><span class="si">}</span><span class="s2"> keys   </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">n</span><span class="p">[</span><span class="n">m</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">&gt;7,</span><span class="si">}</span><span class="s2"> records&quot;</span><span class="p">)</span>
+
+    <span class="n">dis</span> <span class="o">=</span> <span class="n">cur</span><span class="p">[</span><span class="n">cur</span><span class="p">[</span><span class="s2">&quot;czisco_agree&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">eq</span><span class="p">(</span><span class="s2">&quot;0&quot;</span><span class="p">)]</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">n_i</span><span class="o">=</span><span class="n">n</span><span class="p">)</span><span class="o">.</span><span class="n">nlargest</span><span class="p">(</span><span class="mi">20</span><span class="p">,</span> <span class="s2">&quot;n_i&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">dis</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  largest disagreements — read these, they are the point of the check:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">dis</span><span class="o">.</span><span class="n">itertuples</span><span class="p">():</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">n_i</span><span class="p">)</span><span class="si">:</span><span class="s2">&gt;6,</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">r</span><span class="o">.</span><span class="n">key</span><span class="si">:</span><span class="s2">&lt;20</span><span class="si">}</span><span class="s2"> ours=</span><span class="si">{</span><span class="n">r</span><span class="o">.</span><span class="n">hisco</span><span class="si">:</span><span class="s2">&lt;6</span><span class="si">}</span><span class="s2"> &quot;</span>
+                  <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">czisco_code</span><span class="p">)</span><span class="si">:</span><span class="s2">&lt;6</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">r</span><span class="o">.</span><span class="n">czisco_cs</span><span class="p">[:</span><span class="mi">30</span><span class="p">]</span><span class="si">:</span><span class="s2">&lt;30</span><span class="si">}</span><span class="s2"> = </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">czisco_en</span><span class="p">)[:</span><span class="mi">38</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">tail_candidates</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;CZ-ISCO hits among the enrolment strings nothing currently codes.</span>
+
+<span class="sd">    Emitted for hand adjudication only. Accepted rows are hand-entered into</span>
+<span class="sd">    ``czech_glosses.py``&#39;s ``HISCO_OVERRIDE`` like every other code, and the HISCO code is</span>
+<span class="sd">    still read off ``hisco_authority.csv`` — never off CZ-ISCO.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing.occupations</span><span class="w"> </span><span class="kn">import</span> <span class="n">_norm</span>
+
+    <span class="n">final</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;data&quot;</span> <span class="o">/</span> <span class="s2">&quot;final&quot;</span> <span class="o">/</span> <span class="s2">&quot;persons&quot;</span> <span class="o">/</span> <span class="s2">&quot;legionnaires_clean.parquet&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">final</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">final</span><span class="si">}</span><span class="s2"> not found — run notebook 02 first.&quot;</span><span class="p">)</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">final</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;occupation&quot;</span><span class="p">,</span> <span class="s2">&quot;occupation_hisco&quot;</span><span class="p">])</span>
+    <span class="n">un</span> <span class="o">=</span> <span class="n">d</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">d</span><span class="p">[</span><span class="s2">&quot;occupation&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">d</span><span class="p">[</span><span class="s2">&quot;occupation_hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isna</span><span class="p">(),</span> <span class="s2">&quot;occupation&quot;</span><span class="p">]</span>
+    <span class="n">vc</span> <span class="o">=</span> <span class="n">un</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  uncoded tail: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">un</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> records over </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">vc</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> distinct strings&quot;</span><span class="p">)</span>
+
+    <span class="n">b</span> <span class="o">=</span> <span class="n">load_bridge</span><span class="p">()</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">raw</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">vc</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">key</span> <span class="o">=</span> <span class="n">_norm</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">key</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">m</span><span class="p">,</span> <span class="n">n_hits</span> <span class="o">=</span> <span class="n">best_match</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">m</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">dict</span><span class="p">(</span><span class="n">raw</span><span class="o">=</span><span class="n">raw</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">key</span><span class="p">,</span> <span class="n">n</span><span class="o">=</span><span class="n">c</span><span class="p">,</span> <span class="n">czisco_code</span><span class="o">=</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;code&quot;</span><span class="p">],</span>
+                        <span class="n">czisco_cs</span><span class="o">=</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;cs&quot;</span><span class="p">],</span> <span class="n">czisco_en</span><span class="o">=</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;en&quot;</span><span class="p">],</span>
+                        <span class="n">czisco_isco08</span><span class="o">=</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;isco08_4d&quot;</span><span class="p">],</span> <span class="n">czisco_n_hits</span><span class="o">=</span><span class="n">n_hits</span><span class="p">,</span>
+                        <span class="n">accept</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">hisco</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">note</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">))</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">out</span><span class="p">)</span><span class="o">.</span><span class="n">sort_values</span><span class="p">(</span><span class="s2">&quot;n&quot;</span><span class="p">,</span> <span class="n">ascending</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">ignore_index</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  CZ-ISCO proposes a reading for </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> strings / &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s1">&#39;n&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> records&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  top candidates (nothing is applied — `accept` and `hisco` are yours to fill):&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">head</span><span class="p">(</span><span class="mi">20</span><span class="p">)</span><span class="o">.</span><span class="n">itertuples</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">r</span><span class="o">.</span><span class="n">n</span><span class="si">:</span><span class="s2">&gt;4</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">r</span><span class="o">.</span><span class="n">raw</span><span class="p">[:</span><span class="mi">24</span><span class="p">]</span><span class="si">:</span><span class="s2">&lt;24</span><span class="si">}</span><span class="s2"> -&gt; </span><span class="si">{</span><span class="n">r</span><span class="o">.</span><span class="n">czisco_code</span><span class="si">:</span><span class="s2">&lt;6</span><span class="si">}</span><span class="s2"> &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">r</span><span class="o">.</span><span class="n">czisco_cs</span><span class="p">[:</span><span class="mi">32</span><span class="p">]</span><span class="si">:</span><span class="s2">&lt;32</span><span class="si">}</span><span class="s2"> = </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">czisco_en</span><span class="p">)[:</span><span class="mi">40</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">df</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()[</span><span class="mi">1</span><span class="p">])</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--tail&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;also emit candidates for the uncoded enrolment tail&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;CZ-ISCO third-coder check …&quot;</span><span class="p">)</span>
+    <span class="n">cur</span> <span class="o">=</span> <span class="n">check</span><span class="p">()</span>
+    <span class="n">cur</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">CURATION</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Updated </span><span class="si">{</span><span class="n">CURATION</span><span class="o">.</span><span class="n">relative_to</span><span class="p">(</span><span class="n">ROOT</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">tail</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Tail candidates …&quot;</span><span class="p">)</span>
+        <span class="n">tail_candidates</span><span class="p">()</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">TAIL_OUT</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Wrote </span><span class="si">{</span><span class="n">TAIL_OUT</span><span class="o">.</span><span class="n">relative_to</span><span class="p">(</span><span class="n">ROOT</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>

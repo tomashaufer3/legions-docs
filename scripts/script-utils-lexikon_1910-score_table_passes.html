@@ -1,0 +1,1329 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Score the table readings against the gold tables, cell by cell.</p><p class="tldr-facts"><b>1910 register</b> · v— · 354 lines · 17 public functions · 9 constants · used by <code>utils/lexikon_1910/run_table_arm.py</code> · <code>utils/lexikon_1910/score_table_passes.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-lexikon_1910-score_table_passes-norm_name">norm_name</a><a class="chip" href="#fn-utils-lexikon_1910-score_table_passes-norm_name_strict">norm_name_strict</a><a class="chip" href="#fn-utils-lexikon_1910-score_table_passes-norm_number">norm_number</a><a class="chip" href="#fn-utils-lexikon_1910-score_table_passes-norm_text">norm_text</a><a class="chip" href="#fn-utils-lexikon_1910-score_table_passes-norm">norm</a><a class="chip" href="#fn-utils-lexikon_1910-score_table_passes-load_gold">load_gold</a><a class="chip" href="#fn-utils-lexikon_1910-score_table_passes-load_rows">load_rows</a><a class="chip" href="#fn-utils-lexikon_1910-score_table_passes-label_of">label_of</a><a class="chip" href="#fn-utils-lexikon_1910-score_table_passes-pair_score">pair_score</a><a class="chip" href="#fn-utils-lexikon_1910-score_table_passes-align">align</a><a class="chip" href="#fn-utils-lexikon_1910-score_table_passes-readings">readings</a><a class="chip" href="#fn-utils-lexikon_1910-score_table_passes-score_reading">score_reading</a><a class="chip" href="#fn-utils-lexikon_1910-score_table_passes-cross">cross</a><a class="chip" href="#fn-utils-lexikon_1910-score_table_passes-fmt">fmt</a><a class="chip" href="#fn-utils-lexikon_1910-score_table_passes-report">report</a><a class="chip" href="#fn-utils-lexikon_1910-score_table_passes-pass_files">pass_files</a><a class="chip" href="#fn-utils-lexikon_1910-score_table_passes-main">main</a><a class="chip const" href="#c-utils-lexikon_1910-score_table_passes-HERE">HERE</a><a class="chip const" href="#c-utils-lexikon_1910-score_table_passes-ROOT">ROOT</a><a class="chip const" href="#c-utils-lexikon_1910-score_table_passes-GOLD_ROLES">GOLD_ROLES</a><a class="chip const" href="#c-utils-lexikon_1910-score_table_passes-MIN_PAIR">MIN_PAIR</a><a class="chip const" href="#c-utils-lexikon_1910-score_table_passes-SEQ_BONUS">SEQ_BONUS</a><a class="chip const" href="#c-utils-lexikon_1910-score_table_passes-NUMBER_COLS">NUMBER_COLS</a><a class="chip const" href="#c-utils-lexikon_1910-score_table_passes-TEXT_COLS">TEXT_COLS</a><a class="chip const" href="#c-utils-lexikon_1910-score_table_passes-SCORED_COLS">SCORED_COLS</a><a class="chip const" href="#c-utils-lexikon_1910-score_table_passes-EXTRA_COLS">EXTRA_COLS</a></div>
+<h2>How it works</h2><p>The table arm of <code>r5</code> (<code>run_table_arm.py</code>) asks how far a model reading of
+the seventeen printed columns beats the text layer. Channel B (the NDK ALTO
+text layer) and channel A (a vision model) read the <strong>same municipality-block
+crops</strong>, and every row each returned is in <code>table_rows_&amp;lt;label&amp;gt;.csv</code>
+(<code>run_lexikon_1910_pilot.py</code>). The gold is section 1 of the calibration and
+purposive sheets — 403 rows on 13 pages — read in-process by
+<code>read_transcription_md.read_sheet</code>. Certification sheets are never read here.</p>
+<h4>Matching</h4>
+<p>A gold row and a channel row are paired per page by a weighted alignment that
+keeps printed order: a pair scores the similarity of the normalised names, plus
+a bonus when the printed number agrees, and no pair under <code>MIN_PAIR</code> is made.
+A gold row with no partner is <strong>missed</strong>: the crop did not hold it, or the
+reader dropped it — the same for both channels when the crop is to blame. The
+<em>mezi tím vojsko</em> lines are left out on the channel side, because the gold
+sheets do not transcribe them.</p>
+<h4>What is compared</h4>
+<p><code>name</code>: the <strong>words</strong> of the place name — runs of two or more letters,
+case-folded — so the bracketed place-type tokens, the footnote marks (<code>*)</code>),
+the dot leaders, the part numbers and a pictogram the text layer turned into a
+stray letter (<code>Pankratz o</code>) do not count against a reading. A misspelt word
+does. <code>name_strict</code> keeps everything but the brackets, marks and leaders, and
+is reported beside it.
+Number columns: the digits, with the printed nil <code>.</code> and an empty cell equal.
+<code>post_key</code> and <code>station_note</code>: the text with every space removed.</p>
+<p>A cell counts when the gold <strong>or</strong> the reading has something in it, so a column
+that is blank on most rows does not score itself.</p>
+<pre><code>python utils/lexikon_1910/score_table_passes.py                 # every pass in the bake-off dirs
+python utils/lexikon_1910/score_table_passes.py --rows a.csv b.csv
+</code></pre>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-lexikon_1910-score_table_passes-norm_name">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">norm_name</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<div class="fndoc"><p>The words of a name: runs of two or more letters, case-folded.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_score_table_passes.py</code></p>
+<details><summary>source · lines 76–80 (5 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">76</span>
+<span class="normal">77</span>
+<span class="normal">78</span>
+<span class="normal">79</span>
+<span class="normal">80</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">norm_name</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The words of a name: runs of two or more letters, case-folded.&quot;&quot;&quot;</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">_BRACKET_RE</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">text</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">words</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;[^\W\d_]{2,}&quot;</span><span class="p">,</span> <span class="n">text</span><span class="p">)</span>
+    <span class="k">return</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">words</span><span class="p">)</span><span class="o">.</span><span class="n">casefold</span><span class="p">()</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-score_table_passes-norm_name_strict">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">norm_name_strict</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<p class="calls"><b>Called by</b> <code>tests/test_score_table_passes.py</code></p>
+<details><summary>source · lines 83–89 (7 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">83</span>
+<span class="normal">84</span>
+<span class="normal">85</span>
+<span class="normal">86</span>
+<span class="normal">87</span>
+<span class="normal">88</span>
+<span class="normal">89</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">norm_name_strict</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">_BRACKET_RE</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">text</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">_FOOTNOTE_RE</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">text</span><span class="p">)</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">_LEADER_RE</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">text</span><span class="p">)</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">_NOT_NAME_RE</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">text</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;_&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="p">)</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\s+&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">text</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s2">&quot; ,.:;&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">text</span><span class="o">.</span><span class="n">casefold</span><span class="p">()</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-score_table_passes-norm_number">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">norm_number</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<p class="calls"><b>Called by</b> <code>tests/test_score_table_passes.py</code></p>
+<details><summary>source · lines 92–94 (3 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">92</span>
+<span class="normal">93</span>
+<span class="normal">94</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">norm_number</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\s+&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">text</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">text</span> <span class="ow">in</span> <span class="n">_NIL</span> <span class="k">else</span> <span class="n">text</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-score_table_passes-norm_text">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">norm_text</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<p class="calls"><b>Called by</b> <code>tests/test_score_table_passes.py</code></p>
+<details><summary>source · lines 97–98 (2 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">97</span>
+<span class="normal">98</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">norm_text</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\s+&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">text</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-score_table_passes-norm">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">norm</span><span class="p">(</span><span class="n">col</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<p class="calls"><b>Called by</b> <code>tests/test_glyph_e3.py</code> <code>utils/lexikon_1910/locate_glyphs.py</code> <code>utils/lexikon_1910/run_glyph_e3.py</code> <code>utils/lexikon_1910/run_glyph_test_a.py</code> <code>utils/reference_tools/background/verify_locators.py</code></p>
+<details><summary>source · lines 101–108 (8 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">norm</span><span class="p">(</span><span class="n">col</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">col</span> <span class="o">==</span> <span class="s2">&quot;name&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">norm_name</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">col</span> <span class="o">==</span> <span class="s2">&quot;name_strict&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">norm_name_strict</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">TEXT_COLS</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">norm_text</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">norm_number</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-score_table_passes-load_gold">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">load_gold</span><span class="p">(</span><span class="n">roles</span><span class="o">=</span><span class="n">GOLD_ROLES</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]</span></pre>
+<div class="fndoc"><p><code>{page: [row, …]}</code> in printed order, from the sheets themselves.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 115–128 (14 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">load_gold</span><span class="p">(</span><span class="n">roles</span><span class="o">=</span><span class="n">GOLD_ROLES</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``{page: [row, …]}`` in printed order, from the sheets themselves.&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">read_transcription_md</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">rt</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_institutions</span> <span class="k">as</span> <span class="n">lxin</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_vision</span> <span class="k">as</span> <span class="n">lxv</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">check_transcription</span><span class="w"> </span><span class="kn">import</span> <span class="n">OFF_ATLAS</span><span class="p">,</span> <span class="n">TOPOGRAPHIC</span>
+
+    <span class="n">abbreviations</span> <span class="o">=</span> <span class="n">lxin</span><span class="o">.</span><span class="n">load_abbreviations</span><span class="p">(</span><span class="n">rt</span><span class="o">.</span><span class="n">ABBREVIATIONS</span><span class="p">,</span> <span class="n">lang</span><span class="o">=</span><span class="s2">&quot;cs&quot;</span><span class="p">)</span>
+    <span class="n">allowed</span> <span class="o">=</span> <span class="n">lxv</span><span class="o">.</span><span class="n">vocabulary</span><span class="p">(</span><span class="n">abbreviations</span><span class="p">)</span> <span class="o">|</span> <span class="p">{</span><span class="n">OFF_ATLAS</span><span class="p">}</span> <span class="o">|</span> <span class="n">TOPOGRAPHIC</span>
+    <span class="n">gold</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">role</span> <span class="ow">in</span> <span class="n">roles</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">((</span><span class="n">rt</span><span class="o">.</span><span class="n">GOLD_ROOT</span> <span class="o">/</span> <span class="n">role</span><span class="p">)</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">&quot;[0-9][0-9][0-9][0-9].md&quot;</span><span class="p">)):</span>
+            <span class="n">gold</span><span class="p">[</span><span class="n">path</span><span class="o">.</span><span class="n">stem</span><span class="p">]</span> <span class="o">+=</span> <span class="n">rt</span><span class="o">.</span><span class="n">read_sheet</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">allowed</span><span class="p">)[</span><span class="s2">&quot;table&quot;</span><span class="p">]</span>
+    <span class="k">return</span> <span class="nb">dict</span><span class="p">(</span><span class="n">gold</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-score_table_passes-load_rows">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">load_rows</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]]</span></pre>
+<div class="fndoc"><p><code>{channel: {page: [row, …]}}</code> in block order, <em>mezi tím</em> lines left out.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 131–141 (11 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">load_rows</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``{channel: {page: [row, …]}}`` in block order, *mezi tím* lines left out.&quot;&quot;&quot;</span>
+    <span class="n">out</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]]</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="k">lambda</span><span class="p">:</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">))</span>
+    <span class="k">with</span> <span class="n">path</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+        <span class="n">rows</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">csv</span><span class="o">.</span><span class="n">DictReader</span><span class="p">(</span><span class="n">fh</span><span class="p">))</span>
+    <span class="n">rows</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">r</span><span class="p">:</span> <span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;channel&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">],</span> <span class="nb">int</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;block_index&quot;</span><span class="p">]),</span> <span class="nb">int</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;row&quot;</span><span class="p">])))</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">lx</span><span class="o">.</span><span class="n">OF_WHICH_RE</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)):</span>
+            <span class="k">continue</span>
+        <span class="n">out</span><span class="p">[</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;channel&quot;</span><span class="p">]][</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-score_table_passes-label_of">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">label_of</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 144–145 (2 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">144</span>
+<span class="normal">145</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">label_of</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">path</span><span class="o">.</span><span class="n">stem</span><span class="o">.</span><span class="n">removeprefix</span><span class="p">(</span><span class="s2">&quot;table_rows_&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;unlabelled&quot;</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-score_table_passes-pair_score">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">pair_score</span><span class="p">(</span><span class="n">gold</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">row</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 152–158 (7 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">pair_score</span><span class="p">(</span><span class="n">gold</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">row</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+    <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="o">=</span> <span class="n">norm_name</span><span class="p">(</span><span class="n">gold</span><span class="p">[</span><span class="s2">&quot;name&quot;</span><span class="p">]),</span> <span class="n">norm_name</span><span class="p">(</span><span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+    <span class="n">score</span> <span class="o">=</span> <span class="n">difflib</span><span class="o">.</span><span class="n">SequenceMatcher</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span><span class="o">.</span><span class="n">ratio</span><span class="p">()</span> <span class="k">if</span> <span class="n">a</span> <span class="ow">and</span> <span class="n">b</span> <span class="k">else</span> <span class="mf">0.0</span>
+    <span class="n">seq_g</span><span class="p">,</span> <span class="n">seq_r</span> <span class="o">=</span> <span class="n">norm_number</span><span class="p">(</span><span class="n">gold</span><span class="p">[</span><span class="s2">&quot;seq&quot;</span><span class="p">]),</span> <span class="n">norm_number</span><span class="p">(</span><span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;seq&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">seq_g</span> <span class="ow">and</span> <span class="n">seq_g</span> <span class="o">==</span> <span class="n">seq_r</span><span class="p">:</span>
+        <span class="n">score</span> <span class="o">+=</span> <span class="n">SEQ_BONUS</span>
+    <span class="k">return</span> <span class="n">score</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-score_table_passes-align">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">align</span><span class="p">(</span><span class="n">gold</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">],</span> <span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]]</span></pre>
+<div class="fndoc"><p>Order-keeping pairs <code>(gold index, row index)</code> of greatest total score.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_glyph_e3.py</code> <code>tests/test_score_table_passes.py</code> <code>utils/lexikon_1910/locate_glyphs.py</code></p>
+<details><summary>source · lines 161–183 (23 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">align</span><span class="p">(</span><span class="n">gold</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">],</span> <span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Order-keeping pairs ``(gold index, row index)`` of greatest total score.&quot;&quot;&quot;</span>
+    <span class="n">n</span><span class="p">,</span> <span class="n">m</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">gold</span><span class="p">),</span> <span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+    <span class="n">best</span> <span class="o">=</span> <span class="p">[[</span><span class="mf">0.0</span><span class="p">]</span> <span class="o">*</span> <span class="p">(</span><span class="n">m</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)]</span>
+    <span class="n">move</span> <span class="o">=</span> <span class="p">[[</span><span class="s2">&quot;&quot;</span><span class="p">]</span> <span class="o">*</span> <span class="p">(</span><span class="n">m</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)]</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">n</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">m</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+            <span class="n">best</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">],</span> <span class="n">move</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">]</span> <span class="o">=</span> <span class="n">best</span><span class="p">[</span><span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">][</span><span class="n">j</span><span class="p">],</span> <span class="s2">&quot;g&quot;</span>
+            <span class="k">if</span> <span class="n">best</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">best</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">]:</span>
+                <span class="n">best</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">],</span> <span class="n">move</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">]</span> <span class="o">=</span> <span class="n">best</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span> <span class="o">-</span> <span class="mi">1</span><span class="p">],</span> <span class="s2">&quot;r&quot;</span>
+            <span class="n">s</span> <span class="o">=</span> <span class="n">pair_score</span><span class="p">(</span><span class="n">gold</span><span class="p">[</span><span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">],</span> <span class="n">rows</span><span class="p">[</span><span class="n">j</span> <span class="o">-</span> <span class="mi">1</span><span class="p">])</span>
+            <span class="k">if</span> <span class="n">s</span> <span class="o">&gt;=</span> <span class="n">MIN_PAIR</span> <span class="ow">and</span> <span class="n">best</span><span class="p">[</span><span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">][</span><span class="n">j</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="n">s</span> <span class="o">&gt;</span> <span class="n">best</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">]:</span>
+                <span class="n">best</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">],</span> <span class="n">move</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">]</span> <span class="o">=</span> <span class="n">best</span><span class="p">[</span><span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">][</span><span class="n">j</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="n">s</span><span class="p">,</span> <span class="s2">&quot;p&quot;</span>
+    <span class="n">pairs</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span> <span class="o">=</span> <span class="p">[],</span> <span class="n">n</span><span class="p">,</span> <span class="n">m</span>
+    <span class="k">while</span> <span class="n">i</span> <span class="ow">and</span> <span class="n">j</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">move</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;p&quot;</span><span class="p">:</span>
+            <span class="n">pairs</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="n">j</span> <span class="o">-</span> <span class="mi">1</span><span class="p">))</span>
+            <span class="n">i</span><span class="p">,</span> <span class="n">j</span> <span class="o">=</span> <span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="n">j</span> <span class="o">-</span> <span class="mi">1</span>
+        <span class="k">elif</span> <span class="n">move</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;g&quot;</span><span class="p">:</span>
+            <span class="n">i</span> <span class="o">-=</span> <span class="mi">1</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">j</span> <span class="o">-=</span> <span class="mi">1</span>
+    <span class="k">return</span> <span class="n">pairs</span><span class="p">[::</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-score_table_passes-readings">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">readings</span><span class="p">(</span><span class="n">gold</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">rows</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">tuple</span><span class="p">,</span> <span class="nb">dict</span><span class="p">]</span></pre>
+<div class="fndoc"><p><code>{(page, gold position index): row}</code> — the row read for each gold row.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 186–192 (7 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">readings</span><span class="p">(</span><span class="n">gold</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">rows</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">tuple</span><span class="p">,</span> <span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``{(page, gold position index): row}`` — the row read for each gold row.&quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">page</span><span class="p">,</span> <span class="n">gold_rows</span> <span class="ow">in</span> <span class="n">gold</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">for</span> <span class="n">gi</span><span class="p">,</span> <span class="n">ri</span> <span class="ow">in</span> <span class="n">align</span><span class="p">(</span><span class="n">gold_rows</span><span class="p">,</span> <span class="n">rows</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">page</span><span class="p">,</span> <span class="p">[])):</span>
+            <span class="n">out</span><span class="p">[(</span><span class="n">page</span><span class="p">,</span> <span class="n">gi</span><span class="p">)]</span> <span class="o">=</span> <span class="n">rows</span><span class="p">[</span><span class="n">page</span><span class="p">][</span><span class="n">ri</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-score_table_passes-score_reading">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">score_reading</span><span class="p">(</span><span class="n">gold</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">read</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">tuple</span><span class="p">,</span> <span class="nb">dict</span><span class="p">],</span> <span class="n">n_rows</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span></pre>
+<div class="fndoc"><p>Recall, row-exact and per-column accuracy of one channel of one pass.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_score_table_passes.py</code></p>
+<details><summary>source · lines 199–231 (33 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">score_reading</span><span class="p">(</span><span class="n">gold</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">read</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">tuple</span><span class="p">,</span> <span class="nb">dict</span><span class="p">],</span> <span class="n">n_rows</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Recall, row-exact and per-column accuracy of one channel of one pass.&quot;&quot;&quot;</span>
+    <span class="n">n_gold</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">gold</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+    <span class="n">right</span><span class="p">,</span> <span class="n">counted</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">(),</span> <span class="n">Counter</span><span class="p">()</span>
+    <span class="n">exact</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="p">(</span><span class="n">page</span><span class="p">,</span> <span class="n">gi</span><span class="p">),</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">read</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">g</span> <span class="o">=</span> <span class="n">gold</span><span class="p">[</span><span class="n">page</span><span class="p">][</span><span class="n">gi</span><span class="p">]</span>
+        <span class="n">whole</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">SCORED_COLS</span><span class="p">:</span>
+            <span class="n">truth</span><span class="p">,</span> <span class="n">got</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="n">g</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)),</span> <span class="n">norm</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">truth</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">got</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">counted</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">if</span> <span class="n">truth</span> <span class="o">==</span> <span class="n">got</span><span class="p">:</span>
+                <span class="n">right</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">whole</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="n">exact</span> <span class="o">+=</span> <span class="n">whole</span>
+        <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">EXTRA_COLS</span><span class="p">:</span>
+            <span class="n">truth</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="n">g</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+            <span class="n">got</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+            <span class="n">counted</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="n">right</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">+=</span> <span class="n">truth</span> <span class="o">==</span> <span class="n">got</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;gold_rows&quot;</span><span class="p">:</span> <span class="n">n_gold</span><span class="p">,</span> <span class="s2">&quot;matched&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">read</span><span class="p">),</span> <span class="s2">&quot;extra&quot;</span><span class="p">:</span> <span class="n">n_rows</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">read</span><span class="p">),</span>
+           <span class="s2">&quot;recall&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">read</span><span class="p">)</span> <span class="o">/</span> <span class="n">n_gold</span> <span class="k">if</span> <span class="n">n_gold</span> <span class="k">else</span> <span class="mf">0.0</span><span class="p">,</span>
+           <span class="s2">&quot;row_exact&quot;</span><span class="p">:</span> <span class="n">exact</span> <span class="o">/</span> <span class="n">n_gold</span> <span class="k">if</span> <span class="n">n_gold</span> <span class="k">else</span> <span class="mf">0.0</span><span class="p">,</span>
+           <span class="s2">&quot;cells&quot;</span><span class="p">:</span> <span class="nb">sum</span><span class="p">(</span><span class="n">counted</span><span class="o">.</span><span class="n">values</span><span class="p">()),</span>
+           <span class="s2">&quot;cell_acc&quot;</span><span class="p">:</span> <span class="nb">sum</span><span class="p">(</span><span class="n">right</span><span class="o">.</span><span class="n">values</span><span class="p">())</span> <span class="o">/</span> <span class="nb">max</span><span class="p">(</span><span class="nb">sum</span><span class="p">(</span><span class="n">counted</span><span class="o">.</span><span class="n">values</span><span class="p">()),</span> <span class="mi">1</span><span class="p">),</span>
+           <span class="s2">&quot;number_acc&quot;</span><span class="p">:</span> <span class="p">(</span><span class="nb">sum</span><span class="p">(</span><span class="n">right</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">NUMBER_COLS</span><span class="p">)</span>
+                          <span class="o">/</span> <span class="nb">max</span><span class="p">(</span><span class="nb">sum</span><span class="p">(</span><span class="n">counted</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">NUMBER_COLS</span><span class="p">),</span> <span class="mi">1</span><span class="p">))}</span>
+    <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">SCORED_COLS</span> <span class="o">+</span> <span class="n">EXTRA_COLS</span><span class="p">:</span>
+        <span class="n">out</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;acc_</span><span class="si">{</span><span class="n">col</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">right</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">/</span> <span class="n">counted</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="k">if</span> <span class="n">counted</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="k">else</span> <span class="kc">None</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-score_table_passes-cross">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">cross</span><span class="p">(</span><span class="n">gold</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">left</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">tuple</span><span class="p">,</span> <span class="nb">dict</span><span class="p">],</span> <span class="n">right</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">tuple</span><span class="p">,</span> <span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Counter</span></pre>
+<div class="fndoc"><p>Cell outcomes where two readings both hold a gold row.</p>
+<p><code>agree_right</code>/<code>agree_wrong</code>: the two say the same; <code>left_only</code> /
+<code>right_only</code>: one is right; <code>both_wrong</code>: they differ and neither is.
+<code>agree_wrong</code> is the shared error a comparison of the two cannot see.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 234–257 (24 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">cross</span><span class="p">(</span><span class="n">gold</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">left</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">tuple</span><span class="p">,</span> <span class="nb">dict</span><span class="p">],</span> <span class="n">right</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">tuple</span><span class="p">,</span> <span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Counter</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Cell outcomes where two readings both hold a gold row.</span>
+
+<span class="sd">    ``agree_right``/``agree_wrong``: the two say the same; ``left_only`` /</span>
+<span class="sd">    ``right_only``: one is right; ``both_wrong``: they differ and neither is.</span>
+<span class="sd">    ``agree_wrong`` is the shared error a comparison of the two cannot see.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">left</span><span class="o">.</span><span class="n">keys</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">right</span><span class="o">.</span><span class="n">keys</span><span class="p">():</span>
+        <span class="n">g</span> <span class="o">=</span> <span class="n">gold</span><span class="p">[</span><span class="n">key</span><span class="p">[</span><span class="mi">0</span><span class="p">]][</span><span class="n">key</span><span class="p">[</span><span class="mi">1</span><span class="p">]]</span>
+        <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">SCORED_COLS</span><span class="p">:</span>
+            <span class="n">truth</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="n">g</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+            <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="n">left</span><span class="p">[</span><span class="n">key</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)),</span> <span class="n">norm</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="n">right</span><span class="p">[</span><span class="n">key</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="n">truth</span> <span class="ow">or</span> <span class="n">a</span> <span class="ow">or</span> <span class="n">b</span><span class="p">):</span>
+                <span class="k">continue</span>
+            <span class="k">if</span> <span class="n">a</span> <span class="o">==</span> <span class="n">b</span><span class="p">:</span>
+                <span class="n">out</span><span class="p">[</span><span class="s2">&quot;agree_right&quot;</span> <span class="k">if</span> <span class="n">a</span> <span class="o">==</span> <span class="n">truth</span> <span class="k">else</span> <span class="s2">&quot;agree_wrong&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">elif</span> <span class="n">a</span> <span class="o">==</span> <span class="n">truth</span><span class="p">:</span>
+                <span class="n">out</span><span class="p">[</span><span class="s2">&quot;left_only&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">elif</span> <span class="n">b</span> <span class="o">==</span> <span class="n">truth</span><span class="p">:</span>
+                <span class="n">out</span><span class="p">[</span><span class="s2">&quot;right_only&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">out</span><span class="p">[</span><span class="s2">&quot;both_wrong&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-score_table_passes-fmt">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">fmt</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<p class="calls"><b>Called by</b> <code>utils/docs/build_docs.py</code> <code>utils/validation/build_validation_workbook.py</code></p>
+<details><summary>source · lines 260–261 (2 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">260</span>
+<span class="normal">261</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">fmt</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="s2">&quot;  -- &quot;</span> <span class="k">if</span> <span class="n">x</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">x</span><span class="si">:</span><span class="s2">6.1%</span><span class="si">}</span><span class="s2">&quot;</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-score_table_passes-report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">gold</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">passes</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">dict</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]</span></pre>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code> <code>03_visualisation.ipynb</code> <code>utils/lexikon_1910/build_de_page_map.py</code> <code>utils/lexikon_1910/build_mark_ledger.py</code> <code>utils/lexikon_1910/build_symbol_atlas_de.py</code> <code>utils/lexikon_1910/read_transcription_md.py</code> <code>utils/lexikon_1910/run_glyph_e3.py</code> <code>utils/lexikon_1910/score_certification.py</code> <code>utils/linkage.py</code> <code>utils/parsing/clean.py</code> <code>utils/parsing/dates.py</code> <code>utils/parsing/exit_codes.py</code> <code>utils/parsing/habsburg.py</code> <code>utils/validation/data_checks.py</code></p>
+<details><summary>source · lines 264–310 (47 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">gold</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">passes</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">dict</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]:</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;table arm — </span><span class="si">{</span><span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">)</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">v</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">gold</span><span class="o">.</span><span class="n">values</span><span class="p">())</span><span class="si">}</span><span class="s2"> gold rows on &quot;</span>
+             <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">gold</span><span class="p">)</span><span class="si">}</span><span class="s2"> pages (</span><span class="si">{</span><span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">GOLD_ROLES</span><span class="p">)</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">]</span>
+    <span class="n">table</span><span class="p">,</span> <span class="n">read_by</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">{}</span>
+    <span class="n">seen_text_layer</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">channels</span> <span class="ow">in</span> <span class="n">passes</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">channel</span><span class="p">,</span> <span class="n">rows</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">channels</span><span class="o">.</span><span class="n">items</span><span class="p">()):</span>
+            <span class="k">if</span> <span class="n">channel</span> <span class="o">==</span> <span class="s2">&quot;B&quot;</span><span class="p">:</span>
+                <span class="c1"># Every pass carries the same text layer; score it once.</span>
+                <span class="k">if</span> <span class="n">seen_text_layer</span><span class="p">:</span>
+                    <span class="k">continue</span>
+                <span class="n">seen_text_layer</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="n">reading</span> <span class="o">=</span> <span class="n">readings</span><span class="p">(</span><span class="n">gold</span><span class="p">,</span> <span class="n">rows</span><span class="p">)</span>
+            <span class="n">n_rows</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="p">[]))</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">gold</span><span class="p">)</span>
+            <span class="n">s</span> <span class="o">=</span> <span class="n">score_reading</span><span class="p">(</span><span class="n">gold</span><span class="p">,</span> <span class="n">reading</span><span class="p">,</span> <span class="n">n_rows</span><span class="p">)</span>
+            <span class="n">tag</span> <span class="o">=</span> <span class="s2">&quot;OCR&quot;</span> <span class="k">if</span> <span class="n">channel</span> <span class="o">==</span> <span class="s2">&quot;B&quot;</span> <span class="k">else</span> <span class="s2">&quot;AI&quot;</span>
+            <span class="n">read_by</span><span class="p">[(</span><span class="n">label</span><span class="p">,</span> <span class="n">channel</span><span class="p">)]</span> <span class="o">=</span> <span class="n">reading</span>
+            <span class="n">table</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;label&quot;</span><span class="p">:</span> <span class="n">label</span><span class="p">,</span> <span class="s2">&quot;channel&quot;</span><span class="p">:</span> <span class="n">channel</span><span class="p">,</span> <span class="s2">&quot;reader&quot;</span><span class="p">:</span> <span class="n">tag</span><span class="p">,</span> <span class="o">**</span><span class="n">s</span><span class="p">})</span>
+    <span class="n">head</span> <span class="o">=</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="s1">&#39;pass&#39;</span><span class="si">:</span><span class="s2">28s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;ch&#39;</span><span class="si">:</span><span class="s2">3s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;recall&#39;</span><span class="si">:</span><span class="s2">&gt;7s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;row ok&#39;</span><span class="si">:</span><span class="s2">&gt;7s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;cells&#39;</span><span class="si">:</span><span class="s2">&gt;7s</span><span class="si">}</span><span class="s2"> &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="s1">&#39;numbers&#39;</span><span class="si">:</span><span class="s2">&gt;7s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;names&#39;</span><span class="si">:</span><span class="s2">&gt;7s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;strict&#39;</span><span class="si">:</span><span class="s2">&gt;7s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;seq&#39;</span><span class="si">:</span><span class="s2">&gt;7s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;post&#39;</span><span class="si">:</span><span class="s2">&gt;7s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;station&#39;</span><span class="si">:</span><span class="s2">&gt;7s</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span><span class="n">head</span><span class="p">,</span> <span class="s2">&quot;  &quot;</span> <span class="o">+</span> <span class="s2">&quot;-&quot;</span> <span class="o">*</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">head</span><span class="p">)</span> <span class="o">-</span> <span class="mi">2</span><span class="p">)]</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">table</span><span class="p">:</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;label&#39;</span><span class="p">][:</span><span class="mi">28</span><span class="p">]</span><span class="si">:</span><span class="s2">28s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;channel&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">3s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">fmt</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;recall&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2"> &quot;</span>
+                     <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">fmt</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;row_exact&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">fmt</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;cell_acc&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">fmt</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;number_acc&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2"> &quot;</span>
+                     <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">fmt</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;acc_name&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">fmt</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;acc_name_strict&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">fmt</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;acc_seq&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">fmt</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;acc_post_key&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2"> &quot;</span>
+                     <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">fmt</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;acc_station_note&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;  per number column (share of counted cells right):&quot;</span><span class="p">,</span>
+              <span class="s2">&quot;  &quot;</span> <span class="o">+</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">c</span><span class="p">[:</span><span class="mi">9</span><span class="p">]</span><span class="si">:</span><span class="s2">&gt;9s</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">NUMBER_COLS</span><span class="p">)]</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">table</span><span class="p">:</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;label&#39;</span><span class="p">][:</span><span class="mi">20</span><span class="p">]</span><span class="si">:</span><span class="s2">20s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;channel&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> &quot;</span>
+                     <span class="o">+</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">fmt</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="sa">f</span><span class="s1">&#39;acc_</span><span class="si">{</span><span class="n">c</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">])</span><span class="si">:</span><span class="s2">&gt;9s</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">NUMBER_COLS</span><span class="p">))</span>
+    <span class="n">pairs</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">keys</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">read_by</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">a</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">keys</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">keys</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">:]:</span>
+            <span class="n">pairs</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">cross</span><span class="p">(</span><span class="n">gold</span><span class="p">,</span> <span class="n">read_by</span><span class="p">[</span><span class="n">a</span><span class="p">],</span> <span class="n">read_by</span><span class="p">[</span><span class="n">b</span><span class="p">])))</span>
+    <span class="k">if</span> <span class="n">pairs</span><span class="p">:</span>
+        <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;  two readings side by side (cells where either holds something):&quot;</span><span class="p">,</span>
+                  <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="s1">&#39;left&#39;</span><span class="si">:</span><span class="s2">24s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;right&#39;</span><span class="si">:</span><span class="s2">24s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;agree ok&#39;</span><span class="si">:</span><span class="s2">&gt;9s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;agree bad&#39;</span><span class="si">:</span><span class="s2">&gt;9s</span><span class="si">}</span><span class="s2"> &quot;</span>
+                  <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="s1">&#39;left only&#39;</span><span class="si">:</span><span class="s2">&gt;9s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;right only&#39;</span><span class="si">:</span><span class="s2">&gt;10s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;both bad&#39;</span><span class="si">:</span><span class="s2">&gt;9s</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">pairs</span><span class="p">:</span>
+            <span class="n">total</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">values</span><span class="p">())</span> <span class="ow">or</span> <span class="mi">1</span>
+            <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">a</span><span class="p">[</span><span class="mi">0</span><span class="p">][:</span><span class="mi">20</span><span class="p">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s1">&#39; &#39;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">a</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">24s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">b</span><span class="p">[</span><span class="mi">0</span><span class="p">][:</span><span class="mi">20</span><span class="p">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s1">&#39; &#39;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">b</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">24s</span><span class="si">}</span><span class="s2"> &quot;</span>
+                         <span class="o">+</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">c</span><span class="p">[</span><span class="n">k</span><span class="p">]</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">total</span><span class="si">:</span><span class="s2">9.1%</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span>
+                                    <span class="p">(</span><span class="s2">&quot;agree_right&quot;</span><span class="p">,</span> <span class="s2">&quot;agree_wrong&quot;</span><span class="p">,</span> <span class="s2">&quot;left_only&quot;</span><span class="p">,</span>
+                                     <span class="s2">&quot;right_only&quot;</span><span class="p">,</span> <span class="s2">&quot;both_wrong&quot;</span><span class="p">)))</span>
+    <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">),</span> <span class="n">table</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-score_table_passes-pass_files">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">pass_files</span><span class="p">(</span><span class="n">dirs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">Path</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">Path</span><span class="p">]</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 313–314 (2 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">313</span>
+<span class="normal">314</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">pass_files</span><span class="p">(</span><span class="n">dirs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">Path</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">Path</span><span class="p">]:</span>
+    <span class="k">return</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">p</span> <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">dirs</span> <span class="k">if</span> <span class="n">d</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">d</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">&quot;table_rows_*.csv&quot;</span><span class="p">))</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-score_table_passes-main">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 317–350 (34 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span>
+<span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span>
+<span class="normal">337</span>
+<span class="normal">338</span>
+<span class="normal">339</span>
+<span class="normal">340</span>
+<span class="normal">341</span>
+<span class="normal">342</span>
+<span class="normal">343</span>
+<span class="normal">344</span>
+<span class="normal">345</span>
+<span class="normal">346</span>
+<span class="normal">347</span>
+<span class="normal">348</span>
+<span class="normal">349</span>
+<span class="normal">350</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="k">for</span> <span class="n">stream</span> <span class="ow">in</span> <span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">stdout</span><span class="p">,</span> <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">stream</span><span class="o">.</span><span class="n">reconfigure</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;replace&quot;</span><span class="p">)</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">AttributeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">):</span>
+            <span class="k">pass</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="p">,</span>
+                                 <span class="n">formatter_class</span><span class="o">=</span><span class="n">argparse</span><span class="o">.</span><span class="n">RawDescriptionHelpFormatter</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--rows&quot;</span><span class="p">,</span> <span class="n">nargs</span><span class="o">=</span><span class="s2">&quot;*&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[],</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;table_rows_&lt;label&gt;.csv files; default every pass on disk&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--out&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;write the table here as CSV&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">rows</span><span class="p">:</span>
+        <span class="n">files</span> <span class="o">=</span> <span class="p">[</span><span class="n">Path</span><span class="p">(</span><span class="n">p</span><span class="p">)</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">args</span><span class="o">.</span><span class="n">rows</span><span class="p">]</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">bakeoff</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">bo</span>
+        <span class="n">files</span> <span class="o">=</span> <span class="n">pass_files</span><span class="p">([</span><span class="n">d</span> <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span><span class="o">.</span><span class="n">iterdir</span><span class="p">()</span> <span class="k">if</span> <span class="n">d</span><span class="o">.</span><span class="n">is_dir</span><span class="p">()])</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">files</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;no table_rows_*.csv found — run run_table_arm.py first&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="mi">1</span>
+    <span class="n">gold</span> <span class="o">=</span> <span class="n">load_gold</span><span class="p">()</span>
+    <span class="n">passes</span> <span class="o">=</span> <span class="p">[(</span><span class="n">label_of</span><span class="p">(</span><span class="n">f</span><span class="p">),</span> <span class="n">load_rows</span><span class="p">(</span><span class="n">f</span><span class="p">))</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">files</span><span class="p">]</span>
+    <span class="n">text</span><span class="p">,</span> <span class="n">table</span> <span class="o">=</span> <span class="n">report</span><span class="p">(</span><span class="n">gold</span><span class="p">,</span> <span class="n">passes</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">out</span><span class="p">:</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">out</span><span class="p">)</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">with</span> <span class="n">out</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;w&quot;</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+            <span class="n">writer</span> <span class="o">=</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictWriter</span><span class="p">(</span><span class="n">fh</span><span class="p">,</span> <span class="n">fieldnames</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="n">table</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+            <span class="n">writer</span><span class="o">.</span><span class="n">writeheader</span><span class="p">()</span>
+            <span class="n">writer</span><span class="o">.</span><span class="n">writerows</span><span class="p">(</span><span class="n">table</span><span class="p">)</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">with_suffix</span><span class="p">(</span><span class="s2">&quot;.txt&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">text</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  -&gt; </span><span class="si">{</span><span class="n">out</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-lexikon_1910-score_table_passes-HERE"><pre class="sig">HERE<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-score_table_passes-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">HERE</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-score_table_passes-GOLD_ROLES"><pre class="sig">GOLD_ROLES<span class="kind">tuple · 2 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">(</span><span class="s1">&#39;calibration&#39;</span><span class="p">,</span> <span class="s1">&#39;purposive&#39;</span><span class="p">)</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-score_table_passes-MIN_PAIR"><pre class="sig">MIN_PAIR<span class="kind">float</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mf">0.6</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-score_table_passes-SEQ_BONUS"><pre class="sig">SEQ_BONUS<span class="kind">float</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mf">0.3</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-score_table_passes-NUMBER_COLS"><pre class="sig">NUMBER_COLS<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">lx</span><span class="o">.</span><span class="n">INT_COLS</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-score_table_passes-TEXT_COLS"><pre class="sig">TEXT_COLS<span class="kind">list · 2 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">[</span><span class="s1">&#39;post_key&#39;</span><span class="p">,</span> <span class="s1">&#39;station_note&#39;</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-score_table_passes-SCORED_COLS"><pre class="sig">SCORED_COLS<span class="kind">list · 4 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">[</span><span class="s1">&#39;seq&#39;</span><span class="p">,</span> <span class="s1">&#39;name&#39;</span><span class="p">,</span> <span class="o">*</span><span class="n">NUMBER_COLS</span><span class="p">,</span> <span class="o">*</span><span class="n">TEXT_COLS</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-score_table_passes-EXTRA_COLS"><pre class="sig">EXTRA_COLS<span class="kind">list · 1 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">[</span><span class="s1">&#39;name_strict&#39;</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<h2>Used by</h2><p><code>utils/lexikon_1910/run_table_arm.py</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/lexikon_1910/score_table_passes.py · 354 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span>
+<span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span>
+<span class="normal">337</span>
+<span class="normal">338</span>
+<span class="normal">339</span>
+<span class="normal">340</span>
+<span class="normal">341</span>
+<span class="normal">342</span>
+<span class="normal">343</span>
+<span class="normal">344</span>
+<span class="normal">345</span>
+<span class="normal">346</span>
+<span class="normal">347</span>
+<span class="normal">348</span>
+<span class="normal">349</span>
+<span class="normal">350</span>
+<span class="normal">351</span>
+<span class="normal">352</span>
+<span class="normal">353</span>
+<span class="normal">354</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;Score the table readings against the gold tables, cell by cell.</span>
+
+<span class="sd">The table arm of ``r5`` (``run_table_arm.py``) asks how far a model reading of</span>
+<span class="sd">the seventeen printed columns beats the text layer. Channel B (the NDK ALTO</span>
+<span class="sd">text layer) and channel A (a vision model) read the **same municipality-block</span>
+<span class="sd">crops**, and every row each returned is in ``table_rows_&lt;label&gt;.csv``</span>
+<span class="sd">(``run_lexikon_1910_pilot.py``). The gold is section 1 of the calibration and</span>
+<span class="sd">purposive sheets — 403 rows on 13 pages — read in-process by</span>
+<span class="sd">``read_transcription_md.read_sheet``. Certification sheets are never read here.</span>
+
+<span class="sd">Matching</span>
+<span class="sd">--------</span>
+<span class="sd">A gold row and a channel row are paired per page by a weighted alignment that</span>
+<span class="sd">keeps printed order: a pair scores the similarity of the normalised names, plus</span>
+<span class="sd">a bonus when the printed number agrees, and no pair under ``MIN_PAIR`` is made.</span>
+<span class="sd">A gold row with no partner is **missed**: the crop did not hold it, or the</span>
+<span class="sd">reader dropped it — the same for both channels when the crop is to blame. The</span>
+<span class="sd">*mezi tím vojsko* lines are left out on the channel side, because the gold</span>
+<span class="sd">sheets do not transcribe them.</span>
+
+<span class="sd">What is compared</span>
+<span class="sd">----------------</span>
+<span class="sd">``name``: the **words** of the place name — runs of two or more letters,</span>
+<span class="sd">case-folded — so the bracketed place-type tokens, the footnote marks (``*)``),</span>
+<span class="sd">the dot leaders, the part numbers and a pictogram the text layer turned into a</span>
+<span class="sd">stray letter (``Pankratz o``) do not count against a reading. A misspelt word</span>
+<span class="sd">does. ``name_strict`` keeps everything but the brackets, marks and leaders, and</span>
+<span class="sd">is reported beside it.</span>
+<span class="sd">Number columns: the digits, with the printed nil ``.`` and an empty cell equal.</span>
+<span class="sd">``post_key`` and ``station_note``: the text with every space removed.</span>
+
+<span class="sd">A cell counts when the gold **or** the reading has something in it, so a column</span>
+<span class="sd">that is blank on most rows does not score itself.</span>
+
+<span class="sd">    python utils/lexikon_1910/score_table_passes.py                 # every pass in the bake-off dirs</span>
+<span class="sd">    python utils/lexikon_1910/score_table_passes.py --rows a.csv b.csv</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">csv</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">difflib</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">Counter</span><span class="p">,</span> <span class="n">defaultdict</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="n">HERE</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span>
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">HERE</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">))</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">HERE</span><span class="p">))</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910</span> <span class="k">as</span> <span class="n">lx</span>                    <span class="c1"># noqa: E402</span>
+
+<span class="c1">#: The roles the bake-off may look at; certification stays sealed (D-55).</span>
+<span class="n">GOLD_ROLES</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;calibration&quot;</span><span class="p">,</span> <span class="s2">&quot;purposive&quot;</span><span class="p">)</span>
+<span class="c1">#: A pair below this score is not made: the two rows are different places.</span>
+<span class="n">MIN_PAIR</span> <span class="o">=</span> <span class="mf">0.6</span>
+<span class="c1">#: Added to a pair&#39;s name similarity when the printed numbers agree.</span>
+<span class="n">SEQ_BONUS</span> <span class="o">=</span> <span class="mf">0.3</span>
+
+<span class="n">NUMBER_COLS</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">lx</span><span class="o">.</span><span class="n">INT_COLS</span><span class="p">]</span>
+<span class="n">TEXT_COLS</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;post_key&quot;</span><span class="p">,</span> <span class="s2">&quot;station_note&quot;</span><span class="p">]</span>
+<span class="n">SCORED_COLS</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;seq&quot;</span><span class="p">,</span> <span class="s2">&quot;name&quot;</span><span class="p">,</span> <span class="o">*</span><span class="n">NUMBER_COLS</span><span class="p">,</span> <span class="o">*</span><span class="n">TEXT_COLS</span><span class="p">]</span>
+<span class="c1">#: Reported, never part of a row&#39;s verdict.</span>
+<span class="n">EXTRA_COLS</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;name_strict&quot;</span><span class="p">]</span>
+
+<span class="n">_BRACKET_RE</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\[[^\]]*\]&quot;</span><span class="p">)</span>
+<span class="n">_FOOTNOTE_RE</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\*+\)?&quot;</span><span class="p">)</span>
+<span class="n">_LEADER_RE</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\.{2,}|…&quot;</span><span class="p">)</span>
+<span class="n">_NOT_NAME_RE</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;[^\w\s,.\-&#39;]&quot;</span><span class="p">)</span>
+<span class="n">_NIL</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;.&quot;</span><span class="p">,</span> <span class="s2">&quot;·&quot;</span><span class="p">,</span> <span class="s2">&quot;—&quot;</span><span class="p">,</span> <span class="s2">&quot;–&quot;</span><span class="p">,</span> <span class="s2">&quot;-&quot;</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">norm_name</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The words of a name: runs of two or more letters, case-folded.&quot;&quot;&quot;</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">_BRACKET_RE</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">text</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">words</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;[^\W\d_]{2,}&quot;</span><span class="p">,</span> <span class="n">text</span><span class="p">)</span>
+    <span class="k">return</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">words</span><span class="p">)</span><span class="o">.</span><span class="n">casefold</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">norm_name_strict</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">_BRACKET_RE</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">text</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">_FOOTNOTE_RE</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">text</span><span class="p">)</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">_LEADER_RE</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">text</span><span class="p">)</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">_NOT_NAME_RE</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">text</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;_&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="p">)</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\s+&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">text</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s2">&quot; ,.:;&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">text</span><span class="o">.</span><span class="n">casefold</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">norm_number</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\s+&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">text</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">text</span> <span class="ow">in</span> <span class="n">_NIL</span> <span class="k">else</span> <span class="n">text</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">norm_text</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\s+&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">text</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">norm</span><span class="p">(</span><span class="n">col</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">col</span> <span class="o">==</span> <span class="s2">&quot;name&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">norm_name</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">col</span> <span class="o">==</span> <span class="s2">&quot;name_strict&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">norm_name_strict</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">TEXT_COLS</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">norm_text</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">norm_number</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+
+
+<span class="c1"># --------------------------------------------------------------------------- #</span>
+<span class="c1"># Loading</span>
+<span class="c1"># --------------------------------------------------------------------------- #</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">load_gold</span><span class="p">(</span><span class="n">roles</span><span class="o">=</span><span class="n">GOLD_ROLES</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``{page: [row, …]}`` in printed order, from the sheets themselves.&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">read_transcription_md</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">rt</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_institutions</span> <span class="k">as</span> <span class="n">lxin</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_vision</span> <span class="k">as</span> <span class="n">lxv</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">check_transcription</span><span class="w"> </span><span class="kn">import</span> <span class="n">OFF_ATLAS</span><span class="p">,</span> <span class="n">TOPOGRAPHIC</span>
+
+    <span class="n">abbreviations</span> <span class="o">=</span> <span class="n">lxin</span><span class="o">.</span><span class="n">load_abbreviations</span><span class="p">(</span><span class="n">rt</span><span class="o">.</span><span class="n">ABBREVIATIONS</span><span class="p">,</span> <span class="n">lang</span><span class="o">=</span><span class="s2">&quot;cs&quot;</span><span class="p">)</span>
+    <span class="n">allowed</span> <span class="o">=</span> <span class="n">lxv</span><span class="o">.</span><span class="n">vocabulary</span><span class="p">(</span><span class="n">abbreviations</span><span class="p">)</span> <span class="o">|</span> <span class="p">{</span><span class="n">OFF_ATLAS</span><span class="p">}</span> <span class="o">|</span> <span class="n">TOPOGRAPHIC</span>
+    <span class="n">gold</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">role</span> <span class="ow">in</span> <span class="n">roles</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">((</span><span class="n">rt</span><span class="o">.</span><span class="n">GOLD_ROOT</span> <span class="o">/</span> <span class="n">role</span><span class="p">)</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">&quot;[0-9][0-9][0-9][0-9].md&quot;</span><span class="p">)):</span>
+            <span class="n">gold</span><span class="p">[</span><span class="n">path</span><span class="o">.</span><span class="n">stem</span><span class="p">]</span> <span class="o">+=</span> <span class="n">rt</span><span class="o">.</span><span class="n">read_sheet</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">allowed</span><span class="p">)[</span><span class="s2">&quot;table&quot;</span><span class="p">]</span>
+    <span class="k">return</span> <span class="nb">dict</span><span class="p">(</span><span class="n">gold</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">load_rows</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``{channel: {page: [row, …]}}`` in block order, *mezi tím* lines left out.&quot;&quot;&quot;</span>
+    <span class="n">out</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]]</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="k">lambda</span><span class="p">:</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">))</span>
+    <span class="k">with</span> <span class="n">path</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+        <span class="n">rows</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">csv</span><span class="o">.</span><span class="n">DictReader</span><span class="p">(</span><span class="n">fh</span><span class="p">))</span>
+    <span class="n">rows</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">r</span><span class="p">:</span> <span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;channel&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">],</span> <span class="nb">int</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;block_index&quot;</span><span class="p">]),</span> <span class="nb">int</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;row&quot;</span><span class="p">])))</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">lx</span><span class="o">.</span><span class="n">OF_WHICH_RE</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)):</span>
+            <span class="k">continue</span>
+        <span class="n">out</span><span class="p">[</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;channel&quot;</span><span class="p">]][</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">label_of</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">path</span><span class="o">.</span><span class="n">stem</span><span class="o">.</span><span class="n">removeprefix</span><span class="p">(</span><span class="s2">&quot;table_rows_&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;unlabelled&quot;</span>
+
+
+<span class="c1"># --------------------------------------------------------------------------- #</span>
+<span class="c1"># Matching</span>
+<span class="c1"># --------------------------------------------------------------------------- #</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">pair_score</span><span class="p">(</span><span class="n">gold</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">row</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+    <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="o">=</span> <span class="n">norm_name</span><span class="p">(</span><span class="n">gold</span><span class="p">[</span><span class="s2">&quot;name&quot;</span><span class="p">]),</span> <span class="n">norm_name</span><span class="p">(</span><span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+    <span class="n">score</span> <span class="o">=</span> <span class="n">difflib</span><span class="o">.</span><span class="n">SequenceMatcher</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span><span class="o">.</span><span class="n">ratio</span><span class="p">()</span> <span class="k">if</span> <span class="n">a</span> <span class="ow">and</span> <span class="n">b</span> <span class="k">else</span> <span class="mf">0.0</span>
+    <span class="n">seq_g</span><span class="p">,</span> <span class="n">seq_r</span> <span class="o">=</span> <span class="n">norm_number</span><span class="p">(</span><span class="n">gold</span><span class="p">[</span><span class="s2">&quot;seq&quot;</span><span class="p">]),</span> <span class="n">norm_number</span><span class="p">(</span><span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;seq&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">seq_g</span> <span class="ow">and</span> <span class="n">seq_g</span> <span class="o">==</span> <span class="n">seq_r</span><span class="p">:</span>
+        <span class="n">score</span> <span class="o">+=</span> <span class="n">SEQ_BONUS</span>
+    <span class="k">return</span> <span class="n">score</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">align</span><span class="p">(</span><span class="n">gold</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">],</span> <span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Order-keeping pairs ``(gold index, row index)`` of greatest total score.&quot;&quot;&quot;</span>
+    <span class="n">n</span><span class="p">,</span> <span class="n">m</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">gold</span><span class="p">),</span> <span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+    <span class="n">best</span> <span class="o">=</span> <span class="p">[[</span><span class="mf">0.0</span><span class="p">]</span> <span class="o">*</span> <span class="p">(</span><span class="n">m</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)]</span>
+    <span class="n">move</span> <span class="o">=</span> <span class="p">[[</span><span class="s2">&quot;&quot;</span><span class="p">]</span> <span class="o">*</span> <span class="p">(</span><span class="n">m</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)]</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">n</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">m</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+            <span class="n">best</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">],</span> <span class="n">move</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">]</span> <span class="o">=</span> <span class="n">best</span><span class="p">[</span><span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">][</span><span class="n">j</span><span class="p">],</span> <span class="s2">&quot;g&quot;</span>
+            <span class="k">if</span> <span class="n">best</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">best</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">]:</span>
+                <span class="n">best</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">],</span> <span class="n">move</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">]</span> <span class="o">=</span> <span class="n">best</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span> <span class="o">-</span> <span class="mi">1</span><span class="p">],</span> <span class="s2">&quot;r&quot;</span>
+            <span class="n">s</span> <span class="o">=</span> <span class="n">pair_score</span><span class="p">(</span><span class="n">gold</span><span class="p">[</span><span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">],</span> <span class="n">rows</span><span class="p">[</span><span class="n">j</span> <span class="o">-</span> <span class="mi">1</span><span class="p">])</span>
+            <span class="k">if</span> <span class="n">s</span> <span class="o">&gt;=</span> <span class="n">MIN_PAIR</span> <span class="ow">and</span> <span class="n">best</span><span class="p">[</span><span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">][</span><span class="n">j</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="n">s</span> <span class="o">&gt;</span> <span class="n">best</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">]:</span>
+                <span class="n">best</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">],</span> <span class="n">move</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">]</span> <span class="o">=</span> <span class="n">best</span><span class="p">[</span><span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">][</span><span class="n">j</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="n">s</span><span class="p">,</span> <span class="s2">&quot;p&quot;</span>
+    <span class="n">pairs</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span> <span class="o">=</span> <span class="p">[],</span> <span class="n">n</span><span class="p">,</span> <span class="n">m</span>
+    <span class="k">while</span> <span class="n">i</span> <span class="ow">and</span> <span class="n">j</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">move</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;p&quot;</span><span class="p">:</span>
+            <span class="n">pairs</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="n">j</span> <span class="o">-</span> <span class="mi">1</span><span class="p">))</span>
+            <span class="n">i</span><span class="p">,</span> <span class="n">j</span> <span class="o">=</span> <span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="n">j</span> <span class="o">-</span> <span class="mi">1</span>
+        <span class="k">elif</span> <span class="n">move</span><span class="p">[</span><span class="n">i</span><span class="p">][</span><span class="n">j</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;g&quot;</span><span class="p">:</span>
+            <span class="n">i</span> <span class="o">-=</span> <span class="mi">1</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">j</span> <span class="o">-=</span> <span class="mi">1</span>
+    <span class="k">return</span> <span class="n">pairs</span><span class="p">[::</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">readings</span><span class="p">(</span><span class="n">gold</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">rows</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">tuple</span><span class="p">,</span> <span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``{(page, gold position index): row}`` — the row read for each gold row.&quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">page</span><span class="p">,</span> <span class="n">gold_rows</span> <span class="ow">in</span> <span class="n">gold</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">for</span> <span class="n">gi</span><span class="p">,</span> <span class="n">ri</span> <span class="ow">in</span> <span class="n">align</span><span class="p">(</span><span class="n">gold_rows</span><span class="p">,</span> <span class="n">rows</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">page</span><span class="p">,</span> <span class="p">[])):</span>
+            <span class="n">out</span><span class="p">[(</span><span class="n">page</span><span class="p">,</span> <span class="n">gi</span><span class="p">)]</span> <span class="o">=</span> <span class="n">rows</span><span class="p">[</span><span class="n">page</span><span class="p">][</span><span class="n">ri</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="c1"># --------------------------------------------------------------------------- #</span>
+<span class="c1"># Scoring</span>
+<span class="c1"># --------------------------------------------------------------------------- #</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">score_reading</span><span class="p">(</span><span class="n">gold</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">read</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">tuple</span><span class="p">,</span> <span class="nb">dict</span><span class="p">],</span> <span class="n">n_rows</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Recall, row-exact and per-column accuracy of one channel of one pass.&quot;&quot;&quot;</span>
+    <span class="n">n_gold</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">gold</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+    <span class="n">right</span><span class="p">,</span> <span class="n">counted</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">(),</span> <span class="n">Counter</span><span class="p">()</span>
+    <span class="n">exact</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="p">(</span><span class="n">page</span><span class="p">,</span> <span class="n">gi</span><span class="p">),</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">read</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">g</span> <span class="o">=</span> <span class="n">gold</span><span class="p">[</span><span class="n">page</span><span class="p">][</span><span class="n">gi</span><span class="p">]</span>
+        <span class="n">whole</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">SCORED_COLS</span><span class="p">:</span>
+            <span class="n">truth</span><span class="p">,</span> <span class="n">got</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="n">g</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)),</span> <span class="n">norm</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">truth</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">got</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">counted</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">if</span> <span class="n">truth</span> <span class="o">==</span> <span class="n">got</span><span class="p">:</span>
+                <span class="n">right</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">whole</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="n">exact</span> <span class="o">+=</span> <span class="n">whole</span>
+        <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">EXTRA_COLS</span><span class="p">:</span>
+            <span class="n">truth</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="n">g</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+            <span class="n">got</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+            <span class="n">counted</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="n">right</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">+=</span> <span class="n">truth</span> <span class="o">==</span> <span class="n">got</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;gold_rows&quot;</span><span class="p">:</span> <span class="n">n_gold</span><span class="p">,</span> <span class="s2">&quot;matched&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">read</span><span class="p">),</span> <span class="s2">&quot;extra&quot;</span><span class="p">:</span> <span class="n">n_rows</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">read</span><span class="p">),</span>
+           <span class="s2">&quot;recall&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">read</span><span class="p">)</span> <span class="o">/</span> <span class="n">n_gold</span> <span class="k">if</span> <span class="n">n_gold</span> <span class="k">else</span> <span class="mf">0.0</span><span class="p">,</span>
+           <span class="s2">&quot;row_exact&quot;</span><span class="p">:</span> <span class="n">exact</span> <span class="o">/</span> <span class="n">n_gold</span> <span class="k">if</span> <span class="n">n_gold</span> <span class="k">else</span> <span class="mf">0.0</span><span class="p">,</span>
+           <span class="s2">&quot;cells&quot;</span><span class="p">:</span> <span class="nb">sum</span><span class="p">(</span><span class="n">counted</span><span class="o">.</span><span class="n">values</span><span class="p">()),</span>
+           <span class="s2">&quot;cell_acc&quot;</span><span class="p">:</span> <span class="nb">sum</span><span class="p">(</span><span class="n">right</span><span class="o">.</span><span class="n">values</span><span class="p">())</span> <span class="o">/</span> <span class="nb">max</span><span class="p">(</span><span class="nb">sum</span><span class="p">(</span><span class="n">counted</span><span class="o">.</span><span class="n">values</span><span class="p">()),</span> <span class="mi">1</span><span class="p">),</span>
+           <span class="s2">&quot;number_acc&quot;</span><span class="p">:</span> <span class="p">(</span><span class="nb">sum</span><span class="p">(</span><span class="n">right</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">NUMBER_COLS</span><span class="p">)</span>
+                          <span class="o">/</span> <span class="nb">max</span><span class="p">(</span><span class="nb">sum</span><span class="p">(</span><span class="n">counted</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">NUMBER_COLS</span><span class="p">),</span> <span class="mi">1</span><span class="p">))}</span>
+    <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">SCORED_COLS</span> <span class="o">+</span> <span class="n">EXTRA_COLS</span><span class="p">:</span>
+        <span class="n">out</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;acc_</span><span class="si">{</span><span class="n">col</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">right</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">/</span> <span class="n">counted</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="k">if</span> <span class="n">counted</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="k">else</span> <span class="kc">None</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">cross</span><span class="p">(</span><span class="n">gold</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">left</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">tuple</span><span class="p">,</span> <span class="nb">dict</span><span class="p">],</span> <span class="n">right</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">tuple</span><span class="p">,</span> <span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Counter</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Cell outcomes where two readings both hold a gold row.</span>
+
+<span class="sd">    ``agree_right``/``agree_wrong``: the two say the same; ``left_only`` /</span>
+<span class="sd">    ``right_only``: one is right; ``both_wrong``: they differ and neither is.</span>
+<span class="sd">    ``agree_wrong`` is the shared error a comparison of the two cannot see.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">left</span><span class="o">.</span><span class="n">keys</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">right</span><span class="o">.</span><span class="n">keys</span><span class="p">():</span>
+        <span class="n">g</span> <span class="o">=</span> <span class="n">gold</span><span class="p">[</span><span class="n">key</span><span class="p">[</span><span class="mi">0</span><span class="p">]][</span><span class="n">key</span><span class="p">[</span><span class="mi">1</span><span class="p">]]</span>
+        <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">SCORED_COLS</span><span class="p">:</span>
+            <span class="n">truth</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="n">g</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+            <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="o">=</span> <span class="n">norm</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="n">left</span><span class="p">[</span><span class="n">key</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)),</span> <span class="n">norm</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="n">right</span><span class="p">[</span><span class="n">key</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">col</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="n">truth</span> <span class="ow">or</span> <span class="n">a</span> <span class="ow">or</span> <span class="n">b</span><span class="p">):</span>
+                <span class="k">continue</span>
+            <span class="k">if</span> <span class="n">a</span> <span class="o">==</span> <span class="n">b</span><span class="p">:</span>
+                <span class="n">out</span><span class="p">[</span><span class="s2">&quot;agree_right&quot;</span> <span class="k">if</span> <span class="n">a</span> <span class="o">==</span> <span class="n">truth</span> <span class="k">else</span> <span class="s2">&quot;agree_wrong&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">elif</span> <span class="n">a</span> <span class="o">==</span> <span class="n">truth</span><span class="p">:</span>
+                <span class="n">out</span><span class="p">[</span><span class="s2">&quot;left_only&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">elif</span> <span class="n">b</span> <span class="o">==</span> <span class="n">truth</span><span class="p">:</span>
+                <span class="n">out</span><span class="p">[</span><span class="s2">&quot;right_only&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">out</span><span class="p">[</span><span class="s2">&quot;both_wrong&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">fmt</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="s2">&quot;  -- &quot;</span> <span class="k">if</span> <span class="n">x</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">x</span><span class="si">:</span><span class="s2">6.1%</span><span class="si">}</span><span class="s2">&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">gold</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">passes</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">dict</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]:</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;table arm — </span><span class="si">{</span><span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">)</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">v</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">gold</span><span class="o">.</span><span class="n">values</span><span class="p">())</span><span class="si">}</span><span class="s2"> gold rows on &quot;</span>
+             <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">gold</span><span class="p">)</span><span class="si">}</span><span class="s2"> pages (</span><span class="si">{</span><span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">GOLD_ROLES</span><span class="p">)</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">]</span>
+    <span class="n">table</span><span class="p">,</span> <span class="n">read_by</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">{}</span>
+    <span class="n">seen_text_layer</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">channels</span> <span class="ow">in</span> <span class="n">passes</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">channel</span><span class="p">,</span> <span class="n">rows</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">channels</span><span class="o">.</span><span class="n">items</span><span class="p">()):</span>
+            <span class="k">if</span> <span class="n">channel</span> <span class="o">==</span> <span class="s2">&quot;B&quot;</span><span class="p">:</span>
+                <span class="c1"># Every pass carries the same text layer; score it once.</span>
+                <span class="k">if</span> <span class="n">seen_text_layer</span><span class="p">:</span>
+                    <span class="k">continue</span>
+                <span class="n">seen_text_layer</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="n">reading</span> <span class="o">=</span> <span class="n">readings</span><span class="p">(</span><span class="n">gold</span><span class="p">,</span> <span class="n">rows</span><span class="p">)</span>
+            <span class="n">n_rows</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="p">[]))</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">gold</span><span class="p">)</span>
+            <span class="n">s</span> <span class="o">=</span> <span class="n">score_reading</span><span class="p">(</span><span class="n">gold</span><span class="p">,</span> <span class="n">reading</span><span class="p">,</span> <span class="n">n_rows</span><span class="p">)</span>
+            <span class="n">tag</span> <span class="o">=</span> <span class="s2">&quot;OCR&quot;</span> <span class="k">if</span> <span class="n">channel</span> <span class="o">==</span> <span class="s2">&quot;B&quot;</span> <span class="k">else</span> <span class="s2">&quot;AI&quot;</span>
+            <span class="n">read_by</span><span class="p">[(</span><span class="n">label</span><span class="p">,</span> <span class="n">channel</span><span class="p">)]</span> <span class="o">=</span> <span class="n">reading</span>
+            <span class="n">table</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;label&quot;</span><span class="p">:</span> <span class="n">label</span><span class="p">,</span> <span class="s2">&quot;channel&quot;</span><span class="p">:</span> <span class="n">channel</span><span class="p">,</span> <span class="s2">&quot;reader&quot;</span><span class="p">:</span> <span class="n">tag</span><span class="p">,</span> <span class="o">**</span><span class="n">s</span><span class="p">})</span>
+    <span class="n">head</span> <span class="o">=</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="s1">&#39;pass&#39;</span><span class="si">:</span><span class="s2">28s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;ch&#39;</span><span class="si">:</span><span class="s2">3s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;recall&#39;</span><span class="si">:</span><span class="s2">&gt;7s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;row ok&#39;</span><span class="si">:</span><span class="s2">&gt;7s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;cells&#39;</span><span class="si">:</span><span class="s2">&gt;7s</span><span class="si">}</span><span class="s2"> &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="s1">&#39;numbers&#39;</span><span class="si">:</span><span class="s2">&gt;7s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;names&#39;</span><span class="si">:</span><span class="s2">&gt;7s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;strict&#39;</span><span class="si">:</span><span class="s2">&gt;7s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;seq&#39;</span><span class="si">:</span><span class="s2">&gt;7s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;post&#39;</span><span class="si">:</span><span class="s2">&gt;7s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;station&#39;</span><span class="si">:</span><span class="s2">&gt;7s</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span><span class="n">head</span><span class="p">,</span> <span class="s2">&quot;  &quot;</span> <span class="o">+</span> <span class="s2">&quot;-&quot;</span> <span class="o">*</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">head</span><span class="p">)</span> <span class="o">-</span> <span class="mi">2</span><span class="p">)]</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">table</span><span class="p">:</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;label&#39;</span><span class="p">][:</span><span class="mi">28</span><span class="p">]</span><span class="si">:</span><span class="s2">28s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;channel&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">3s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">fmt</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;recall&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2"> &quot;</span>
+                     <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">fmt</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;row_exact&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">fmt</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;cell_acc&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">fmt</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;number_acc&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2"> &quot;</span>
+                     <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">fmt</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;acc_name&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">fmt</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;acc_name_strict&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">fmt</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;acc_seq&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">fmt</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;acc_post_key&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2"> &quot;</span>
+                     <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">fmt</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;acc_station_note&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;  per number column (share of counted cells right):&quot;</span><span class="p">,</span>
+              <span class="s2">&quot;  &quot;</span> <span class="o">+</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">c</span><span class="p">[:</span><span class="mi">9</span><span class="p">]</span><span class="si">:</span><span class="s2">&gt;9s</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">NUMBER_COLS</span><span class="p">)]</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">table</span><span class="p">:</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;label&#39;</span><span class="p">][:</span><span class="mi">20</span><span class="p">]</span><span class="si">:</span><span class="s2">20s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;channel&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> &quot;</span>
+                     <span class="o">+</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">fmt</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="sa">f</span><span class="s1">&#39;acc_</span><span class="si">{</span><span class="n">c</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">])</span><span class="si">:</span><span class="s2">&gt;9s</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">NUMBER_COLS</span><span class="p">))</span>
+    <span class="n">pairs</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">keys</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">read_by</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">a</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">keys</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">keys</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">:]:</span>
+            <span class="n">pairs</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">cross</span><span class="p">(</span><span class="n">gold</span><span class="p">,</span> <span class="n">read_by</span><span class="p">[</span><span class="n">a</span><span class="p">],</span> <span class="n">read_by</span><span class="p">[</span><span class="n">b</span><span class="p">])))</span>
+    <span class="k">if</span> <span class="n">pairs</span><span class="p">:</span>
+        <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;  two readings side by side (cells where either holds something):&quot;</span><span class="p">,</span>
+                  <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="s1">&#39;left&#39;</span><span class="si">:</span><span class="s2">24s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;right&#39;</span><span class="si">:</span><span class="s2">24s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;agree ok&#39;</span><span class="si">:</span><span class="s2">&gt;9s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;agree bad&#39;</span><span class="si">:</span><span class="s2">&gt;9s</span><span class="si">}</span><span class="s2"> &quot;</span>
+                  <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="s1">&#39;left only&#39;</span><span class="si">:</span><span class="s2">&gt;9s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;right only&#39;</span><span class="si">:</span><span class="s2">&gt;10s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;both bad&#39;</span><span class="si">:</span><span class="s2">&gt;9s</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">pairs</span><span class="p">:</span>
+            <span class="n">total</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">values</span><span class="p">())</span> <span class="ow">or</span> <span class="mi">1</span>
+            <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">a</span><span class="p">[</span><span class="mi">0</span><span class="p">][:</span><span class="mi">20</span><span class="p">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s1">&#39; &#39;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">a</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">24s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">b</span><span class="p">[</span><span class="mi">0</span><span class="p">][:</span><span class="mi">20</span><span class="p">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s1">&#39; &#39;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">b</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">24s</span><span class="si">}</span><span class="s2"> &quot;</span>
+                         <span class="o">+</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">c</span><span class="p">[</span><span class="n">k</span><span class="p">]</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">total</span><span class="si">:</span><span class="s2">9.1%</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span>
+                                    <span class="p">(</span><span class="s2">&quot;agree_right&quot;</span><span class="p">,</span> <span class="s2">&quot;agree_wrong&quot;</span><span class="p">,</span> <span class="s2">&quot;left_only&quot;</span><span class="p">,</span>
+                                     <span class="s2">&quot;right_only&quot;</span><span class="p">,</span> <span class="s2">&quot;both_wrong&quot;</span><span class="p">)))</span>
+    <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">),</span> <span class="n">table</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">pass_files</span><span class="p">(</span><span class="n">dirs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">Path</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">Path</span><span class="p">]:</span>
+    <span class="k">return</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">p</span> <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">dirs</span> <span class="k">if</span> <span class="n">d</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">d</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">&quot;table_rows_*.csv&quot;</span><span class="p">))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="k">for</span> <span class="n">stream</span> <span class="ow">in</span> <span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">stdout</span><span class="p">,</span> <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">stream</span><span class="o">.</span><span class="n">reconfigure</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;replace&quot;</span><span class="p">)</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">AttributeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">):</span>
+            <span class="k">pass</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="p">,</span>
+                                 <span class="n">formatter_class</span><span class="o">=</span><span class="n">argparse</span><span class="o">.</span><span class="n">RawDescriptionHelpFormatter</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--rows&quot;</span><span class="p">,</span> <span class="n">nargs</span><span class="o">=</span><span class="s2">&quot;*&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="p">[],</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;table_rows_&lt;label&gt;.csv files; default every pass on disk&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--out&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;write the table here as CSV&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">rows</span><span class="p">:</span>
+        <span class="n">files</span> <span class="o">=</span> <span class="p">[</span><span class="n">Path</span><span class="p">(</span><span class="n">p</span><span class="p">)</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">args</span><span class="o">.</span><span class="n">rows</span><span class="p">]</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">bakeoff</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">bo</span>
+        <span class="n">files</span> <span class="o">=</span> <span class="n">pass_files</span><span class="p">([</span><span class="n">d</span> <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">bo</span><span class="o">.</span><span class="n">BAKEOFF</span><span class="o">.</span><span class="n">iterdir</span><span class="p">()</span> <span class="k">if</span> <span class="n">d</span><span class="o">.</span><span class="n">is_dir</span><span class="p">()])</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">files</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;no table_rows_*.csv found — run run_table_arm.py first&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="mi">1</span>
+    <span class="n">gold</span> <span class="o">=</span> <span class="n">load_gold</span><span class="p">()</span>
+    <span class="n">passes</span> <span class="o">=</span> <span class="p">[(</span><span class="n">label_of</span><span class="p">(</span><span class="n">f</span><span class="p">),</span> <span class="n">load_rows</span><span class="p">(</span><span class="n">f</span><span class="p">))</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">files</span><span class="p">]</span>
+    <span class="n">text</span><span class="p">,</span> <span class="n">table</span> <span class="o">=</span> <span class="n">report</span><span class="p">(</span><span class="n">gold</span><span class="p">,</span> <span class="n">passes</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">out</span><span class="p">:</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">out</span><span class="p">)</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">with</span> <span class="n">out</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;w&quot;</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+            <span class="n">writer</span> <span class="o">=</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictWriter</span><span class="p">(</span><span class="n">fh</span><span class="p">,</span> <span class="n">fieldnames</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="n">table</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+            <span class="n">writer</span><span class="o">.</span><span class="n">writeheader</span><span class="p">()</span>
+            <span class="n">writer</span><span class="o">.</span><span class="n">writerows</span><span class="p">(</span><span class="n">table</span><span class="p">)</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">with_suffix</span><span class="p">(</span><span class="s2">&quot;.txt&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">text</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  -&gt; </span><span class="si">{</span><span class="n">out</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>

@@ -1,0 +1,1195 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Exit code harmonisation for the 'Konec v legiích' field.</p><p class="tldr-facts"><b>Person parsing</b> · v1.2.0 · 344 lines · 5 public functions · 3 constants · used by <code>02_data_cleaning.ipynb</code>, <code>03_visualisation.ipynb</code>, <code>utils/docs/build_docs.py</code> +3 · <code>utils/parsing/exit_codes.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-parsing-exit_codes-parse_exit_codes">parse_exit_codes</a><a class="chip" href="#fn-utils-parsing-exit_codes-label_exit_codes">label_exit_codes</a><a class="chip" href="#fn-utils-parsing-exit_codes-add_exit_columns">add_exit_columns</a><a class="chip" href="#fn-utils-parsing-exit_codes-parse_exit_date">parse_exit_date</a><a class="chip" href="#fn-utils-parsing-exit_codes-exit_code_report">exit_code_report</a><a class="chip const" href="#c-utils-parsing-exit_codes-CODES_CS">CODES_CS</a><a class="chip const" href="#c-utils-parsing-exit_codes-CODES_EN">CODES_EN</a><a class="chip const" href="#c-utils-parsing-exit_codes-EXIT_DATE_RANGE">EXIT_DATE_RANGE</a></div>
+<h2>How it works</h2><p>The field encodes the reason(s) a soldier left the Legions.  In the raw data it
+takes the form  "DD.MM.YYYY ( CODE )"  where CODE is one or more single- or
+multi-letter tokens from the codebook below, optionally separated by commas,
+spaces, or slashes.  Some records substitute full Czech words for the letter
+codes.  A minority of records omit the date and contain only the code, or
+contain only the date with no code.</p>
+<h4>Codebook (source: <a class="cite" data-ref="csol" href="#references" onclick="return bibGo(event)">csol.cz</a> / <a class="cite" data-ref="vua_db" href="#references" onclick="return bibGo(event)">VÚA</a>-VHA Praha)</h4>
+<p>B    Padl v boji                               Killed in action
+ČSA  Sloužil v čs. armádě po r. 1918          Served in post-1918 Czechoslovak army
+D    Dezertoval                                Deserted
+DM   Demobilizován                             Demobilised
+N    Nezvěstný                                 Missing
+NS   Neschopen služby                          Unfit for service
+P    Popraven                                  Executed
+S    Zemřel                                    Died
+V    Vrátil se do vlasti                       Returned home
+X    Viz poznámku                              See note
+Z    Zemřel na následky zranění               Died of wounds</p>
+<p>Source type codes (archival material identifiers, not exit codes):
+Is   Legionářský poslužný spis
+k    Osobní karta legionáře
+o    Osvědčení o vykonané legionářské službě</p>
+<h4>Usage</h4>
+<pre><code>&gt;&gt;&gt; from utils.parsing.exit_codes import parse_exit_codes, add_exit_columns
+&gt;&gt;&gt; codes = parse_exit_codes("30.12.1920 ( Demobilizován )")
+&gt;&gt;&gt; codes
+{'DM'}
+&gt;&gt;&gt; codes = parse_exit_codes("1.1.1918 ( DM,D X )")
+&gt;&gt;&gt; codes
+{'DM', 'D', 'X'}
+
+&gt;&gt;&gt; import pandas as pd
+&gt;&gt;&gt; df = pd.read_csv("data/raw/legionnaires/legionnaires.csv", low_memory=False)
+&gt;&gt;&gt; df = add_exit_columns(df)
+</code></pre>
+<p>Author: Tomáš Haufer</p>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-parsing-exit_codes-parse_exit_codes">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">parse_exit_codes</span><span class="p">(</span><span class="n">raw</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">frozenset</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span></pre>
+<div class="fndoc"><p>Parse a raw <em>Konec v legiích</em> string into a frozenset of canonical codes.</p>
+<h4>Parameters</h4>
+<dl>
+<dt><code>raw</code></dt>
+<dd>A single cell value from the <em>Konec v legiích</em> column.</dd>
+</dl>
+<h4>Returns</h4>
+<p>frozenset[str]
+Zero or more codes from <code>CODES_CS</code>.  Empty if the input is NaN,
+blank, or contains only unrecognised tokens.</p>
+<h4>Examples</h4>
+<blockquote>
+<blockquote>
+<blockquote>
+<p>parse_exit_codes("30.12.1920 ( Demobilizován )")
+frozenset({'DM'})
+parse_exit_codes("1.1.1918 ( DM,D X )")
+frozenset({'D', 'DM', 'X'})
+parse_exit_codes(float("nan"))
+frozenset()</p>
+</blockquote>
+</blockquote>
+</blockquote></div>
+<p class="calls"><b>Called by</b> <code>utils/validation/data_checks.py</code></p>
+<details><summary>source · lines 145–219 (75 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">parse_exit_codes</span><span class="p">(</span><span class="n">raw</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">frozenset</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Parse a raw *Konec v legiích* string into a frozenset of canonical codes.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    raw:</span>
+<span class="sd">        A single cell value from the *Konec v legiích* column.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    frozenset[str]</span>
+<span class="sd">        Zero or more codes from :data:`CODES_CS`.  Empty if the input is NaN,</span>
+<span class="sd">        blank, or contains only unrecognised tokens.</span>
+
+<span class="sd">    Examples</span>
+<span class="sd">    --------</span>
+<span class="sd">    &gt;&gt;&gt; parse_exit_codes(&quot;30.12.1920 ( Demobilizován )&quot;)</span>
+<span class="sd">    frozenset({&#39;DM&#39;})</span>
+<span class="sd">    &gt;&gt;&gt; parse_exit_codes(&quot;1.1.1918 ( DM,D X )&quot;)</span>
+<span class="sd">    frozenset({&#39;D&#39;, &#39;DM&#39;, &#39;X&#39;})</span>
+<span class="sd">    &gt;&gt;&gt; parse_exit_codes(float(&quot;nan&quot;))</span>
+<span class="sd">    frozenset()</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Guard EVERY missing scalar — including pd.NA, which clean.normalize_missing</span>
+    <span class="c1"># substitutes for placeholders. The old float-only guard let pd.NA through as</span>
+    <span class="c1"># the string &quot;&lt;NA&gt;&quot;, whose letter N was scanned into a fabricated &quot;Missing&quot;</span>
+    <span class="c1"># exit code on every empty cell (26,386 rows in the 2026-07 build).</span>
+    <span class="k">if</span> <span class="n">raw</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="p">(</span><span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">raw</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">and</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">raw</span><span class="p">)):</span>
+        <span class="k">return</span> <span class="nb">frozenset</span><span class="p">()</span>
+
+    <span class="n">token</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+
+    <span class="c1"># Extract parenthetical content when present; otherwise work with the</span>
+    <span class="c1"># full string (some records omit the date wrapper entirely).</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\(([^)]+)\)&quot;</span><span class="p">,</span> <span class="n">token</span><span class="p">)</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="k">if</span> <span class="n">m</span> <span class="k">else</span> <span class="n">token</span>
+
+    <span class="c1"># Substitute full Czech words before any further processing</span>
+    <span class="k">for</span> <span class="n">word</span><span class="p">,</span> <span class="n">code</span> <span class="ow">in</span> <span class="n">_WORD_TO_CODE</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">token</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="n">word</span><span class="p">,</span> <span class="n">code</span><span class="p">)</span>
+
+    <span class="c1"># Normalise to uppercase; collapse separators and whitespace</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;[,./\-]+&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">token</span><span class="p">)</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\s+&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">token</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+
+    <span class="c1"># Strip leading date fragments that survived the substitutions</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">_DATE_RE</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">token</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+
+    <span class="c1"># Token-wise extraction. Each whitespace token is first checked against the</span>
+    <span class="c1"># drop list (archival markers — struck whole, so &quot;MD&quot; can never yield D),</span>
+    <span class="c1"># then must parse COMPLETELY as a sequence of codes (greedy, ČSA (3) before</span>
+    <span class="c1"># DM/NS (2) before single letters). A token with unparseable residue is</span>
+    <span class="c1"># skipped entirely — partial reads fabricated codes from unknown strings</span>
+    <span class="c1"># (&quot;SUPER&quot; → S, &quot;PROP&quot; → P), so no partial extraction is allowed.</span>
+    <span class="n">found</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">tok</span> <span class="ow">in</span> <span class="n">token</span><span class="o">.</span><span class="n">split</span><span class="p">():</span>
+        <span class="n">tok</span> <span class="o">=</span> <span class="n">_TOKEN_SUBS</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">tok</span><span class="p">,</span> <span class="n">tok</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;?&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>   <span class="c1"># &quot;D?&quot;, &quot;DM?V&quot; = uncertain — keep codes</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">tok</span> <span class="ow">or</span> <span class="n">tok</span> <span class="ow">in</span> <span class="n">_DROP_TOKENS</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">tok</span><span class="o">.</span><span class="n">isalpha</span><span class="p">():</span>
+            <span class="k">continue</span>
+        <span class="n">codes</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+        <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">while</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">tok</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">length</span> <span class="ow">in</span> <span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">):</span>
+                <span class="n">candidate</span> <span class="o">=</span> <span class="n">tok</span><span class="p">[</span><span class="n">i</span> <span class="p">:</span> <span class="n">i</span> <span class="o">+</span> <span class="n">length</span><span class="p">]</span>
+                <span class="k">if</span> <span class="n">candidate</span> <span class="ow">in</span> <span class="n">CODES_CS</span><span class="p">:</span>
+                    <span class="n">codes</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">candidate</span><span class="p">)</span>
+                    <span class="n">i</span> <span class="o">+=</span> <span class="nb">len</span><span class="p">(</span><span class="n">candidate</span><span class="p">)</span>
+                    <span class="k">break</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">codes</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>        <span class="c1"># unparseable residue → reject the whole token</span>
+                <span class="k">break</span>
+        <span class="n">found</span> <span class="o">|=</span> <span class="n">codes</span>
+
+    <span class="k">return</span> <span class="nb">frozenset</span><span class="p">(</span><span class="n">found</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-exit_codes-label_exit_codes">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">label_exit_codes</span><span class="p">(</span><span class="n">codes</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">lang</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;cs&#39;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span></pre>
+<div class="fndoc"><p>Map a collection of parsed codes to their human-readable labels.</p>
+<h4>Parameters</h4>
+<dl>
+<dt><code>codes</code></dt>
+<dd>An iterable of canonical code strings (e.g. from <code>parse_exit_codes</code>).</dd>
+<dt><code>lang</code></dt>
+<dd><code>"cs"</code> for Czech labels (default), <code>"en"</code> for English.</dd>
+</dl>
+<h4>Returns</h4>
+<p>dict[str, str]
+Mapping of code → label for each recognised code.</p></div>
+<p class="calls warn">No call site found in the notebooks or <code>utils/</code> — possibly superseded or reserved for interactive use.</p>
+<details><summary>source · lines 222–241 (20 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">label_exit_codes</span><span class="p">(</span>
+    <span class="n">codes</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="n">lang</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;cs&quot;</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Map a collection of parsed codes to their human-readable labels.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    codes:</span>
+<span class="sd">        An iterable of canonical code strings (e.g. from :func:`parse_exit_codes`).</span>
+<span class="sd">    lang:</span>
+<span class="sd">        ``&quot;cs&quot;`` for Czech labels (default), ``&quot;en&quot;`` for English.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    dict[str, str]</span>
+<span class="sd">        Mapping of code → label for each recognised code.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">lookup</span> <span class="o">=</span> <span class="n">CODES_CS</span> <span class="k">if</span> <span class="n">lang</span> <span class="o">==</span> <span class="s2">&quot;cs&quot;</span> <span class="k">else</span> <span class="n">CODES_EN</span>
+    <span class="k">return</span> <span class="p">{</span><span class="n">c</span><span class="p">:</span> <span class="n">lookup</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">codes</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">lookup</span><span class="p">}</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-exit_codes-add_exit_columns">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">add_exit_columns</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">source_col</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;Konec v legiích&#39;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Add harmonised exit-code columns to a legionnaire DataFrame.</p>
+<p>Adds the following columns:</p>
+<p><code>exit_codes</code>
+    frozenset of canonical code strings for each record.</p>
+<p><code>exit_&amp;lt;CODE&amp;gt;</code> (one per code in <code>CODES_CS</code>)
+    Boolean indicator, True if the code is present in <em>exit_codes</em>.</p>
+<p><code>deserted</code>
+    Shorthand for <code>exit_D</code>; the primary outcome variable.</p>
+<p><code>exit_date</code>
+    Date parsed from the text <strong>before</strong> the parenthesis, through the same machinery
+    as every other date (<code>utils.parsing.dates.parse_date</code>): range
+    1914-01-01 – 1939-12-31, the century-slip fix both ways, and month-year / year-only
+    fallbacks (<code>pd.NaT</code> if absent, unparseable or out of range).</p>
+<p><code>exit_date_precision</code>
+    <code>day</code> / <code>month</code> / <code>year</code> — how exact <code>exit_date</code> is; <code>&amp;lt;NA&amp;gt;</code> without a date.
+    Until v1.2.0 the exit date was the one date in the pipeline with <strong>no range check</strong>
+    (values ran from 1818 to 2192), and a year-only exit (<code>1920 ( Vrátil se do vlasti
+    )</code>, 3,930 records) got no date at all. Only the text before the parenthesis is
+    read, so the <code>1918</code> inside the label <em>Sloužil v čs. armádě po r. 1918</em> can never
+    become an exit year (audit 2026-09-22 §A8).</p>
+<h4>Parameters</h4>
+<dl>
+<dt><code>df</code></dt>
+<dd>Input DataFrame containing <em>source_col</em>.</dd>
+<dt><code>source_col</code></dt>
+<dd>Column name of the raw exit field.  Defaults to <code>"Konec v legiích"</code>.</dd>
+</dl>
+<h4>Returns</h4>
+<p>pd.DataFrame
+The original DataFrame with new columns appended (copy).</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code> <code>utils/tables/latex_tables.py</code></p>
+<details><summary>source · lines 248–301 (54 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">add_exit_columns</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">source_col</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Konec v legiích&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Add harmonised exit-code columns to a legionnaire DataFrame.</span>
+
+<span class="sd">    Adds the following columns:</span>
+
+<span class="sd">    ``exit_codes``</span>
+<span class="sd">        frozenset of canonical code strings for each record.</span>
+
+<span class="sd">    ``exit_&lt;CODE&gt;`` (one per code in :data:`CODES_CS`)</span>
+<span class="sd">        Boolean indicator, True if the code is present in *exit_codes*.</span>
+
+<span class="sd">    ``deserted``</span>
+<span class="sd">        Shorthand for ``exit_D``; the primary outcome variable.</span>
+
+<span class="sd">    ``exit_date``</span>
+<span class="sd">        Date parsed from the text **before** the parenthesis, through the same machinery</span>
+<span class="sd">        as every other date (:func:`utils.parsing.dates.parse_date`): range</span>
+<span class="sd">        1914-01-01 – 1939-12-31, the century-slip fix both ways, and month-year / year-only</span>
+<span class="sd">        fallbacks (``pd.NaT`` if absent, unparseable or out of range).</span>
+
+<span class="sd">    ``exit_date_precision``</span>
+<span class="sd">        ``day`` / ``month`` / ``year`` — how exact ``exit_date`` is; ``&lt;NA&gt;`` without a date.</span>
+<span class="sd">        Until v1.2.0 the exit date was the one date in the pipeline with **no range check**</span>
+<span class="sd">        (values ran from 1818 to 2192), and a year-only exit (``1920 ( Vrátil se do vlasti</span>
+<span class="sd">        )``, 3,930 records) got no date at all. Only the text before the parenthesis is</span>
+<span class="sd">        read, so the ``1918`` inside the label *Sloužil v čs. armádě po r. 1918* can never</span>
+<span class="sd">        become an exit year (audit 2026-09-22 §A8).</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    df:</span>
+<span class="sd">        Input DataFrame containing *source_col*.</span>
+<span class="sd">    source_col:</span>
+<span class="sd">        Column name of the raw exit field.  Defaults to ``&quot;Konec v legiích&quot;``.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    pd.DataFrame</span>
+<span class="sd">        The original DataFrame with new columns appended (copy).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;exit_codes&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">source_col</span><span class="p">]</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="n">parse_exit_codes</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">code</span> <span class="ow">in</span> <span class="n">CODES_CS</span><span class="p">:</span>
+        <span class="n">df</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;exit_</span><span class="si">{</span><span class="n">code</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;exit_codes&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="k">lambda</span> <span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="o">=</span><span class="n">code</span><span class="p">:</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">s</span><span class="p">)</span>
+
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;deserted&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;exit_D&quot;</span><span class="p">]</span>
+
+    <span class="n">parsed</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">source_col</span><span class="p">]</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="n">parse_exit_date</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;exit_date&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_datetime</span><span class="p">(</span><span class="n">parsed</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">t</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;exit_date_precision&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">parsed</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">t</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;string&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">df</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-exit_codes-parse_exit_date">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">parse_exit_date</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">Timestamp</span><span class="p">,</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">]</span></pre>
+<div class="fndoc"><p><code>(exit date, precision)</code> from the text before the parenthesis of one exit cell.</p></div>
+<p class="calls warn">No call site found in the notebooks or <code>utils/</code> — possibly superseded or reserved for interactive use.</p>
+<details><summary>source · lines 307–314 (8 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">parse_exit_date</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">Timestamp</span><span class="p">,</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``(exit date, precision)`` from the text before the parenthesis of one exit cell.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">raw</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="p">(</span><span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">raw</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">and</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">raw</span><span class="p">)):</span>
+        <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">NaT</span><span class="p">,</span> <span class="kc">None</span>
+    <span class="n">head</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;(&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="n">head</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;(?&lt;=\d)\s+(?=\d)&quot;</span><span class="p">,</span> <span class="s2">&quot;.&quot;</span><span class="p">,</span> <span class="n">head</span><span class="p">)</span>          <span class="c1"># &quot;1 1 1918&quot; -&gt; &quot;1.1.1918&quot;</span>
+    <span class="n">lo</span><span class="p">,</span> <span class="n">hi</span> <span class="o">=</span> <span class="n">EXIT_DATE_RANGE</span>
+    <span class="k">return</span> <span class="n">parse_date</span><span class="p">(</span><span class="n">head</span><span class="p">,</span> <span class="n">lo</span><span class="p">,</span> <span class="n">hi</span><span class="p">,</span> <span class="n">partial</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-exit_codes-exit_code_report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">exit_code_report</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span></pre>
+<div class="fndoc"><p>Print a frequency table of parsed exit codes to stdout.</p>
+<p>Requires that <code>add_exit_columns</code> has already been called on <em>df</em>.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code></p>
+<details><summary>source · lines 321–344 (24 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span>
+<span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span>
+<span class="normal">337</span>
+<span class="normal">338</span>
+<span class="normal">339</span>
+<span class="normal">340</span>
+<span class="normal">341</span>
+<span class="normal">342</span>
+<span class="normal">343</span>
+<span class="normal">344</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">exit_code_report</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Print a frequency table of parsed exit codes to stdout.</span>
+
+<span class="sd">    Requires that :func:`add_exit_columns` has already been called on *df*.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">Counter</span>
+
+    <span class="k">if</span> <span class="s2">&quot;exit_codes&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Run add_exit_columns(df) first.&quot;</span><span class="p">)</span>
+
+    <span class="n">counts</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">(</span><span class="n">code</span> <span class="k">for</span> <span class="n">codes</span> <span class="ow">in</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;exit_codes&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">code</span> <span class="ow">in</span> <span class="n">codes</span><span class="p">)</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Exit code report  (N = </span><span class="si">{</span><span class="n">n</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="s1">&#39;Code&#39;</span><span class="si">:</span><span class="s2">&lt;6</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="s1">&#39;Czech label&#39;</span><span class="si">:</span><span class="s2">&lt;45</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="s1">&#39;English label&#39;</span><span class="si">:</span><span class="s2">&lt;40</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="s1">&#39;n&#39;</span><span class="si">:</span><span class="s2">&gt;7</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="s1">&#39;%&#39;</span><span class="si">:</span><span class="s2">&gt;6</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  &quot;</span> <span class="o">+</span> <span class="s2">&quot;-&quot;</span> <span class="o">*</span> <span class="mi">114</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">code</span> <span class="ow">in</span> <span class="n">CODES_CS</span><span class="p">:</span>
+        <span class="n">cs</span> <span class="o">=</span> <span class="n">CODES_CS</span><span class="p">[</span><span class="n">code</span><span class="p">]</span>
+        <span class="n">en</span> <span class="o">=</span> <span class="n">CODES_EN</span><span class="p">[</span><span class="n">code</span><span class="p">]</span>
+        <span class="n">c</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">code</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">code</span><span class="si">:</span><span class="s2">&lt;6</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">cs</span><span class="si">:</span><span class="s2">&lt;45</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">en</span><span class="si">:</span><span class="s2">&lt;40</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">c</span><span class="si">:</span><span class="s2">&gt;7,</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">c</span><span class="o">/</span><span class="n">n</span><span class="o">*</span><span class="mi">100</span><span class="si">:</span><span class="s2">&gt;5.2f</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+
+    <span class="n">n_empty</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="mi">1</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;exit_codes&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  </span><span class="si">{</span><span class="s1">&#39;—&#39;</span><span class="si">:</span><span class="s2">&lt;6</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="s1">&#39;No code parsed&#39;</span><span class="si">:</span><span class="s2">&lt;45</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="s1">&#39;&#39;</span><span class="si">:</span><span class="s2">&lt;40</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">n_empty</span><span class="si">:</span><span class="s2">&gt;7,</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">n_empty</span><span class="o">/</span><span class="n">n</span><span class="o">*</span><span class="mi">100</span><span class="si">:</span><span class="s2">&gt;5.2f</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-parsing-exit_codes-CODES_CS"><pre class="sig">CODES_CS<span class="kind">dict · 11 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;B&#39;</span><span class="p">:</span> <span class="s1">&#39;Padl v boji&#39;</span><span class="p">,</span> <span class="s1">&#39;ČSA&#39;</span><span class="p">:</span> <span class="s1">&#39;Sloužil v čs. armádě po r. 1918&#39;</span><span class="p">,</span> <span class="s1">&#39;D&#39;</span><span class="p">:</span> <span class="s1">&#39;Dezertoval&#39;</span><span class="p">,</span> <span class="s1">&#39;DM&#39;</span><span class="p">:</span> <span class="s1">&#39;Demobilizován&#39;</span><span class="p">,</span> <span class="s1">&#39;N&#39;</span><span class="p">:</span> <span class="s1">&#39;Nezvěstný&#39;</span><span class="p">,</span> <span class="s1">&#39;NS&#39;</span><span class="p">:</span> <span class="s1">&#39;Neschopen služby&#39;</span><span class="p">,</span> <span class="s1">&#39;P&#39;</span><span class="p">:</span> <span class="s1">&#39;Popraven&#39;</span><span class="p">,</span> <span class="s1">&#39;S&#39;</span><span class="p">:</span> <span class="s1">&#39;Zemřel&#39;</span><span class="p">,</span> <span class="s1">&#39;V&#39;</span><span class="p">:</span> <span class="s1">&#39;Vrátil se do vlasti&#39;</span><span class="p">,</span> <span class="s1">&#39;X&#39;</span><span class="p">:</span> <span class="s1">&#39;Viz poznámku&#39;</span><span class="p">,</span> <span class="s1">&#39;Z&#39;</span><span class="p">:</span> <span class="s1">&#39;Zemřel na následky zranění&#39;</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-parsing-exit_codes-CODES_EN"><pre class="sig">CODES_EN<span class="kind">dict · 11 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;B&#39;</span><span class="p">:</span> <span class="s1">&#39;Killed in action&#39;</span><span class="p">,</span> <span class="s1">&#39;ČSA&#39;</span><span class="p">:</span> <span class="s1">&#39;Served in post-1918 Czechoslovak army&#39;</span><span class="p">,</span> <span class="s1">&#39;D&#39;</span><span class="p">:</span> <span class="s1">&#39;Deserted&#39;</span><span class="p">,</span> <span class="s1">&#39;DM&#39;</span><span class="p">:</span> <span class="s1">&#39;Demobilised&#39;</span><span class="p">,</span> <span class="s1">&#39;N&#39;</span><span class="p">:</span> <span class="s1">&#39;Missing&#39;</span><span class="p">,</span> <span class="s1">&#39;NS&#39;</span><span class="p">:</span> <span class="s1">&#39;Unfit for service&#39;</span><span class="p">,</span> <span class="s1">&#39;P&#39;</span><span class="p">:</span> <span class="s1">&#39;Executed&#39;</span><span class="p">,</span> <span class="s1">&#39;S&#39;</span><span class="p">:</span> <span class="s1">&#39;Died&#39;</span><span class="p">,</span> <span class="s1">&#39;V&#39;</span><span class="p">:</span> <span class="s1">&#39;Returned home&#39;</span><span class="p">,</span> <span class="s1">&#39;X&#39;</span><span class="p">:</span> <span class="s1">&#39;See note&#39;</span><span class="p">,</span> <span class="s1">&#39;Z&#39;</span><span class="p">:</span> <span class="s1">&#39;Died of wounds&#39;</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-parsing-exit_codes-EXIT_DATE_RANGE"><pre class="sig">EXIT_DATE_RANGE<span class="kind">tuple · 2 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">Timestamp</span><span class="p">(</span><span class="s1">&#39;1914-01-01&#39;</span><span class="p">),</span> <span class="n">pd</span><span class="o">.</span><span class="n">Timestamp</span><span class="p">(</span><span class="s1">&#39;1939-12-31&#39;</span><span class="p">))</span>
+</pre></div>
+</details></div>
+<h2>Used by</h2><p><code>02_data_cleaning.ipynb</code> <code>03_visualisation.ipynb</code> <code>utils/docs/build_docs.py</code> <code>utils/parsing/schema.py</code> <code>utils/tables/latex_tables.py</code> <code>utils/validation/data_checks.py</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/parsing/exit_codes.py · 344 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span>
+<span class="normal">320</span>
+<span class="normal">321</span>
+<span class="normal">322</span>
+<span class="normal">323</span>
+<span class="normal">324</span>
+<span class="normal">325</span>
+<span class="normal">326</span>
+<span class="normal">327</span>
+<span class="normal">328</span>
+<span class="normal">329</span>
+<span class="normal">330</span>
+<span class="normal">331</span>
+<span class="normal">332</span>
+<span class="normal">333</span>
+<span class="normal">334</span>
+<span class="normal">335</span>
+<span class="normal">336</span>
+<span class="normal">337</span>
+<span class="normal">338</span>
+<span class="normal">339</span>
+<span class="normal">340</span>
+<span class="normal">341</span>
+<span class="normal">342</span>
+<span class="normal">343</span>
+<span class="normal">344</span></pre></div></td><td class="code"><div><pre><span></span><span class="ch">#!/usr/bin/env python3</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Exit code harmonisation for the &#39;Konec v legiích&#39; field.</span>
+
+<span class="sd">The field encodes the reason(s) a soldier left the Legions.  In the raw data it</span>
+<span class="sd">takes the form  &quot;DD.MM.YYYY ( CODE )&quot;  where CODE is one or more single- or</span>
+<span class="sd">multi-letter tokens from the codebook below, optionally separated by commas,</span>
+<span class="sd">spaces, or slashes.  Some records substitute full Czech words for the letter</span>
+<span class="sd">codes.  A minority of records omit the date and contain only the code, or</span>
+<span class="sd">contain only the date with no code.</span>
+
+<span class="sd">Codebook (source: csol.cz / VÚA-VHA Praha)</span>
+<span class="sd">-------------------------------------------</span>
+<span class="sd">B    Padl v boji                               Killed in action</span>
+<span class="sd">ČSA  Sloužil v čs. armádě po r. 1918          Served in post-1918 Czechoslovak army</span>
+<span class="sd">D    Dezertoval                                Deserted</span>
+<span class="sd">DM   Demobilizován                             Demobilised</span>
+<span class="sd">N    Nezvěstný                                 Missing</span>
+<span class="sd">NS   Neschopen služby                          Unfit for service</span>
+<span class="sd">P    Popraven                                  Executed</span>
+<span class="sd">S    Zemřel                                    Died</span>
+<span class="sd">V    Vrátil se do vlasti                       Returned home</span>
+<span class="sd">X    Viz poznámku                              See note</span>
+<span class="sd">Z    Zemřel na následky zranění               Died of wounds</span>
+
+<span class="sd">Source type codes (archival material identifiers, not exit codes):</span>
+<span class="sd">Is   Legionářský poslužný spis</span>
+<span class="sd">k    Osobní karta legionáře</span>
+<span class="sd">o    Osvědčení o vykonané legionářské službě</span>
+
+<span class="sd">Usage</span>
+<span class="sd">-----</span>
+<span class="sd">    &gt;&gt;&gt; from utils.parsing.exit_codes import parse_exit_codes, add_exit_columns</span>
+<span class="sd">    &gt;&gt;&gt; codes = parse_exit_codes(&quot;30.12.1920 ( Demobilizován )&quot;)</span>
+<span class="sd">    &gt;&gt;&gt; codes</span>
+<span class="sd">    {&#39;DM&#39;}</span>
+<span class="sd">    &gt;&gt;&gt; codes = parse_exit_codes(&quot;1.1.1918 ( DM,D X )&quot;)</span>
+<span class="sd">    &gt;&gt;&gt; codes</span>
+<span class="sd">    {&#39;DM&#39;, &#39;D&#39;, &#39;X&#39;}</span>
+
+<span class="sd">    &gt;&gt;&gt; import pandas as pd</span>
+<span class="sd">    &gt;&gt;&gt; df = pd.read_csv(&quot;data/raw/legionnaires/legionnaires.csv&quot;, low_memory=False)</span>
+<span class="sd">    &gt;&gt;&gt; df = add_exit_columns(df)</span>
+
+<span class="sd">Author: Tomáš Haufer</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections.abc</span><span class="w"> </span><span class="kn">import</span> <span class="n">Iterable</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing.dates</span><span class="w"> </span><span class="kn">import</span> <span class="n">parse_date</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.2.0&quot;</span>   <span class="c1"># exit date: range-checked, pre-parenthesis, partial dates (audit 2026-09-22)</span>
+
+<span class="c1"># ---------------------------------------------------------------------------</span>
+<span class="c1"># Codebook</span>
+<span class="c1"># ---------------------------------------------------------------------------</span>
+
+<span class="c1">#: Canonical codes → Czech label</span>
+<span class="n">CODES_CS</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;B&quot;</span><span class="p">:</span>   <span class="s2">&quot;Padl v boji&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;ČSA&quot;</span><span class="p">:</span> <span class="s2">&quot;Sloužil v čs. armádě po r. 1918&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;D&quot;</span><span class="p">:</span>   <span class="s2">&quot;Dezertoval&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;DM&quot;</span><span class="p">:</span>  <span class="s2">&quot;Demobilizován&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;N&quot;</span><span class="p">:</span>   <span class="s2">&quot;Nezvěstný&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;NS&quot;</span><span class="p">:</span>  <span class="s2">&quot;Neschopen služby&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;P&quot;</span><span class="p">:</span>   <span class="s2">&quot;Popraven&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;S&quot;</span><span class="p">:</span>   <span class="s2">&quot;Zemřel&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;V&quot;</span><span class="p">:</span>   <span class="s2">&quot;Vrátil se do vlasti&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;X&quot;</span><span class="p">:</span>   <span class="s2">&quot;Viz poznámku&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Z&quot;</span><span class="p">:</span>   <span class="s2">&quot;Zemřel na následky zranění&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="c1">#: Canonical codes → English label</span>
+<span class="n">CODES_EN</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;B&quot;</span><span class="p">:</span>   <span class="s2">&quot;Killed in action&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;ČSA&quot;</span><span class="p">:</span> <span class="s2">&quot;Served in post-1918 Czechoslovak army&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;D&quot;</span><span class="p">:</span>   <span class="s2">&quot;Deserted&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;DM&quot;</span><span class="p">:</span>  <span class="s2">&quot;Demobilised&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;N&quot;</span><span class="p">:</span>   <span class="s2">&quot;Missing&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;NS&quot;</span><span class="p">:</span>  <span class="s2">&quot;Unfit for service&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;P&quot;</span><span class="p">:</span>   <span class="s2">&quot;Executed&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;S&quot;</span><span class="p">:</span>   <span class="s2">&quot;Died&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;V&quot;</span><span class="p">:</span>   <span class="s2">&quot;Returned home&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;X&quot;</span><span class="p">:</span>   <span class="s2">&quot;See note&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Z&quot;</span><span class="p">:</span>   <span class="s2">&quot;Died of wounds&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="c1"># Full Czech words that appear verbatim in the raw field instead of letter codes.</span>
+<span class="c1"># Replaced before tokenisation.</span>
+<span class="n">_WORD_TO_CODE</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;Demobilizován&quot;</span><span class="p">:</span>                    <span class="s2">&quot;DM&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Dezertoval&quot;</span><span class="p">:</span>                       <span class="s2">&quot;D&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Neschopen služby&quot;</span><span class="p">:</span>                 <span class="s2">&quot;NS&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Nezvěstný&quot;</span><span class="p">:</span>                        <span class="s2">&quot;N&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Padl v boji&quot;</span><span class="p">:</span>                      <span class="s2">&quot;B&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Popraven&quot;</span><span class="p">:</span>                         <span class="s2">&quot;P&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Sloužil v čs. armádě po r. 1918&quot;</span><span class="p">:</span>  <span class="s2">&quot;ČSA&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Viz poznámku&quot;</span><span class="p">:</span>                     <span class="s2">&quot;X&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Vrátil se do vlasti&quot;</span><span class="p">:</span>              <span class="s2">&quot;V&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Zemřel na následky zranění&quot;</span><span class="p">:</span>       <span class="s2">&quot;Z&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Zemřel&quot;</span><span class="p">:</span>                           <span class="s2">&quot;S&quot;</span><span class="p">,</span>   <span class="c1"># must come after the longer variant</span>
+<span class="p">}</span>
+
+<span class="c1"># Whole tokens observed in the raw data that are archival identifiers, annotations,</span>
+<span class="c1"># or unresolvable code-like strings — struck from the token stream BEFORE code</span>
+<span class="c1"># extraction, so their letters can never fabricate codes (&quot;MD&quot; must not yield D).</span>
+<span class="c1">#</span>
+<span class="c1">#   IS / K / O   source type codes (Is = poslužný spis, k = osobní karta, o = osvědčení)</span>
+<span class="c1">#   C            isolated C — likely OCR artefact</span>
+<span class="c1">#   LF / LI / LR unidentified archival markers</span>
+<span class="c1">#   M            unidentified</span>
+<span class="c1">#   MD / DMD     ambiguous (DM transposed/doubled, or DM+D?) — 2 records, refused rather</span>
+<span class="c1">#                than guessed: legion_id 113629 (&quot;14.8.1920 ( MD )&quot;, Russia) and</span>
+<span class="c1">#                18666 (&quot;19.7.1919 ( DMD )&quot;, France); both plausibly DM but not certain</span>
+<span class="c1">#   SUPER / PROP annotation fragments</span>
+<span class="n">_DROP_TOKENS</span><span class="p">:</span> <span class="nb">frozenset</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">({</span>
+    <span class="s2">&quot;IS&quot;</span><span class="p">,</span> <span class="s2">&quot;K&quot;</span><span class="p">,</span> <span class="s2">&quot;O&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;C&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;LF&quot;</span><span class="p">,</span> <span class="s2">&quot;LI&quot;</span><span class="p">,</span> <span class="s2">&quot;LR&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;M&quot;</span><span class="p">,</span> <span class="s2">&quot;MD&quot;</span><span class="p">,</span> <span class="s2">&quot;DMD&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;SUPER&quot;</span><span class="p">,</span> <span class="s2">&quot;PROP&quot;</span><span class="p">,</span>
+<span class="p">})</span>
+
+<span class="c1"># Whole-token substitutions applied before extraction (variant → canonical spelling).</span>
+<span class="n">_TOKEN_SUBS</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;X2&quot;</span><span class="p">:</span> <span class="s2">&quot;X&quot;</span><span class="p">,</span>               <span class="c1"># variant note marker → see-note</span>
+    <span class="s2">&quot;DMM&quot;</span><span class="p">:</span> <span class="s2">&quot;DM&quot;</span><span class="p">,</span>             <span class="c1"># DM with a glued M archival marker (1 row)</span>
+    <span class="s2">&quot;DMCSA&quot;</span><span class="p">:</span> <span class="s2">&quot;DMČSA&quot;</span><span class="p">,</span>        <span class="c1"># DM+ČSA glued, diacritics dropped (1 row) → parses as DM, ČSA</span>
+<span class="p">}</span>
+
+<span class="c1"># Pre-compiled pattern that strips leading date fragments  &quot;DD.MM.YYYY&quot; or</span>
+<span class="c1"># partial dates so they do not pollute the token stream.</span>
+<span class="n">_DATE_RE</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;^\s*[\d\s.]*&quot;</span><span class="p">)</span>
+
+
+<span class="c1"># ---------------------------------------------------------------------------</span>
+<span class="c1"># Core parsing logic</span>
+<span class="c1"># ---------------------------------------------------------------------------</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">parse_exit_codes</span><span class="p">(</span><span class="n">raw</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">frozenset</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Parse a raw *Konec v legiích* string into a frozenset of canonical codes.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    raw:</span>
+<span class="sd">        A single cell value from the *Konec v legiích* column.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    frozenset[str]</span>
+<span class="sd">        Zero or more codes from :data:`CODES_CS`.  Empty if the input is NaN,</span>
+<span class="sd">        blank, or contains only unrecognised tokens.</span>
+
+<span class="sd">    Examples</span>
+<span class="sd">    --------</span>
+<span class="sd">    &gt;&gt;&gt; parse_exit_codes(&quot;30.12.1920 ( Demobilizován )&quot;)</span>
+<span class="sd">    frozenset({&#39;DM&#39;})</span>
+<span class="sd">    &gt;&gt;&gt; parse_exit_codes(&quot;1.1.1918 ( DM,D X )&quot;)</span>
+<span class="sd">    frozenset({&#39;D&#39;, &#39;DM&#39;, &#39;X&#39;})</span>
+<span class="sd">    &gt;&gt;&gt; parse_exit_codes(float(&quot;nan&quot;))</span>
+<span class="sd">    frozenset()</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Guard EVERY missing scalar — including pd.NA, which clean.normalize_missing</span>
+    <span class="c1"># substitutes for placeholders. The old float-only guard let pd.NA through as</span>
+    <span class="c1"># the string &quot;&lt;NA&gt;&quot;, whose letter N was scanned into a fabricated &quot;Missing&quot;</span>
+    <span class="c1"># exit code on every empty cell (26,386 rows in the 2026-07 build).</span>
+    <span class="k">if</span> <span class="n">raw</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="p">(</span><span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">raw</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">and</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">raw</span><span class="p">)):</span>
+        <span class="k">return</span> <span class="nb">frozenset</span><span class="p">()</span>
+
+    <span class="n">token</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+
+    <span class="c1"># Extract parenthetical content when present; otherwise work with the</span>
+    <span class="c1"># full string (some records omit the date wrapper entirely).</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\(([^)]+)\)&quot;</span><span class="p">,</span> <span class="n">token</span><span class="p">)</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="k">if</span> <span class="n">m</span> <span class="k">else</span> <span class="n">token</span>
+
+    <span class="c1"># Substitute full Czech words before any further processing</span>
+    <span class="k">for</span> <span class="n">word</span><span class="p">,</span> <span class="n">code</span> <span class="ow">in</span> <span class="n">_WORD_TO_CODE</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">token</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="n">word</span><span class="p">,</span> <span class="n">code</span><span class="p">)</span>
+
+    <span class="c1"># Normalise to uppercase; collapse separators and whitespace</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">token</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;[,./\-]+&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">token</span><span class="p">)</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\s+&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">token</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+
+    <span class="c1"># Strip leading date fragments that survived the substitutions</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">_DATE_RE</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">token</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+
+    <span class="c1"># Token-wise extraction. Each whitespace token is first checked against the</span>
+    <span class="c1"># drop list (archival markers — struck whole, so &quot;MD&quot; can never yield D),</span>
+    <span class="c1"># then must parse COMPLETELY as a sequence of codes (greedy, ČSA (3) before</span>
+    <span class="c1"># DM/NS (2) before single letters). A token with unparseable residue is</span>
+    <span class="c1"># skipped entirely — partial reads fabricated codes from unknown strings</span>
+    <span class="c1"># (&quot;SUPER&quot; → S, &quot;PROP&quot; → P), so no partial extraction is allowed.</span>
+    <span class="n">found</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">tok</span> <span class="ow">in</span> <span class="n">token</span><span class="o">.</span><span class="n">split</span><span class="p">():</span>
+        <span class="n">tok</span> <span class="o">=</span> <span class="n">_TOKEN_SUBS</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">tok</span><span class="p">,</span> <span class="n">tok</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;?&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>   <span class="c1"># &quot;D?&quot;, &quot;DM?V&quot; = uncertain — keep codes</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">tok</span> <span class="ow">or</span> <span class="n">tok</span> <span class="ow">in</span> <span class="n">_DROP_TOKENS</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">tok</span><span class="o">.</span><span class="n">isalpha</span><span class="p">():</span>
+            <span class="k">continue</span>
+        <span class="n">codes</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+        <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">while</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">tok</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">length</span> <span class="ow">in</span> <span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">):</span>
+                <span class="n">candidate</span> <span class="o">=</span> <span class="n">tok</span><span class="p">[</span><span class="n">i</span> <span class="p">:</span> <span class="n">i</span> <span class="o">+</span> <span class="n">length</span><span class="p">]</span>
+                <span class="k">if</span> <span class="n">candidate</span> <span class="ow">in</span> <span class="n">CODES_CS</span><span class="p">:</span>
+                    <span class="n">codes</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">candidate</span><span class="p">)</span>
+                    <span class="n">i</span> <span class="o">+=</span> <span class="nb">len</span><span class="p">(</span><span class="n">candidate</span><span class="p">)</span>
+                    <span class="k">break</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">codes</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>        <span class="c1"># unparseable residue → reject the whole token</span>
+                <span class="k">break</span>
+        <span class="n">found</span> <span class="o">|=</span> <span class="n">codes</span>
+
+    <span class="k">return</span> <span class="nb">frozenset</span><span class="p">(</span><span class="n">found</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">label_exit_codes</span><span class="p">(</span>
+    <span class="n">codes</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+    <span class="n">lang</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;cs&quot;</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Map a collection of parsed codes to their human-readable labels.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    codes:</span>
+<span class="sd">        An iterable of canonical code strings (e.g. from :func:`parse_exit_codes`).</span>
+<span class="sd">    lang:</span>
+<span class="sd">        ``&quot;cs&quot;`` for Czech labels (default), ``&quot;en&quot;`` for English.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    dict[str, str]</span>
+<span class="sd">        Mapping of code → label for each recognised code.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">lookup</span> <span class="o">=</span> <span class="n">CODES_CS</span> <span class="k">if</span> <span class="n">lang</span> <span class="o">==</span> <span class="s2">&quot;cs&quot;</span> <span class="k">else</span> <span class="n">CODES_EN</span>
+    <span class="k">return</span> <span class="p">{</span><span class="n">c</span><span class="p">:</span> <span class="n">lookup</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">codes</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">lookup</span><span class="p">}</span>
+
+
+<span class="c1"># ---------------------------------------------------------------------------</span>
+<span class="c1"># DataFrame helper</span>
+<span class="c1"># ---------------------------------------------------------------------------</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">add_exit_columns</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">source_col</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Konec v legiích&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Add harmonised exit-code columns to a legionnaire DataFrame.</span>
+
+<span class="sd">    Adds the following columns:</span>
+
+<span class="sd">    ``exit_codes``</span>
+<span class="sd">        frozenset of canonical code strings for each record.</span>
+
+<span class="sd">    ``exit_&lt;CODE&gt;`` (one per code in :data:`CODES_CS`)</span>
+<span class="sd">        Boolean indicator, True if the code is present in *exit_codes*.</span>
+
+<span class="sd">    ``deserted``</span>
+<span class="sd">        Shorthand for ``exit_D``; the primary outcome variable.</span>
+
+<span class="sd">    ``exit_date``</span>
+<span class="sd">        Date parsed from the text **before** the parenthesis, through the same machinery</span>
+<span class="sd">        as every other date (:func:`utils.parsing.dates.parse_date`): range</span>
+<span class="sd">        1914-01-01 – 1939-12-31, the century-slip fix both ways, and month-year / year-only</span>
+<span class="sd">        fallbacks (``pd.NaT`` if absent, unparseable or out of range).</span>
+
+<span class="sd">    ``exit_date_precision``</span>
+<span class="sd">        ``day`` / ``month`` / ``year`` — how exact ``exit_date`` is; ``&lt;NA&gt;`` without a date.</span>
+<span class="sd">        Until v1.2.0 the exit date was the one date in the pipeline with **no range check**</span>
+<span class="sd">        (values ran from 1818 to 2192), and a year-only exit (``1920 ( Vrátil se do vlasti</span>
+<span class="sd">        )``, 3,930 records) got no date at all. Only the text before the parenthesis is</span>
+<span class="sd">        read, so the ``1918`` inside the label *Sloužil v čs. armádě po r. 1918* can never</span>
+<span class="sd">        become an exit year (audit 2026-09-22 §A8).</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    df:</span>
+<span class="sd">        Input DataFrame containing *source_col*.</span>
+<span class="sd">    source_col:</span>
+<span class="sd">        Column name of the raw exit field.  Defaults to ``&quot;Konec v legiích&quot;``.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    pd.DataFrame</span>
+<span class="sd">        The original DataFrame with new columns appended (copy).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;exit_codes&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">source_col</span><span class="p">]</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="n">parse_exit_codes</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">code</span> <span class="ow">in</span> <span class="n">CODES_CS</span><span class="p">:</span>
+        <span class="n">df</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;exit_</span><span class="si">{</span><span class="n">code</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;exit_codes&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="k">lambda</span> <span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="o">=</span><span class="n">code</span><span class="p">:</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">s</span><span class="p">)</span>
+
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;deserted&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;exit_D&quot;</span><span class="p">]</span>
+
+    <span class="n">parsed</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">source_col</span><span class="p">]</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="n">parse_exit_date</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;exit_date&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_datetime</span><span class="p">(</span><span class="n">parsed</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">t</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;exit_date_precision&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">parsed</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">t</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;string&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">df</span>
+
+
+<span class="n">EXIT_DATE_RANGE</span> <span class="o">=</span> <span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">Timestamp</span><span class="p">(</span><span class="s2">&quot;1914-01-01&quot;</span><span class="p">),</span> <span class="n">pd</span><span class="o">.</span><span class="n">Timestamp</span><span class="p">(</span><span class="s2">&quot;1939-12-31&quot;</span><span class="p">))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">parse_exit_date</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">Timestamp</span><span class="p">,</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``(exit date, precision)`` from the text before the parenthesis of one exit cell.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">raw</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="p">(</span><span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">raw</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">and</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">raw</span><span class="p">)):</span>
+        <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">NaT</span><span class="p">,</span> <span class="kc">None</span>
+    <span class="n">head</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;(&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="n">head</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;(?&lt;=\d)\s+(?=\d)&quot;</span><span class="p">,</span> <span class="s2">&quot;.&quot;</span><span class="p">,</span> <span class="n">head</span><span class="p">)</span>          <span class="c1"># &quot;1 1 1918&quot; -&gt; &quot;1.1.1918&quot;</span>
+    <span class="n">lo</span><span class="p">,</span> <span class="n">hi</span> <span class="o">=</span> <span class="n">EXIT_DATE_RANGE</span>
+    <span class="k">return</span> <span class="n">parse_date</span><span class="p">(</span><span class="n">head</span><span class="p">,</span> <span class="n">lo</span><span class="p">,</span> <span class="n">hi</span><span class="p">,</span> <span class="n">partial</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+
+<span class="c1"># ---------------------------------------------------------------------------</span>
+<span class="c1"># Diagnostics</span>
+<span class="c1"># ---------------------------------------------------------------------------</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">exit_code_report</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Print a frequency table of parsed exit codes to stdout.</span>
+
+<span class="sd">    Requires that :func:`add_exit_columns` has already been called on *df*.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">Counter</span>
+
+    <span class="k">if</span> <span class="s2">&quot;exit_codes&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Run add_exit_columns(df) first.&quot;</span><span class="p">)</span>
+
+    <span class="n">counts</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">(</span><span class="n">code</span> <span class="k">for</span> <span class="n">codes</span> <span class="ow">in</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;exit_codes&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">code</span> <span class="ow">in</span> <span class="n">codes</span><span class="p">)</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Exit code report  (N = </span><span class="si">{</span><span class="n">n</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="s1">&#39;Code&#39;</span><span class="si">:</span><span class="s2">&lt;6</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="s1">&#39;Czech label&#39;</span><span class="si">:</span><span class="s2">&lt;45</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="s1">&#39;English label&#39;</span><span class="si">:</span><span class="s2">&lt;40</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="s1">&#39;n&#39;</span><span class="si">:</span><span class="s2">&gt;7</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="s1">&#39;%&#39;</span><span class="si">:</span><span class="s2">&gt;6</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  &quot;</span> <span class="o">+</span> <span class="s2">&quot;-&quot;</span> <span class="o">*</span> <span class="mi">114</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">code</span> <span class="ow">in</span> <span class="n">CODES_CS</span><span class="p">:</span>
+        <span class="n">cs</span> <span class="o">=</span> <span class="n">CODES_CS</span><span class="p">[</span><span class="n">code</span><span class="p">]</span>
+        <span class="n">en</span> <span class="o">=</span> <span class="n">CODES_EN</span><span class="p">[</span><span class="n">code</span><span class="p">]</span>
+        <span class="n">c</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">code</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">code</span><span class="si">:</span><span class="s2">&lt;6</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">cs</span><span class="si">:</span><span class="s2">&lt;45</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">en</span><span class="si">:</span><span class="s2">&lt;40</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">c</span><span class="si">:</span><span class="s2">&gt;7,</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">c</span><span class="o">/</span><span class="n">n</span><span class="o">*</span><span class="mi">100</span><span class="si">:</span><span class="s2">&gt;5.2f</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+
+    <span class="n">n_empty</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="mi">1</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;exit_codes&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  </span><span class="si">{</span><span class="s1">&#39;—&#39;</span><span class="si">:</span><span class="s2">&lt;6</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="s1">&#39;No code parsed&#39;</span><span class="si">:</span><span class="s2">&lt;45</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="s1">&#39;&#39;</span><span class="si">:</span><span class="s2">&lt;40</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">n_empty</span><span class="si">:</span><span class="s2">&gt;7,</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">n_empty</span><span class="o">/</span><span class="n">n</span><span class="o">*</span><span class="mi">100</span><span class="si">:</span><span class="s2">&gt;5.2f</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>

@@ -1,0 +1,1147 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Fetches Czech settlements (obec Q5153359 + část obce Q15978299) with <strong>coordinates</strong>, Czech +
+German labels, and their <strong>modern okres</strong> (P131) from the <a class="cite" data-ref="wikidata" href="#references" onclick="return bibGo(event)">Wikidata</a> Query Service, then attaches
+lat/lon/QID to the <code>utils.parsing.lexikon</code> settlement crosswalk and to individual birth
+records. Enables point-level mapping and Kelly-2019 spatial standard errors.</p><p class="tldr-facts"><b>Geography &amp; census</b> · v1.4.0 · 319 lines · 6 public functions · used by <code>02_data_cleaning.ipynb</code> · <code>utils/parsing/wikidata.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-parsing-wikidata-fetch_cz_settlements">fetch_cz_settlements</a><a class="chip" href="#fn-utils-parsing-wikidata-add_settlement_coords">add_settlement_coords</a><a class="chip" href="#fn-utils-parsing-wikidata-add_settlement_de_name">add_settlement_de_name</a><a class="chip" href="#fn-utils-parsing-wikidata-add_birth_coords">add_birth_coords</a><a class="chip" href="#fn-utils-parsing-wikidata-okres_centroids">okres_centroids</a><a class="chip" href="#fn-utils-parsing-wikidata-wikidata_report">wikidata_report</a></div>
+<h2>How it works</h2><p>The SPARQL result is <strong>cached to disk</strong> (<code>data/raw/wikidata/…</code>) so the pipeline is reproducible
+without re-querying every run; delete the cache (or pass <code>refresh=True</code>) to re-fetch.</p>
+<h4>Matching</h4>
+<p><a class="cite" data-ref="wikidata" href="#references" onclick="return bibGo(event)">Wikidata</a> is queried CZ-only (the class instances are Czech settlements), so the cross-empire
+German-name collision (<code>Trautenau → Trutnowo</code>) cannot occur here. Homonyms are disambiguated by
+<strong>modern okres</strong>: the lexikon <code>okres_all</code> timeline ends at the present-day okres, matched to
+<a class="cite" data-ref="wikidata" href="#references" onclick="return bibGo(event)">Wikidata</a>'s P131 okres. Records are disambiguated by their already-resolved <code>birth_okres_id</code>
+(exact), falling back to a unique-name match.</p>
+<p>Coverage note: <a class="cite" data-ref="wikidata" href="#references" onclick="return bibGo(event)">Wikidata</a> carries coordinates for ~6.3k current municipalities (+~0.6k parts), so
+settlement coverage of the ~18k historical lexikon entries is ~40%, and birth-coordinate coverage
+is ~40–50% of records (births cluster in municipalities). Okres-level analysis does not need these.</p>
+<h4>Usage</h4>
+<pre><code>from utils.parsing import wikidata as wd
+points = wd.fetch_cz_settlements(CACHE)              # SPARQL (or load cache)
+settlements = wd.add_settlement_coords(settlements, points)
+legion = wd.add_birth_coords(legion, settlements)
+</code></pre>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-parsing-wikidata-fetch_cz_settlements">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">fetch_cz_settlements</span><span class="p">(</span><span class="n">cache_path</span><span class="p">,</span> <span class="n">refresh</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Return <a class="cite" data-ref="wikidata" href="#references" onclick="return bibGo(event)">Wikidata</a> Czech settlements (<code>qid, cs, de, lat, lon, okres_modern, wd_class</code>).</p>
+<p>Loads <em>cache_path</em> if present (unless <code>refresh</code>); otherwise queries the <a class="cite" data-ref="wikidata" href="#references" onclick="return bibGo(event)">Wikidata</a> Query
+Service per class, keeps only rows whose P131 is an <code>okres …</code> (drops the ORP duplicates),
+dedupes per QID, and writes the cache.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code></p>
+<details><summary>source · lines 98–132 (35 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">fetch_cz_settlements</span><span class="p">(</span><span class="n">cache_path</span><span class="p">,</span> <span class="n">refresh</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return Wikidata Czech settlements (``qid, cs, de, lat, lon, okres_modern, wd_class``).</span>
+
+<span class="sd">    Loads *cache_path* if present (unless ``refresh``); otherwise queries the Wikidata Query</span>
+<span class="sd">    Service per class, keeps only rows whose P131 is an ``okres …`` (drops the ORP duplicates),</span>
+<span class="sd">    dedupes per QID, and writes the cache.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">cache_path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">cache_path</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">cache_path</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">refresh</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">cache_path</span><span class="p">)</span>
+
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">class_qid</span><span class="p">,</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">_CLASSES</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">for</span> <span class="n">_try</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">3</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">bindings</span> <span class="o">=</span> <span class="n">_query_class</span><span class="p">(</span><span class="n">class_qid</span><span class="p">)</span>
+                <span class="k">break</span>
+            <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>                       <span class="c1"># noqa: BLE001 — transient WDQS timeout</span>
+                <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">5</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">bindings</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">bindings</span><span class="p">:</span>
+            <span class="n">okres</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;okresLabel&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;value&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">okres</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;okres &quot;</span><span class="p">):</span>      <span class="c1"># keep the okres P131, drop ORP / others</span>
+                <span class="k">continue</span>
+            <span class="n">lat</span><span class="p">,</span> <span class="n">lon</span> <span class="o">=</span> <span class="n">_wkt_lonlat</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="s2">&quot;coord&quot;</span><span class="p">][</span><span class="s2">&quot;value&quot;</span><span class="p">])</span>
+            <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;qid&quot;</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="s2">&quot;item&quot;</span><span class="p">][</span><span class="s2">&quot;value&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">rsplit</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span>
+                         <span class="s2">&quot;cs&quot;</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="s2">&quot;csLabel&quot;</span><span class="p">][</span><span class="s2">&quot;value&quot;</span><span class="p">],</span>
+                         <span class="s2">&quot;de&quot;</span><span class="p">:</span> <span class="n">x</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;de&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;value&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span>
+                         <span class="s2">&quot;lat&quot;</span><span class="p">:</span> <span class="n">lat</span><span class="p">,</span> <span class="s2">&quot;lon&quot;</span><span class="p">:</span> <span class="n">lon</span><span class="p">,</span>
+                         <span class="s2">&quot;okres_modern&quot;</span><span class="p">:</span> <span class="n">okres</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="s2">&quot;okres &quot;</span><span class="p">):],</span> <span class="s2">&quot;wd_class&quot;</span><span class="p">:</span> <span class="n">tag</span><span class="p">})</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;qid&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">cache_path</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">out</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">cache_path</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-wikidata-add_settlement_coords">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">add_settlement_coords</span><span class="p">(</span><span class="n">settlements</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">points</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Attach <code>wd_qid</code> / <code>lat</code> / <code>lon</code> to the lexikon settlement crosswalk.</p>
+<p>Match on Czech name, then <strong>corroborate</strong>: the candidate's <a class="cite" data-ref="wikidata" href="#references" onclick="return bibGo(event)">Wikidata</a> (modern) okres must
+equal the settlement's own modern okres — the last entry of its <code>okres_all</code> timeline.</p>
+<p>The bare unique-name fallback this replaced (<em>"only one <a class="cite" data-ref="wikidata" href="#references" onclick="return bibGo(event)">Wikidata</a> point carries this name,
+so take it"</em>) was the single largest source of bad geography in the build: <a class="cite" data-ref="wikidata" href="#references" onclick="return bibGo(event)">Wikidata</a> lists
+~6.2k <strong>present-day municipalities</strong>, whereas the lexikon holds ~18k historical
+settlements incl. <em>osady</em> and absorbed hamlets, so 2,250 lexikon names are shared by
+several settlements while only one survives as a modern obec. Every one of those
+same-named settlements silently inherited that single obec's coordinates — landing a
+median <strong>75 km</strong> from its own okres. Measured (audit 2026-07-16): coordinates that pass
+the okres corroboration land inside their name-based okres <strong>87.4 %</strong> of the time; those
+taken by the old fallback, only <strong>30.8 %</strong>.</p>
+<p>A name that is unambiguous on <strong>both</strong> sides (one lexikon settlement, one <a class="cite" data-ref="wikidata" href="#references" onclick="return bibGo(event)">Wikidata</a> point)
+is still accepted without the okres check — there is no other settlement it could be, and
+this is what keeps coverage up where it is safe. Everything else is left blank: wrong
+coordinates scatter people across the country and would silently corrupt any spatial
+analysis (Kelly-2019 SEs, point maps), whereas missing coordinates merely reduce n.</p>
+<p><code>_CURATED_COORDS</code> is consulted first, for the handful of settlements the SPARQL result
+cannot contain at all (Praha, and the towns partitioned away or merged since 1910).</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code></p>
+<details><summary>source · lines 144–208 (65 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">add_settlement_coords</span><span class="p">(</span><span class="n">settlements</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">points</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Attach ``wd_qid`` / ``lat`` / ``lon`` to the lexikon settlement crosswalk.</span>
+
+<span class="sd">    Match on Czech name, then **corroborate**: the candidate&#39;s Wikidata (modern) okres must</span>
+<span class="sd">    equal the settlement&#39;s own modern okres — the last entry of its ``okres_all`` timeline.</span>
+
+<span class="sd">    The bare unique-name fallback this replaced (*&quot;only one Wikidata point carries this name,</span>
+<span class="sd">    so take it&quot;*) was the single largest source of bad geography in the build: Wikidata lists</span>
+<span class="sd">    ~6.2k **present-day municipalities**, whereas the lexikon holds ~18k historical</span>
+<span class="sd">    settlements incl. *osady* and absorbed hamlets, so 2,250 lexikon names are shared by</span>
+<span class="sd">    several settlements while only one survives as a modern obec. Every one of those</span>
+<span class="sd">    same-named settlements silently inherited that single obec&#39;s coordinates — landing a</span>
+<span class="sd">    median **75 km** from its own okres. Measured (audit 2026-07-16): coordinates that pass</span>
+<span class="sd">    the okres corroboration land inside their name-based okres **87.4 %** of the time; those</span>
+<span class="sd">    taken by the old fallback, only **30.8 %**.</span>
+
+<span class="sd">    A name that is unambiguous on **both** sides (one lexikon settlement, one Wikidata point)</span>
+<span class="sd">    is still accepted without the okres check — there is no other settlement it could be, and</span>
+<span class="sd">    this is what keeps coverage up where it is safe. Everything else is left blank: wrong</span>
+<span class="sd">    coordinates scatter people across the country and would silently corrupt any spatial</span>
+<span class="sd">    analysis (Kelly-2019 SEs, point maps), whereas missing coordinates merely reduce n.</span>
+
+<span class="sd">    :data:`_CURATED_COORDS` is consulted first, for the handful of settlements the SPARQL result</span>
+<span class="sd">    cannot contain at all (Praha, and the towns partitioned away or merged since 1910).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">idx</span> <span class="o">=</span> <span class="n">_coord_index</span><span class="p">(</span><span class="n">points</span><span class="p">)</span>
+    <span class="n">okres_modern</span> <span class="o">=</span> <span class="n">settlements</span><span class="p">[</span><span class="s2">&quot;okres_all&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">s</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;|&quot;</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="k">if</span> <span class="n">s</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="c1"># how many lexikon settlements share each (normalised) name — the side the old code ignored</span>
+    <span class="n">lex_n</span> <span class="o">=</span> <span class="n">settlements</span><span class="p">[</span><span class="s2">&quot;cs_name&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">rg</span><span class="o">.</span><span class="n">_norm</span><span class="p">)</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">match</span><span class="p">(</span><span class="n">cs_name</span><span class="p">,</span> <span class="n">om</span><span class="p">,</span> <span class="n">oid</span><span class="p">):</span>
+        <span class="n">k</span> <span class="o">=</span> <span class="n">rg</span><span class="o">.</span><span class="n">_norm</span><span class="p">(</span><span class="n">cs_name</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">oid</span><span class="p">)</span> <span class="ow">and</span> <span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">oid</span><span class="p">))</span> <span class="ow">in</span> <span class="n">_CURATED_COORDS</span><span class="p">:</span>    <span class="c1"># absent from Wikidata&#39;s reach</span>
+            <span class="k">return</span> <span class="n">_CURATED_COORDS</span><span class="p">[(</span><span class="n">k</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">oid</span><span class="p">))]</span>
+        <span class="n">cands</span> <span class="o">=</span> <span class="n">idx</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">k</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">cands</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="n">hit</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cands</span> <span class="k">if</span> <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="n">rg</span><span class="o">.</span><span class="n">_norm</span><span class="p">(</span><span class="n">om</span><span class="p">)]</span>          <span class="c1"># okres-corroborated</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">hit</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">(</span><span class="n">hit</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">],</span> <span class="n">hit</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">2</span><span class="p">],</span> <span class="n">hit</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">3</span><span class="p">])</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">cands</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span> <span class="ow">and</span> <span class="n">lex_n</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>              <span class="c1"># unique on BOTH sides</span>
+            <span class="k">return</span> <span class="p">(</span><span class="n">cands</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">],</span> <span class="n">cands</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">2</span><span class="p">],</span> <span class="n">cands</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">3</span><span class="p">])</span>
+        <span class="k">return</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+
+    <span class="n">out</span> <span class="o">=</span> <span class="n">settlements</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">res</span> <span class="o">=</span> <span class="p">[</span><span class="n">match</span><span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="n">o</span><span class="p">,</span> <span class="n">i</span><span class="p">)</span>
+           <span class="k">for</span> <span class="n">n</span><span class="p">,</span> <span class="n">o</span><span class="p">,</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;cs_name&quot;</span><span class="p">],</span> <span class="n">okres_modern</span><span class="p">,</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">])]</span>
+
+    <span class="c1"># One Wikidata point, one place. Corroborating on the *modern* okres lets two different</span>
+    <span class="c1"># 1910 settlements that today share an okres both claim the same point — BĚLÁ in okres</span>
+    <span class="c1"># Semily and BĚLÁ in okres Turnov, HRADIŠTĚ in Blatná and in Plzeň: 117 settlements over</span>
+    <span class="c1"># 57 points, at least one of each pair on the wrong coordinate and hence the wrong court</span>
+    <span class="c1"># (audit 2026-09-22 §B8). A point claimed from more than one 1910 okres is refused for</span>
+    <span class="c1"># every claimant, the same corroborate-or-refuse rule as the rest of this function.</span>
+    <span class="n">claims</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">set</span><span class="p">]</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">set</span><span class="p">)</span>
+    <span class="k">for</span> <span class="p">(</span><span class="n">q</span><span class="p">,</span> <span class="n">_la</span><span class="p">,</span> <span class="n">_lo</span><span class="p">),</span> <span class="n">oid</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">res</span><span class="p">,</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">]):</span>
+        <span class="k">if</span> <span class="n">q</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">claims</span><span class="p">[</span><span class="n">q</span><span class="p">]</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">oid</span><span class="p">)</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">oid</span><span class="p">)</span> <span class="k">else</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="n">shared</span> <span class="o">=</span> <span class="p">{</span><span class="n">q</span> <span class="k">for</span> <span class="n">q</span><span class="p">,</span> <span class="n">oids</span> <span class="ow">in</span> <span class="n">claims</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">oids</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">}</span>
+    <span class="n">res</span> <span class="o">=</span> <span class="p">[(</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">in</span> <span class="n">shared</span> <span class="k">else</span> <span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">res</span><span class="p">]</span>
+
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;wd_qid&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">r</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">res</span><span class="p">]</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;lat&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">r</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">res</span><span class="p">]</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;lon&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">r</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">res</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-wikidata-add_settlement_de_name">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">add_settlement_de_name</span><span class="p">(</span><span class="n">settlements</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">points</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Attach <code>de_name</code> (standardised 1910/modern German name) to the settlement crosswalk.</p>
+<p>Primary source is the <a class="cite" data-ref="wikidata" href="#references" onclick="return bibGo(event)">Wikidata</a> German label (<code>de</code>), joined on the already-attached
+<code>wd_qid</code> — clean for major places (Liberec→Reichenberg, Budweis). Where <a class="cite" data-ref="wikidata" href="#references" onclick="return bibGo(event)">Wikidata</a> has no
+German label, fall back to the lexikon's <code>name_1910</code> <strong>only when it is genuinely German</strong>
+(differs from the Czech name and carries no Czech diacritics — the Sudeten exonyms). The long
+tail of Czech-only villages keeps <code>de_name</code> = <code>&amp;lt;NA&amp;gt;</code> (no historical German form; no
+translation is invented). Requires <code>add_settlement_coords</code> to have run (for <code>wd_qid</code>).</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code></p>
+<details><summary>source · lines 211–243 (33 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">add_settlement_de_name</span><span class="p">(</span><span class="n">settlements</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">points</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Attach ``de_name`` (standardised 1910/modern German name) to the settlement crosswalk.</span>
+
+<span class="sd">    Primary source is the Wikidata German label (``de``), joined on the already-attached</span>
+<span class="sd">    ``wd_qid`` — clean for major places (Liberec→Reichenberg, Budweis). Where Wikidata has no</span>
+<span class="sd">    German label, fall back to the lexikon&#39;s ``name_1910`` **only when it is genuinely German**</span>
+<span class="sd">    (differs from the Czech name and carries no Czech diacritics — the Sudeten exonyms). The long</span>
+<span class="sd">    tail of Czech-only villages keeps ``de_name`` = ``&lt;NA&gt;`` (no historical German form; no</span>
+<span class="sd">    translation is invented). Requires :func:`add_settlement_coords` to have run (for ``wd_qid``).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Keep only genuine German exonyms — Wikidata&#39;s ``de`` label is frequently just the Czech name</span>
+    <span class="c1"># (Podivín, Želiv), which is noise, not a German variant.</span>
+    <span class="n">de_by_qid</span> <span class="o">=</span> <span class="p">{</span><span class="n">r</span><span class="o">.</span><span class="n">qid</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">de</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">points</span><span class="o">.</span><span class="n">itertuples</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+                 <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">de</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">and</span> <span class="n">r</span><span class="o">.</span><span class="n">de</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+                 <span class="ow">and</span> <span class="n">rg</span><span class="o">.</span><span class="n">_norm</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">de</span><span class="p">)</span> <span class="o">!=</span> <span class="n">rg</span><span class="o">.</span><span class="n">_norm</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">cs</span><span class="p">)}</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_looks_german</span><span class="p">(</span><span class="n">nm</span><span class="p">,</span> <span class="n">cs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">nm</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">nm</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+            <span class="k">return</span> <span class="kc">False</span>
+        <span class="k">if</span> <span class="n">rg</span><span class="o">.</span><span class="n">_norm</span><span class="p">(</span><span class="n">nm</span><span class="p">)</span> <span class="o">==</span> <span class="n">rg</span><span class="o">.</span><span class="n">_norm</span><span class="p">(</span><span class="n">cs</span><span class="p">):</span>
+            <span class="k">return</span> <span class="kc">False</span>
+        <span class="k">return</span> <span class="ow">not</span> <span class="nb">any</span><span class="p">(</span><span class="n">c</span> <span class="ow">in</span> <span class="n">nm</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="s2">&quot;áčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ&quot;</span><span class="p">)</span>
+
+    <span class="n">out</span> <span class="o">=</span> <span class="n">settlements</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">qid</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;wd_qid&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="s2">&quot;wd_qid&quot;</span> <span class="ow">in</span> <span class="n">out</span><span class="o">.</span><span class="n">columns</span> <span class="k">else</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="n">out</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+    <span class="n">de</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">object</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">q</span><span class="p">,</span> <span class="n">n1910</span><span class="p">,</span> <span class="n">cs</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">qid</span><span class="p">,</span> <span class="n">out</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name_1910&quot;</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">([</span><span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">out</span><span class="p">))),</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;cs_name&quot;</span><span class="p">]):</span>
+        <span class="n">val</span> <span class="o">=</span> <span class="n">de_by_qid</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">q</span><span class="p">)</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">q</span><span class="p">)</span> <span class="k">else</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">val</span> <span class="ow">and</span> <span class="n">_looks_german</span><span class="p">(</span><span class="n">n1910</span><span class="p">,</span> <span class="n">cs</span><span class="p">):</span>
+            <span class="n">val</span> <span class="o">=</span> <span class="n">n1910</span>
+        <span class="n">de</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">val</span> <span class="k">if</span> <span class="n">val</span> <span class="k">else</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;de_name&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">de</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-wikidata-add_birth_coords">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">add_birth_coords</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">settlements</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">muni_col</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;birth_municipality&#39;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Attach <code>birth_lat</code> / <code>birth_lon</code> / <code>birth_qid</code> to person records.</p>
+<p>.. note:: <strong>Superseded in the pipeline</strong> by <code>records_geo.add_settlement_attrs</code>
+   (via <code>add_place_standardization</code>, notebook 02 §4), which attaches the same
+   coordinates <em>plus</em> standardised names and courts and — unlike this function —
+   vetoes the unique-name fallback for positively-foreign births. Kept as a
+   standalone utility; if revived, prefer the records_geo path.</p>
+<p>A record is placed by <code>(birth_municipality, birth_okres_id)</code> against the coord-bearing
+settlements — the resolved okres_id disambiguates homonyms exactly — with a unique-name
+fallback where the settlement name is unambiguous.</p></div>
+<p class="calls warn">No call site found in the notebooks or <code>utils/</code> — possibly superseded or reserved for interactive use.</p>
+<details><summary>source · lines 246–295 (50 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">add_birth_coords</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">settlements</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+                     <span class="n">muni_col</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;birth_municipality&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Attach ``birth_lat`` / ``birth_lon`` / ``birth_qid`` to person records.</span>
+
+<span class="sd">    .. note:: **Superseded in the pipeline** by :func:`records_geo.add_settlement_attrs`</span>
+<span class="sd">       (via ``add_place_standardization``, notebook 02 §4), which attaches the same</span>
+<span class="sd">       coordinates *plus* standardised names and courts and — unlike this function —</span>
+<span class="sd">       vetoes the unique-name fallback for positively-foreign births. Kept as a</span>
+<span class="sd">       standalone utility; if revived, prefer the records_geo path.</span>
+
+<span class="sd">    A record is placed by ``(birth_municipality, birth_okres_id)`` against the coord-bearing</span>
+<span class="sd">    settlements — the resolved okres_id disambiguates homonyms exactly — with a unique-name</span>
+<span class="sd">    fallback where the settlement name is unambiguous.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="s2">&quot;wd_qid&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">settlements</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>          <span class="c1"># coords step (add_settlement_coords) not run</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="n">out</span><span class="p">[</span><span class="s2">&quot;birth_lat&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;birth_lon&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;birth_qid&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">return</span> <span class="n">out</span>
+    <span class="n">coord</span> <span class="o">=</span> <span class="n">settlements</span><span class="p">[</span><span class="n">settlements</span><span class="p">[</span><span class="s2">&quot;wd_qid&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()]</span>
+    <span class="n">keyed</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">name_ids</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">set</span><span class="p">)</span>
+    <span class="n">qid_xy</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">coord</span><span class="o">.</span><span class="n">itertuples</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="n">qid_xy</span><span class="p">[</span><span class="n">r</span><span class="o">.</span><span class="n">wd_qid</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">lat</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">lon</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">nm</span> <span class="ow">in</span> <span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">cs_name</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">name_1910</span><span class="p">):</span>
+            <span class="n">k</span> <span class="o">=</span> <span class="n">rg</span><span class="o">.</span><span class="n">_norm</span><span class="p">(</span><span class="n">nm</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">k</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">name_ids</span><span class="p">[</span><span class="n">k</span><span class="p">]</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">wd_qid</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">okres_id</span><span class="p">):</span>
+                <span class="n">keyed</span><span class="p">[(</span><span class="n">k</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">okres_id</span><span class="p">))]</span> <span class="o">=</span> <span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">lat</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">lon</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">wd_qid</span><span class="p">)</span>
+    <span class="n">uniq</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="nb">next</span><span class="p">(</span><span class="nb">iter</span><span class="p">(</span><span class="n">v</span><span class="p">))</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">name_ids</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">}</span>
+
+    <span class="n">lat</span> <span class="o">=</span> <span class="p">[</span><span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="n">lon</span> <span class="o">=</span> <span class="p">[</span><span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="n">qid</span> <span class="o">=</span> <span class="p">[</span><span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="n">munis</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">muni_col</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">()</span>
+    <span class="n">oids</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;birth_okres_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">()</span> <span class="k">if</span> <span class="s2">&quot;birth_okres_id&quot;</span> <span class="ow">in</span> <span class="n">df</span> <span class="k">else</span> <span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="n">mu</span><span class="p">,</span> <span class="n">oid</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">munis</span><span class="p">,</span> <span class="n">oids</span><span class="p">)):</span>
+        <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">mu</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="n">k</span> <span class="o">=</span> <span class="n">rg</span><span class="o">.</span><span class="n">_norm</span><span class="p">(</span><span class="n">mu</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">oid</span><span class="p">)</span> <span class="ow">and</span> <span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">oid</span><span class="p">))</span> <span class="ow">in</span> <span class="n">keyed</span><span class="p">:</span>
+            <span class="n">lat</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">lon</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">qid</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">keyed</span><span class="p">[(</span><span class="n">k</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">oid</span><span class="p">))]</span>
+        <span class="k">elif</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">uniq</span><span class="p">:</span>
+            <span class="n">q</span> <span class="o">=</span> <span class="n">uniq</span><span class="p">[</span><span class="n">k</span><span class="p">]</span>
+            <span class="n">lat</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">lon</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">qid</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">qid_xy</span><span class="p">[</span><span class="n">q</span><span class="p">][</span><span class="mi">0</span><span class="p">],</span> <span class="n">qid_xy</span><span class="p">[</span><span class="n">q</span><span class="p">][</span><span class="mi">1</span><span class="p">],</span> <span class="n">q</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;birth_lat&quot;</span><span class="p">],</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;birth_lon&quot;</span><span class="p">],</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;birth_qid&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">lat</span><span class="p">,</span> <span class="n">lon</span><span class="p">,</span> <span class="n">qid</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-wikidata-okres_centroids">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">okres_centroids</span><span class="p">(</span><span class="n">settlements</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>1910-okres centroid (mean of its coord-bearing settlements) → <code>okres_id, lat, lon</code>.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code></p>
+<details><summary>source · lines 298–302 (5 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">okres_centroids</span><span class="p">(</span><span class="n">settlements</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;1910-okres centroid (mean of its coord-bearing settlements) → ``okres_id, lat, lon``.&quot;&quot;&quot;</span>
+    <span class="n">c</span> <span class="o">=</span> <span class="n">settlements</span><span class="p">[</span><span class="n">settlements</span><span class="p">[</span><span class="s2">&quot;wd_qid&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">settlements</span><span class="p">[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()]</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;okres_id&quot;</span><span class="p">)[[</span><span class="s2">&quot;lat&quot;</span><span class="p">,</span> <span class="s2">&quot;lon&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+            <span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;lat&quot;</span><span class="p">:</span> <span class="s2">&quot;okres_lat&quot;</span><span class="p">,</span> <span class="s2">&quot;lon&quot;</span><span class="p">:</span> <span class="s2">&quot;okres_lon&quot;</span><span class="p">})</span><span class="o">.</span><span class="n">reset_index</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-wikidata-wikidata_report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">wikidata_report</span><span class="p">(</span><span class="n">settlements</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">points</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span></pre>
+<div class="fndoc"><p>Print geocoding coverage of the settlement crosswalk.</p>
+<p>The last line is the one that matters: settlements carrying <strong>both</strong> a 1910
+<code>okres_id</code> and coordinates are the only ones that can support okres-level spatial
+work. Coverage is capped by <a class="cite" data-ref="wikidata" href="#references" onclick="return bibGo(event)">Wikidata</a> holding only present-day municipalities, and is
+deliberately traded down for correctness by the okres corroboration in
+<code>add_settlement_coords</code>.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code></p>
+<details><summary>source · lines 305–319 (15 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">wikidata_report</span><span class="p">(</span><span class="n">settlements</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">points</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Print geocoding coverage of the settlement crosswalk.</span>
+
+<span class="sd">    The last line is the one that matters: settlements carrying **both** a 1910</span>
+<span class="sd">    ``okres_id`` and coordinates are the only ones that can support okres-level spatial</span>
+<span class="sd">    work. Coverage is capped by Wikidata holding only present-day municipalities, and is</span>
+<span class="sd">    deliberately traded down for correctness by the okres corroboration in</span>
+<span class="sd">    :func:`add_settlement_coords`.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">settlements</span><span class="p">)</span>
+    <span class="n">with_xy</span> <span class="o">=</span> <span class="n">settlements</span><span class="p">[</span><span class="s2">&quot;wd_qid&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Wikidata coordinates  (points fetched = </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">points</span><span class="p">)</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  settlements geocoded: </span><span class="si">{</span><span class="n">with_xy</span><span class="si">}</span><span class="s2"> / </span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s2">  (</span><span class="si">{</span><span class="n">with_xy</span><span class="o">/</span><span class="n">n</span><span class="o">*</span><span class="mi">100</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  with both 1910 okres_id and coords: &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="p">(</span><span class="n">settlements</span><span class="p">[</span><span class="s1">&#39;okres_id&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">settlements</span><span class="p">[</span><span class="s1">&#39;wd_qid&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">())</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Used by</h2><p><code>02_data_cleaning.ipynb</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/parsing/wikidata.py · 319 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span>
+<span class="normal">307</span>
+<span class="normal">308</span>
+<span class="normal">309</span>
+<span class="normal">310</span>
+<span class="normal">311</span>
+<span class="normal">312</span>
+<span class="normal">313</span>
+<span class="normal">314</span>
+<span class="normal">315</span>
+<span class="normal">316</span>
+<span class="normal">317</span>
+<span class="normal">318</span>
+<span class="normal">319</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">wikidata.py — coordinates + QIDs for Czech settlements (enriches the lexikon crosswalk)</span>
+<span class="sd">=======================================================================================</span>
+<span class="sd">Fetches Czech settlements (obec Q5153359 + část obce Q15978299) with **coordinates**, Czech +</span>
+<span class="sd">German labels, and their **modern okres** (P131) from the Wikidata Query Service, then attaches</span>
+<span class="sd">lat/lon/QID to the :mod:`utils.parsing.lexikon` settlement crosswalk and to individual birth</span>
+<span class="sd">records. Enables point-level mapping and Kelly-2019 spatial standard errors.</span>
+
+<span class="sd">The SPARQL result is **cached to disk** (``data/raw/wikidata/…``) so the pipeline is reproducible</span>
+<span class="sd">without re-querying every run; delete the cache (or pass ``refresh=True``) to re-fetch.</span>
+
+<span class="sd">Matching</span>
+<span class="sd">--------</span>
+<span class="sd">Wikidata is queried CZ-only (the class instances are Czech settlements), so the cross-empire</span>
+<span class="sd">German-name collision (``Trautenau → Trutnowo``) cannot occur here. Homonyms are disambiguated by</span>
+<span class="sd">**modern okres**: the lexikon ``okres_all`` timeline ends at the present-day okres, matched to</span>
+<span class="sd">Wikidata&#39;s P131 okres. Records are disambiguated by their already-resolved ``birth_okres_id``</span>
+<span class="sd">(exact), falling back to a unique-name match.</span>
+
+<span class="sd">Coverage note: Wikidata carries coordinates for ~6.3k current municipalities (+~0.6k parts), so</span>
+<span class="sd">settlement coverage of the ~18k historical lexikon entries is ~40%, and birth-coordinate coverage</span>
+<span class="sd">is ~40–50% of records (births cluster in municipalities). Okres-level analysis does not need these.</span>
+
+<span class="sd">Usage</span>
+<span class="sd">-----</span>
+<span class="sd">    from utils.parsing import wikidata as wd</span>
+<span class="sd">    points = wd.fetch_cz_settlements(CACHE)              # SPARQL (or load cache)</span>
+<span class="sd">    settlements = wd.add_settlement_coords(settlements, points)</span>
+<span class="sd">    legion = wd.add_birth_coords(legion, settlements)</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">defaultdict</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing</span><span class="w"> </span><span class="kn">import</span> <span class="n">records_geo</span> <span class="k">as</span> <span class="n">rg</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">requests</span>
+<span class="k">except</span> <span class="ne">ImportError</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>  <span class="c1"># pragma: no cover</span>
+    <span class="k">raise</span> <span class="ne">ImportError</span><span class="p">(</span><span class="s2">&quot;wikidata.py requires requests (`pip install requests`).&quot;</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">exc</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.4.0&quot;</span>   <span class="c1"># a point claimed from &gt;1 1910 okres is refused (audit 2026-09-22)</span>
+
+<span class="n">_SPARQL</span> <span class="o">=</span> <span class="s2">&quot;https://query.wikidata.org/sparql&quot;</span>
+
+<span class="c1"># Settlements the SPARQL result **cannot** contain, so no amount of matching will reach them.</span>
+<span class="c1"># The query asks for present-day Czech municipalities whose P131 is an ``okres …``; these four</span>
+<span class="c1"># fail that filter for two different reasons, and between them they account for the largest</span>
+<span class="c1"># remaining blocks of missing birth coordinates (~2,700 legion + ~1,900 VÚA for Praha alone).</span>
+<span class="c1">#</span>
+<span class="c1">#   * **Praha** — the capital is not *in* an okres, so the P131 filter drops it outright.</span>
+<span class="c1">#   * **Frýdek**, **Těšín**, **Bílsko** — the 1910 town no longer exists under that name:</span>
+<span class="c1">#     Frýdek merged into Frýdek-Místek, and Teschen/Bielitz were partitioned to Poland in 1920.</span>
+<span class="c1">#</span>
+<span class="c1"># Keyed ``(norm(cs_name), okres_id)`` — the okres pins *which* like-named settlement is meant, so</span>
+<span class="c1"># the three Czech hamlets called BÍLSKO and the Jilemnice osada called BRNO are never captured.</span>
+<span class="c1"># Coordinates are Wikidata P625, taken by QID (queried 2026-08-01), same CC0 source as the cache.</span>
+<span class="c1"># Frýdek and Těšín use their **successor** municipality&#39;s point: Frýdek-Místek&#39;s centre sits</span>
+<span class="c1"># ~1 km east of the Frýdek square, and Český Těšín ~700 m west of the old town across the Olza.</span>
+<span class="c1"># Both are inside the tolerance the boundary file itself carries (PLACE_MATCHING: a line is good</span>
+<span class="c1"># to a kilometre, not to a field boundary), and both fall in the right 1910 court polygon.</span>
+<span class="n">_CURATED_COORDS</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="p">(</span><span class="s2">&quot;praha&quot;</span><span class="p">,</span> <span class="mi">301072</span><span class="p">):</span>  <span class="p">(</span><span class="s2">&quot;Q1085&quot;</span><span class="p">,</span>   <span class="mf">50.087500</span><span class="p">,</span> <span class="mf">14.421389</span><span class="p">),</span>   <span class="c1"># Prague</span>
+    <span class="p">(</span><span class="s2">&quot;frydek&quot;</span><span class="p">,</span> <span class="mi">303007</span><span class="p">):</span> <span class="p">(</span><span class="s2">&quot;Q48194&quot;</span><span class="p">,</span>  <span class="mf">49.688056</span><span class="p">,</span> <span class="mf">18.353611</span><span class="p">),</span>   <span class="c1"># Frýdek-Místek</span>
+    <span class="p">(</span><span class="s2">&quot;tesin&quot;</span><span class="p">,</span> <span class="mi">303009</span><span class="p">):</span>  <span class="p">(</span><span class="s2">&quot;Q278877&quot;</span><span class="p">,</span> <span class="mf">49.746111</span><span class="p">,</span> <span class="mf">18.626170</span><span class="p">),</span>   <span class="c1"># Český Těšín</span>
+    <span class="p">(</span><span class="s2">&quot;bilsko&quot;</span><span class="p">,</span> <span class="mi">303002</span><span class="p">):</span> <span class="p">(</span><span class="s2">&quot;Q106583&quot;</span><span class="p">,</span> <span class="mf">49.822500</span><span class="p">,</span> <span class="mf">19.044444</span><span class="p">),</span>   <span class="c1"># Bielsko-Biała, PL</span>
+<span class="p">}</span>
+<span class="n">_UA</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;User-Agent&quot;</span><span class="p">:</span> <span class="s2">&quot;LegionsThesis/1.0 (economic-history research; contact via repo)&quot;</span><span class="p">}</span>
+<span class="c1"># Wikidata classes of Czech settlements that carry coordinates.</span>
+<span class="n">_CLASSES</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;Q5153359&quot;</span><span class="p">:</span> <span class="s2">&quot;obec&quot;</span><span class="p">,</span> <span class="s2">&quot;Q15978299&quot;</span><span class="p">:</span> <span class="s2">&quot;cast_obce&quot;</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_wkt_lonlat</span><span class="p">(</span><span class="n">s</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span><span class="p">]:</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;Point\(([-\d.]+) ([-\d.]+)\)&quot;</span><span class="p">,</span> <span class="n">s</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">2</span><span class="p">)),</span> <span class="nb">float</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)))</span> <span class="k">if</span> <span class="n">m</span> <span class="k">else</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_query_class</span><span class="p">(</span><span class="n">class_qid</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">timeout</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">180</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+    <span class="n">q</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    SELECT ?item ?csLabel ?de ?coord ?okresLabel WHERE </span><span class="se">{{</span>
+<span class="s2">      ?item wdt:P31 wd:</span><span class="si">{</span><span class="n">class_qid</span><span class="si">}</span><span class="s2"> ; wdt:P625 ?coord .</span>
+<span class="s2">      OPTIONAL </span><span class="se">{{</span><span class="s2"> ?item wdt:P131 ?okres . </span><span class="se">}}</span>
+<span class="s2">      OPTIONAL </span><span class="se">{{</span><span class="s2"> ?item rdfs:label ?de FILTER(lang(?de)=&quot;de&quot;) </span><span class="se">}}</span>
+<span class="s2">      SERVICE wikibase:label </span><span class="se">{{</span><span class="s2"> bd:serviceParam wikibase:language &quot;cs&quot;.</span>
+<span class="s2">                                ?item rdfs:label ?csLabel . ?okres rdfs:label ?okresLabel . </span><span class="se">}}</span>
+<span class="s2">    </span><span class="se">}}</span><span class="s2">&quot;&quot;&quot;</span>
+    <span class="n">r</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="n">_SPARQL</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;query&quot;</span><span class="p">:</span> <span class="n">q</span><span class="p">,</span> <span class="s2">&quot;format&quot;</span><span class="p">:</span> <span class="s2">&quot;json&quot;</span><span class="p">},</span> <span class="n">headers</span><span class="o">=</span><span class="n">_UA</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="n">timeout</span><span class="p">)</span>
+    <span class="n">r</span><span class="o">.</span><span class="n">raise_for_status</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">r</span><span class="o">.</span><span class="n">json</span><span class="p">()[</span><span class="s2">&quot;results&quot;</span><span class="p">][</span><span class="s2">&quot;bindings&quot;</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">fetch_cz_settlements</span><span class="p">(</span><span class="n">cache_path</span><span class="p">,</span> <span class="n">refresh</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return Wikidata Czech settlements (``qid, cs, de, lat, lon, okres_modern, wd_class``).</span>
+
+<span class="sd">    Loads *cache_path* if present (unless ``refresh``); otherwise queries the Wikidata Query</span>
+<span class="sd">    Service per class, keeps only rows whose P131 is an ``okres …`` (drops the ORP duplicates),</span>
+<span class="sd">    dedupes per QID, and writes the cache.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">cache_path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">cache_path</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">cache_path</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">refresh</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">cache_path</span><span class="p">)</span>
+
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">class_qid</span><span class="p">,</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">_CLASSES</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">for</span> <span class="n">_try</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">3</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">bindings</span> <span class="o">=</span> <span class="n">_query_class</span><span class="p">(</span><span class="n">class_qid</span><span class="p">)</span>
+                <span class="k">break</span>
+            <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>                       <span class="c1"># noqa: BLE001 — transient WDQS timeout</span>
+                <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">5</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">bindings</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">bindings</span><span class="p">:</span>
+            <span class="n">okres</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;okresLabel&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;value&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">okres</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;okres &quot;</span><span class="p">):</span>      <span class="c1"># keep the okres P131, drop ORP / others</span>
+                <span class="k">continue</span>
+            <span class="n">lat</span><span class="p">,</span> <span class="n">lon</span> <span class="o">=</span> <span class="n">_wkt_lonlat</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="s2">&quot;coord&quot;</span><span class="p">][</span><span class="s2">&quot;value&quot;</span><span class="p">])</span>
+            <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;qid&quot;</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="s2">&quot;item&quot;</span><span class="p">][</span><span class="s2">&quot;value&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">rsplit</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span>
+                         <span class="s2">&quot;cs&quot;</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="s2">&quot;csLabel&quot;</span><span class="p">][</span><span class="s2">&quot;value&quot;</span><span class="p">],</span>
+                         <span class="s2">&quot;de&quot;</span><span class="p">:</span> <span class="n">x</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;de&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;value&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span>
+                         <span class="s2">&quot;lat&quot;</span><span class="p">:</span> <span class="n">lat</span><span class="p">,</span> <span class="s2">&quot;lon&quot;</span><span class="p">:</span> <span class="n">lon</span><span class="p">,</span>
+                         <span class="s2">&quot;okres_modern&quot;</span><span class="p">:</span> <span class="n">okres</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="s2">&quot;okres &quot;</span><span class="p">):],</span> <span class="s2">&quot;wd_class&quot;</span><span class="p">:</span> <span class="n">tag</span><span class="p">})</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;qid&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">cache_path</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">out</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">cache_path</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_coord_index</span><span class="p">(</span><span class="n">points</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;norm(cs name) → list of (norm okres_modern, qid, lat, lon).&quot;&quot;&quot;</span>
+    <span class="n">idx</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">]</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">points</span><span class="o">.</span><span class="n">itertuples</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">lat</span><span class="p">):</span>
+            <span class="n">idx</span><span class="p">[</span><span class="n">rg</span><span class="o">.</span><span class="n">_norm</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">cs</span><span class="p">)]</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">rg</span><span class="o">.</span><span class="n">_norm</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">okres_modern</span><span class="p">),</span> <span class="n">r</span><span class="o">.</span><span class="n">qid</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">lat</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">lon</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">idx</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">add_settlement_coords</span><span class="p">(</span><span class="n">settlements</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">points</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Attach ``wd_qid`` / ``lat`` / ``lon`` to the lexikon settlement crosswalk.</span>
+
+<span class="sd">    Match on Czech name, then **corroborate**: the candidate&#39;s Wikidata (modern) okres must</span>
+<span class="sd">    equal the settlement&#39;s own modern okres — the last entry of its ``okres_all`` timeline.</span>
+
+<span class="sd">    The bare unique-name fallback this replaced (*&quot;only one Wikidata point carries this name,</span>
+<span class="sd">    so take it&quot;*) was the single largest source of bad geography in the build: Wikidata lists</span>
+<span class="sd">    ~6.2k **present-day municipalities**, whereas the lexikon holds ~18k historical</span>
+<span class="sd">    settlements incl. *osady* and absorbed hamlets, so 2,250 lexikon names are shared by</span>
+<span class="sd">    several settlements while only one survives as a modern obec. Every one of those</span>
+<span class="sd">    same-named settlements silently inherited that single obec&#39;s coordinates — landing a</span>
+<span class="sd">    median **75 km** from its own okres. Measured (audit 2026-07-16): coordinates that pass</span>
+<span class="sd">    the okres corroboration land inside their name-based okres **87.4 %** of the time; those</span>
+<span class="sd">    taken by the old fallback, only **30.8 %**.</span>
+
+<span class="sd">    A name that is unambiguous on **both** sides (one lexikon settlement, one Wikidata point)</span>
+<span class="sd">    is still accepted without the okres check — there is no other settlement it could be, and</span>
+<span class="sd">    this is what keeps coverage up where it is safe. Everything else is left blank: wrong</span>
+<span class="sd">    coordinates scatter people across the country and would silently corrupt any spatial</span>
+<span class="sd">    analysis (Kelly-2019 SEs, point maps), whereas missing coordinates merely reduce n.</span>
+
+<span class="sd">    :data:`_CURATED_COORDS` is consulted first, for the handful of settlements the SPARQL result</span>
+<span class="sd">    cannot contain at all (Praha, and the towns partitioned away or merged since 1910).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">idx</span> <span class="o">=</span> <span class="n">_coord_index</span><span class="p">(</span><span class="n">points</span><span class="p">)</span>
+    <span class="n">okres_modern</span> <span class="o">=</span> <span class="n">settlements</span><span class="p">[</span><span class="s2">&quot;okres_all&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">s</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;|&quot;</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="k">if</span> <span class="n">s</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="c1"># how many lexikon settlements share each (normalised) name — the side the old code ignored</span>
+    <span class="n">lex_n</span> <span class="o">=</span> <span class="n">settlements</span><span class="p">[</span><span class="s2">&quot;cs_name&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">rg</span><span class="o">.</span><span class="n">_norm</span><span class="p">)</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">match</span><span class="p">(</span><span class="n">cs_name</span><span class="p">,</span> <span class="n">om</span><span class="p">,</span> <span class="n">oid</span><span class="p">):</span>
+        <span class="n">k</span> <span class="o">=</span> <span class="n">rg</span><span class="o">.</span><span class="n">_norm</span><span class="p">(</span><span class="n">cs_name</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">oid</span><span class="p">)</span> <span class="ow">and</span> <span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">oid</span><span class="p">))</span> <span class="ow">in</span> <span class="n">_CURATED_COORDS</span><span class="p">:</span>    <span class="c1"># absent from Wikidata&#39;s reach</span>
+            <span class="k">return</span> <span class="n">_CURATED_COORDS</span><span class="p">[(</span><span class="n">k</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">oid</span><span class="p">))]</span>
+        <span class="n">cands</span> <span class="o">=</span> <span class="n">idx</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">k</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">cands</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="n">hit</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cands</span> <span class="k">if</span> <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="n">rg</span><span class="o">.</span><span class="n">_norm</span><span class="p">(</span><span class="n">om</span><span class="p">)]</span>          <span class="c1"># okres-corroborated</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">hit</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">(</span><span class="n">hit</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">],</span> <span class="n">hit</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">2</span><span class="p">],</span> <span class="n">hit</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">3</span><span class="p">])</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">cands</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span> <span class="ow">and</span> <span class="n">lex_n</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>              <span class="c1"># unique on BOTH sides</span>
+            <span class="k">return</span> <span class="p">(</span><span class="n">cands</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">],</span> <span class="n">cands</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">2</span><span class="p">],</span> <span class="n">cands</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">3</span><span class="p">])</span>
+        <span class="k">return</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+
+    <span class="n">out</span> <span class="o">=</span> <span class="n">settlements</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">res</span> <span class="o">=</span> <span class="p">[</span><span class="n">match</span><span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="n">o</span><span class="p">,</span> <span class="n">i</span><span class="p">)</span>
+           <span class="k">for</span> <span class="n">n</span><span class="p">,</span> <span class="n">o</span><span class="p">,</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;cs_name&quot;</span><span class="p">],</span> <span class="n">okres_modern</span><span class="p">,</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">])]</span>
+
+    <span class="c1"># One Wikidata point, one place. Corroborating on the *modern* okres lets two different</span>
+    <span class="c1"># 1910 settlements that today share an okres both claim the same point — BĚLÁ in okres</span>
+    <span class="c1"># Semily and BĚLÁ in okres Turnov, HRADIŠTĚ in Blatná and in Plzeň: 117 settlements over</span>
+    <span class="c1"># 57 points, at least one of each pair on the wrong coordinate and hence the wrong court</span>
+    <span class="c1"># (audit 2026-09-22 §B8). A point claimed from more than one 1910 okres is refused for</span>
+    <span class="c1"># every claimant, the same corroborate-or-refuse rule as the rest of this function.</span>
+    <span class="n">claims</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">set</span><span class="p">]</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">set</span><span class="p">)</span>
+    <span class="k">for</span> <span class="p">(</span><span class="n">q</span><span class="p">,</span> <span class="n">_la</span><span class="p">,</span> <span class="n">_lo</span><span class="p">),</span> <span class="n">oid</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">res</span><span class="p">,</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">]):</span>
+        <span class="k">if</span> <span class="n">q</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">claims</span><span class="p">[</span><span class="n">q</span><span class="p">]</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">oid</span><span class="p">)</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">oid</span><span class="p">)</span> <span class="k">else</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="n">shared</span> <span class="o">=</span> <span class="p">{</span><span class="n">q</span> <span class="k">for</span> <span class="n">q</span><span class="p">,</span> <span class="n">oids</span> <span class="ow">in</span> <span class="n">claims</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">oids</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">}</span>
+    <span class="n">res</span> <span class="o">=</span> <span class="p">[(</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">in</span> <span class="n">shared</span> <span class="k">else</span> <span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">res</span><span class="p">]</span>
+
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;wd_qid&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">r</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">res</span><span class="p">]</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;lat&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">r</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">res</span><span class="p">]</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;lon&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">r</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">res</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">add_settlement_de_name</span><span class="p">(</span><span class="n">settlements</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">points</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Attach ``de_name`` (standardised 1910/modern German name) to the settlement crosswalk.</span>
+
+<span class="sd">    Primary source is the Wikidata German label (``de``), joined on the already-attached</span>
+<span class="sd">    ``wd_qid`` — clean for major places (Liberec→Reichenberg, Budweis). Where Wikidata has no</span>
+<span class="sd">    German label, fall back to the lexikon&#39;s ``name_1910`` **only when it is genuinely German**</span>
+<span class="sd">    (differs from the Czech name and carries no Czech diacritics — the Sudeten exonyms). The long</span>
+<span class="sd">    tail of Czech-only villages keeps ``de_name`` = ``&lt;NA&gt;`` (no historical German form; no</span>
+<span class="sd">    translation is invented). Requires :func:`add_settlement_coords` to have run (for ``wd_qid``).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Keep only genuine German exonyms — Wikidata&#39;s ``de`` label is frequently just the Czech name</span>
+    <span class="c1"># (Podivín, Želiv), which is noise, not a German variant.</span>
+    <span class="n">de_by_qid</span> <span class="o">=</span> <span class="p">{</span><span class="n">r</span><span class="o">.</span><span class="n">qid</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">de</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">points</span><span class="o">.</span><span class="n">itertuples</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+                 <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">de</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">and</span> <span class="n">r</span><span class="o">.</span><span class="n">de</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+                 <span class="ow">and</span> <span class="n">rg</span><span class="o">.</span><span class="n">_norm</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">de</span><span class="p">)</span> <span class="o">!=</span> <span class="n">rg</span><span class="o">.</span><span class="n">_norm</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">cs</span><span class="p">)}</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_looks_german</span><span class="p">(</span><span class="n">nm</span><span class="p">,</span> <span class="n">cs</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">nm</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">nm</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+            <span class="k">return</span> <span class="kc">False</span>
+        <span class="k">if</span> <span class="n">rg</span><span class="o">.</span><span class="n">_norm</span><span class="p">(</span><span class="n">nm</span><span class="p">)</span> <span class="o">==</span> <span class="n">rg</span><span class="o">.</span><span class="n">_norm</span><span class="p">(</span><span class="n">cs</span><span class="p">):</span>
+            <span class="k">return</span> <span class="kc">False</span>
+        <span class="k">return</span> <span class="ow">not</span> <span class="nb">any</span><span class="p">(</span><span class="n">c</span> <span class="ow">in</span> <span class="n">nm</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="s2">&quot;áčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ&quot;</span><span class="p">)</span>
+
+    <span class="n">out</span> <span class="o">=</span> <span class="n">settlements</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">qid</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;wd_qid&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="s2">&quot;wd_qid&quot;</span> <span class="ow">in</span> <span class="n">out</span><span class="o">.</span><span class="n">columns</span> <span class="k">else</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="n">out</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+    <span class="n">de</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">object</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">q</span><span class="p">,</span> <span class="n">n1910</span><span class="p">,</span> <span class="n">cs</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">qid</span><span class="p">,</span> <span class="n">out</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;name_1910&quot;</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">([</span><span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">out</span><span class="p">))),</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;cs_name&quot;</span><span class="p">]):</span>
+        <span class="n">val</span> <span class="o">=</span> <span class="n">de_by_qid</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">q</span><span class="p">)</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">q</span><span class="p">)</span> <span class="k">else</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">val</span> <span class="ow">and</span> <span class="n">_looks_german</span><span class="p">(</span><span class="n">n1910</span><span class="p">,</span> <span class="n">cs</span><span class="p">):</span>
+            <span class="n">val</span> <span class="o">=</span> <span class="n">n1910</span>
+        <span class="n">de</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">val</span> <span class="k">if</span> <span class="n">val</span> <span class="k">else</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;de_name&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">de</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">add_birth_coords</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">settlements</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+                     <span class="n">muni_col</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;birth_municipality&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Attach ``birth_lat`` / ``birth_lon`` / ``birth_qid`` to person records.</span>
+
+<span class="sd">    .. note:: **Superseded in the pipeline** by :func:`records_geo.add_settlement_attrs`</span>
+<span class="sd">       (via ``add_place_standardization``, notebook 02 §4), which attaches the same</span>
+<span class="sd">       coordinates *plus* standardised names and courts and — unlike this function —</span>
+<span class="sd">       vetoes the unique-name fallback for positively-foreign births. Kept as a</span>
+<span class="sd">       standalone utility; if revived, prefer the records_geo path.</span>
+
+<span class="sd">    A record is placed by ``(birth_municipality, birth_okres_id)`` against the coord-bearing</span>
+<span class="sd">    settlements — the resolved okres_id disambiguates homonyms exactly — with a unique-name</span>
+<span class="sd">    fallback where the settlement name is unambiguous.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="s2">&quot;wd_qid&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">settlements</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>          <span class="c1"># coords step (add_settlement_coords) not run</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="n">out</span><span class="p">[</span><span class="s2">&quot;birth_lat&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;birth_lon&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;birth_qid&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">return</span> <span class="n">out</span>
+    <span class="n">coord</span> <span class="o">=</span> <span class="n">settlements</span><span class="p">[</span><span class="n">settlements</span><span class="p">[</span><span class="s2">&quot;wd_qid&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()]</span>
+    <span class="n">keyed</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">name_ids</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">set</span><span class="p">)</span>
+    <span class="n">qid_xy</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">coord</span><span class="o">.</span><span class="n">itertuples</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="n">qid_xy</span><span class="p">[</span><span class="n">r</span><span class="o">.</span><span class="n">wd_qid</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">lat</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">lon</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">nm</span> <span class="ow">in</span> <span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">cs_name</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">name_1910</span><span class="p">):</span>
+            <span class="n">k</span> <span class="o">=</span> <span class="n">rg</span><span class="o">.</span><span class="n">_norm</span><span class="p">(</span><span class="n">nm</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">k</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">name_ids</span><span class="p">[</span><span class="n">k</span><span class="p">]</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">wd_qid</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">okres_id</span><span class="p">):</span>
+                <span class="n">keyed</span><span class="p">[(</span><span class="n">k</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">okres_id</span><span class="p">))]</span> <span class="o">=</span> <span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">lat</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">lon</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">wd_qid</span><span class="p">)</span>
+    <span class="n">uniq</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="nb">next</span><span class="p">(</span><span class="nb">iter</span><span class="p">(</span><span class="n">v</span><span class="p">))</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">name_ids</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">}</span>
+
+    <span class="n">lat</span> <span class="o">=</span> <span class="p">[</span><span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="n">lon</span> <span class="o">=</span> <span class="p">[</span><span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="n">qid</span> <span class="o">=</span> <span class="p">[</span><span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="n">munis</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">muni_col</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">()</span>
+    <span class="n">oids</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;birth_okres_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">()</span> <span class="k">if</span> <span class="s2">&quot;birth_okres_id&quot;</span> <span class="ow">in</span> <span class="n">df</span> <span class="k">else</span> <span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="n">mu</span><span class="p">,</span> <span class="n">oid</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">munis</span><span class="p">,</span> <span class="n">oids</span><span class="p">)):</span>
+        <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">mu</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="n">k</span> <span class="o">=</span> <span class="n">rg</span><span class="o">.</span><span class="n">_norm</span><span class="p">(</span><span class="n">mu</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">oid</span><span class="p">)</span> <span class="ow">and</span> <span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">oid</span><span class="p">))</span> <span class="ow">in</span> <span class="n">keyed</span><span class="p">:</span>
+            <span class="n">lat</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">lon</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">qid</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">keyed</span><span class="p">[(</span><span class="n">k</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">oid</span><span class="p">))]</span>
+        <span class="k">elif</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">uniq</span><span class="p">:</span>
+            <span class="n">q</span> <span class="o">=</span> <span class="n">uniq</span><span class="p">[</span><span class="n">k</span><span class="p">]</span>
+            <span class="n">lat</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">lon</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">qid</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">qid_xy</span><span class="p">[</span><span class="n">q</span><span class="p">][</span><span class="mi">0</span><span class="p">],</span> <span class="n">qid_xy</span><span class="p">[</span><span class="n">q</span><span class="p">][</span><span class="mi">1</span><span class="p">],</span> <span class="n">q</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;birth_lat&quot;</span><span class="p">],</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;birth_lon&quot;</span><span class="p">],</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;birth_qid&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">lat</span><span class="p">,</span> <span class="n">lon</span><span class="p">,</span> <span class="n">qid</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">okres_centroids</span><span class="p">(</span><span class="n">settlements</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;1910-okres centroid (mean of its coord-bearing settlements) → ``okres_id, lat, lon``.&quot;&quot;&quot;</span>
+    <span class="n">c</span> <span class="o">=</span> <span class="n">settlements</span><span class="p">[</span><span class="n">settlements</span><span class="p">[</span><span class="s2">&quot;wd_qid&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span> <span class="o">&amp;</span> <span class="n">settlements</span><span class="p">[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()]</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;okres_id&quot;</span><span class="p">)[[</span><span class="s2">&quot;lat&quot;</span><span class="p">,</span> <span class="s2">&quot;lon&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+            <span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;lat&quot;</span><span class="p">:</span> <span class="s2">&quot;okres_lat&quot;</span><span class="p">,</span> <span class="s2">&quot;lon&quot;</span><span class="p">:</span> <span class="s2">&quot;okres_lon&quot;</span><span class="p">})</span><span class="o">.</span><span class="n">reset_index</span><span class="p">())</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">wikidata_report</span><span class="p">(</span><span class="n">settlements</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">points</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Print geocoding coverage of the settlement crosswalk.</span>
+
+<span class="sd">    The last line is the one that matters: settlements carrying **both** a 1910</span>
+<span class="sd">    ``okres_id`` and coordinates are the only ones that can support okres-level spatial</span>
+<span class="sd">    work. Coverage is capped by Wikidata holding only present-day municipalities, and is</span>
+<span class="sd">    deliberately traded down for correctness by the okres corroboration in</span>
+<span class="sd">    :func:`add_settlement_coords`.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">settlements</span><span class="p">)</span>
+    <span class="n">with_xy</span> <span class="o">=</span> <span class="n">settlements</span><span class="p">[</span><span class="s2">&quot;wd_qid&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Wikidata coordinates  (points fetched = </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">points</span><span class="p">)</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  settlements geocoded: </span><span class="si">{</span><span class="n">with_xy</span><span class="si">}</span><span class="s2"> / </span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s2">  (</span><span class="si">{</span><span class="n">with_xy</span><span class="o">/</span><span class="n">n</span><span class="o">*</span><span class="mi">100</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  with both 1910 okres_id and coords: &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="p">(</span><span class="n">settlements</span><span class="p">[</span><span class="s1">&#39;okres_id&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">settlements</span><span class="p">[</span><span class="s1">&#39;wd_qid&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">())</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>

@@ -1,0 +1,1073 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Applies <code>czech_glosses.py</code> to the curation skeleton and fills in the codes:</p><p class="tldr-facts"><b>Reference tools</b> · v1.2.0 · 296 lines · 7 public functions · 5 constants · used by nothing else · <code>utils/reference_tools/occupations/run_link_bridge.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-reference_tools-occupations-run_link_bridge-load_authority_codes">load_authority_codes</a><a class="chip" href="#fn-utils-reference_tools-occupations-run_link_bridge-load_german_index">load_german_index</a><a class="chip" href="#fn-utils-reference_tools-occupations-run_link_bridge-load_label_index">load_label_index</a><a class="chip" href="#fn-utils-reference_tools-occupations-run_link_bridge-bridge">bridge</a><a class="chip" href="#fn-utils-reference_tools-occupations-run_link_bridge-apply_adjudication">apply_adjudication</a><a class="chip" href="#fn-utils-reference_tools-occupations-run_link_bridge-bridge_report">bridge_report</a><a class="chip" href="#fn-utils-reference_tools-occupations-run_link_bridge-main">main</a><a class="chip const" href="#c-utils-reference_tools-occupations-run_link_bridge-ROOT">ROOT</a><a class="chip const" href="#c-utils-reference_tools-occupations-run_link_bridge-LINK">LINK</a><a class="chip const" href="#c-utils-reference_tools-occupations-run_link_bridge-AUTHORITY">AUTHORITY</a><a class="chip const" href="#c-utils-reference_tools-occupations-run_link_bridge-CURATION">CURATION</a><a class="chip const" href="#c-utils-reference_tools-occupations-run_link_bridge-GERMAN_LANGS">GERMAN_LANGS</a></div>
+<h2>How it works</h2><ol>
+<li><code>de_gloss</code> / <code>en_gloss</code> are written into the curation from <code>CZ_GLOSS</code>.</li>
+<li>The German gloss is looked up <strong>exactly</strong> (case- and diacritic-insensitive) in the
+     <code>lang_code == 'GE'</code> rows of <code>hisco_occupation_link_combined.csv</code> -&gt; <code>link_hisco</code>.
+     A gloss that resolves to more than one HISCO code is <em>not</em> auto-assigned; it is
+     flagged <code>review</code> with the candidates in <code>note</code>.</li>
+<li>Where a gloss misses, the English gloss is matched against the authority's own
+     <code>label_en</code> — <strong>exact only</strong>. No fuzzy matching anywhere: HISCO labels are formal
+     ("Metal Moulder, General"), colloquial glosses are not, and a near-miss between two
+     formal labels is far more likely to be a different occupation than a spelling
+     variant. Anything that misses is flagged for hand assignment instead.</li>
+<li><code>HISCO_OVERRIDE</code> is applied after the bridge and always wins, so a documented
+     judgement call cannot be overwritten by it.</li>
+<li><code>ADJUDICATED</code> is applied last, and it is the <strong>only</strong> writer of <code>review</code>. A key
+     answered <code>keep</code> or <code>recoded</code> in the 2026-08-26 workbook has its flag cleared and
+     its verdict written to the <code>verdict</code> column; a key answered <code>open</code> keeps the flag
+     and carries the reason it survived. Anything never adjudicated keeps whatever the
+     bridge decided, so a new ambiguous key still arrives flagged.</li>
+</ol>
+<p>Hand-entered values already in the curation are preserved: the script only fills blanks
+unless <code>--overwrite</code> is passed.</p>
+<p>Run:  python utils/reference_tools/occupations/run_link_bridge.py [--overwrite]
+Emits: updates reference/occupations/occupation_hisco_curation.csv in place
+Independent check: utils/reference_tools/occupations/run_occcanine_check.py</p>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-reference_tools-occupations-run_link_bridge-load_authority_codes">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">load_authority_codes</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span></pre>
+<div class="fndoc"><p>Every HISCO code the authority can resolve to a label and the HISCLASS/HISCAM scales.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 60–62 (3 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">60</span>
+<span class="normal">61</span>
+<span class="normal">62</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">load_authority_codes</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Every HISCO code the authority can resolve to a label and the HISCLASS/HISCAM scales.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="nb">set</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">AUTHORITY</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;hisco&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">})[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">dropna</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-run_link_bridge-load_german_index">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">load_german_index</span><span class="p">(</span><span class="n">known</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]</span></pre>
+<div class="fndoc"><p>Folded German label -&gt; the link rows carrying it (HISCO ids zero-padded, see <code>_pad_hisco</code>).</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 88–103 (16 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">load_german_index</span><span class="p">(</span><span class="n">known</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Folded German label -&gt; the link rows carrying it (HISCO ids zero-padded, see :func:`_pad_hisco`).&quot;&quot;&quot;</span>
+    <span class="n">known</span> <span class="o">=</span> <span class="n">load_authority_codes</span><span class="p">()</span> <span class="k">if</span> <span class="n">known</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">known</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">LINK</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">&quot;;&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">de</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;lang_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">GERMAN_LANGS</span><span class="p">)]</span>
+    <span class="n">idx</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">n_pad</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">de</span><span class="o">.</span><span class="n">itertuples</span><span class="p">():</span>
+        <span class="n">code</span> <span class="o">=</span> <span class="n">_pad_hisco</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">hisco_id</span><span class="p">,</span> <span class="n">known</span><span class="p">)</span>
+        <span class="n">n_pad</span> <span class="o">+=</span> <span class="n">code</span> <span class="o">!=</span> <span class="n">r</span><span class="o">.</span><span class="n">hisco_id</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="n">idx</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">_fold</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">label</span><span class="p">),</span> <span class="p">[])</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+            <span class="p">{</span><span class="s2">&quot;hisco&quot;</span><span class="p">:</span> <span class="n">code</span><span class="p">,</span> <span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">status_id</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+             <span class="s2">&quot;relation&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">relation_id</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span> <span class="s2">&quot;product&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">product_id</span><span class="o">.</span><span class="n">strip</span><span class="p">()})</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  German link labels: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">idx</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> distinct over </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">de</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> rows &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">n_pad</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> HISCO ids zero-padded to 5 digits)&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">idx</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-run_link_bridge-load_label_index">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">load_label_index</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span></pre>
+<div class="fndoc"><p>Folded English authority label -&gt; HISCO codes.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 106–113 (8 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">load_label_index</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Folded English authority label -&gt; HISCO codes.&quot;&quot;&quot;</span>
+    <span class="n">auth</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">AUTHORITY</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;hisco&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">})</span>
+    <span class="n">auth</span> <span class="o">=</span> <span class="n">auth</span><span class="p">[</span><span class="n">auth</span><span class="p">[</span><span class="s2">&quot;label_en&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()]</span>
+    <span class="n">idx</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">lab</span><span class="p">,</span> <span class="n">hisco</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">auth</span><span class="p">[</span><span class="s2">&quot;label_en&quot;</span><span class="p">],</span> <span class="n">auth</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]):</span>
+        <span class="n">idx</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">_fold</span><span class="p">(</span><span class="n">lab</span><span class="p">),</span> <span class="p">[])</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">hisco</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">v</span><span class="p">))</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">idx</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-run_link_bridge-bridge">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">bridge</span><span class="p">(</span><span class="n">overwrite</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<p class="calls"><b>Called by</b> <code>utils/docs/build_docs.py</code></p>
+<details><summary>source · lines 122–201 (80 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">bridge</span><span class="p">(</span><span class="n">overwrite</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+    <span class="n">cur</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">CURATION</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">de_idx</span> <span class="o">=</span> <span class="n">load_german_index</span><span class="p">()</span>
+    <span class="n">en_idx</span> <span class="o">=</span> <span class="n">load_label_index</span><span class="p">()</span>
+
+    <span class="k">if</span> <span class="s2">&quot;verdict&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">cur</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="n">cur</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+
+    <span class="n">stats</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;gloss&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;de_exact&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;de_ambiguous&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;en_exact&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+             <span class="s2">&quot;override&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;kept&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;none&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">}</span>
+
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">cur</span><span class="o">.</span><span class="n">iterrows</span><span class="p">():</span>
+        <span class="n">key</span> <span class="o">=</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;key&quot;</span><span class="p">]</span>
+        <span class="n">has_code</span> <span class="o">=</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">has_code</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">overwrite</span> <span class="ow">and</span> <span class="n">key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">HISCO_OVERRIDE</span><span class="p">:</span>
+            <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;kept&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">continue</span>
+
+        <span class="n">gloss</span> <span class="o">=</span> <span class="n">CZ_GLOSS</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">gloss</span><span class="p">:</span>
+            <span class="n">de</span><span class="p">,</span> <span class="n">en</span> <span class="o">=</span> <span class="n">gloss</span>
+            <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;de_gloss&quot;</span><span class="p">],</span> <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;en_gloss&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">de</span><span class="p">,</span> <span class="n">en</span>
+            <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;gloss&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+
+            <span class="n">hits</span> <span class="o">=</span> <span class="n">de_idx</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">_fold</span><span class="p">(</span><span class="n">de</span><span class="p">),</span> <span class="p">[])</span>
+            <span class="n">codes</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">({</span><span class="n">h</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">h</span> <span class="ow">in</span> <span class="n">hits</span><span class="p">})</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">codes</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="n">h</span> <span class="o">=</span> <span class="n">hits</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;link_hisco&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">codes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;hisco&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">codes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;status&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">_norm_modifier</span><span class="p">(</span><span class="n">h</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">])</span>
+                <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;relation&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">_norm_modifier</span><span class="p">(</span><span class="n">h</span><span class="p">[</span><span class="s2">&quot;relation&quot;</span><span class="p">])</span>
+                <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;product&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">_norm_modifier</span><span class="p">(</span><span class="n">h</span><span class="p">[</span><span class="s2">&quot;product&quot;</span><span class="p">])</span>
+                <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;source&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;link&quot;</span>
+                <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;de_exact&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">elif</span> <span class="nb">len</span><span class="p">(</span><span class="n">codes</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;link_hisco&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">codes</span><span class="p">)</span>
+                <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;review&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;1&quot;</span>
+                <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;note&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;German gloss </span><span class="si">{</span><span class="n">de</span><span class="si">!r}</span><span class="s2"> maps to </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">codes</span><span class="p">)</span><span class="si">}</span><span class="s2"> codes&quot;</span>
+                <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;de_ambiguous&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">en_codes</span> <span class="o">=</span> <span class="n">en_idx</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">_fold</span><span class="p">(</span><span class="n">en</span><span class="p">),</span> <span class="p">[])</span>
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">en_codes</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                    <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;hisco&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">en_codes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                    <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;link_hisco&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">en_codes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                    <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;source&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;label_en&quot;</span>
+                    <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;en_exact&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;review&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;1&quot;</span>
+                    <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;note&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;no German link for </span><span class="si">{</span><span class="n">de</span><span class="si">!r}</span><span class="s2">; &quot;</span>
+                        <span class="sa">f</span><span class="s2">&quot;English label matched </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">en_codes</span><span class="p">)</span><span class="si">}</span><span class="s2"> codes&quot;</span><span class="p">)</span>
+                    <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;none&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+
+    <span class="c1"># Overrides win outright.</span>
+    <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">spec</span> <span class="ow">in</span> <span class="n">HISCO_OVERRIDE</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">m</span> <span class="o">=</span> <span class="n">cur</span><span class="p">[</span><span class="s2">&quot;key&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">key</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">m</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+            <span class="k">continue</span>
+        <span class="k">for</span> <span class="n">col</span><span class="p">,</span> <span class="n">val</span> <span class="ow">in</span> <span class="n">spec</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">cur</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">m</span><span class="p">,</span> <span class="n">col</span><span class="p">]</span> <span class="o">=</span> <span class="n">val</span>
+        <span class="c1"># `source` is part of the spec for the compounds curated whole under D-29, which are</span>
+        <span class="c1"># a different kind of judgement from a plain hand override and stay labelled as one.</span>
+        <span class="n">cur</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">m</span><span class="p">,</span> <span class="s2">&quot;source&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">spec</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;source&quot;</span><span class="p">,</span> <span class="s2">&quot;manual&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;status&quot;</span><span class="p">,</span> <span class="s2">&quot;relation&quot;</span><span class="p">,</span> <span class="s2">&quot;product&quot;</span><span class="p">):</span>
+            <span class="n">blank</span> <span class="o">=</span> <span class="n">m</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">cur</span><span class="p">[</span><span class="n">col</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">==</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+            <span class="n">cur</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">blank</span><span class="p">,</span> <span class="n">col</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;-9&quot;</span>
+        <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;override&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+
+    <span class="n">apply_adjudication</span><span class="p">(</span><span class="n">cur</span><span class="p">,</span> <span class="n">stats</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  &quot;</span> <span class="o">+</span> <span class="s2">&quot;  &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">k</span><span class="si">}</span><span class="s2">=</span><span class="si">{</span><span class="n">v</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">stats</span><span class="o">.</span><span class="n">items</span><span class="p">()))</span>
+    <span class="n">missing_keys</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">HISCO_OVERRIDE</span><span class="p">)</span> <span class="o">-</span> <span class="nb">set</span><span class="p">(</span><span class="n">cur</span><span class="p">[</span><span class="s2">&quot;key&quot;</span><span class="p">]))</span>
+    <span class="k">if</span> <span class="n">missing_keys</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  note: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">missing_keys</span><span class="p">)</span><span class="si">}</span><span class="s2"> override keys are not in the skeleton: &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">missing_keys</span><span class="p">[:</span><span class="mi">10</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">unused</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">CZ_GLOSS</span><span class="p">)</span> <span class="o">-</span> <span class="nb">set</span><span class="p">(</span><span class="n">cur</span><span class="p">[</span><span class="s2">&quot;key&quot;</span><span class="p">]))</span>
+    <span class="k">if</span> <span class="n">unused</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  note: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">unused</span><span class="p">)</span><span class="si">}</span><span class="s2"> glossed keys are not in the skeleton: </span><span class="si">{</span><span class="n">unused</span><span class="p">[:</span><span class="mi">10</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">cur</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-run_link_bridge-apply_adjudication">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">apply_adjudication</span><span class="p">(</span><span class="n">cur</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">stats</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span></pre>
+<div class="fndoc"><p>Write the human verdicts, and let them — and only them — clear a <code>review</code> flag.</p>
+<p>Ordering matters and is deliberate. The bridge raises <code>review</code> wherever a German gloss
+reached several codes, and it must keep doing so: that is how a key added next month
+arrives flagged. What it must not do is re-raise a flag a human has already answered, so
+this runs last and overwrites.</p>
+<p>Two guards, both for the same failure — a verdict recorded while the code it implies
+never lands, which would leave the curation <em>looking</em> settled at the old code:</p>
+<ul>
+<li>a key marked <code>recoded</code> must have an entry in <code>HISCO_OVERRIDE</code>, since that is where
+  the new code lives;</li>
+<li><code>HISCO_OVERRIDE</code> may not set <code>review</code> for an adjudicated key, or the two would be
+  arguing about the flag and the winner would be whichever ran second.</li>
+</ul></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 204–245 (42 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">apply_adjudication</span><span class="p">(</span><span class="n">cur</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">stats</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Write the human verdicts, and let them — and only them — clear a ``review`` flag.</span>
+
+<span class="sd">    Ordering matters and is deliberate. The bridge raises ``review`` wherever a German gloss</span>
+<span class="sd">    reached several codes, and it must keep doing so: that is how a key added next month</span>
+<span class="sd">    arrives flagged. What it must not do is re-raise a flag a human has already answered, so</span>
+<span class="sd">    this runs last and overwrites.</span>
+
+<span class="sd">    Two guards, both for the same failure — a verdict recorded while the code it implies</span>
+<span class="sd">    never lands, which would leave the curation *looking* settled at the old code:</span>
+
+<span class="sd">    * a key marked ``recoded`` must have an entry in ``HISCO_OVERRIDE``, since that is where</span>
+<span class="sd">      the new code lives;</span>
+<span class="sd">    * ``HISCO_OVERRIDE`` may not set ``review`` for an adjudicated key, or the two would be</span>
+<span class="sd">      arguing about the flag and the winner would be whichever ran second.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">missing</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">k</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">ADJUDICATED</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+                     <span class="k">if</span> <span class="n">v</span> <span class="o">==</span> <span class="s2">&quot;recoded&quot;</span> <span class="ow">and</span> <span class="n">k</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">HISCO_OVERRIDE</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">missing</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;ADJUDICATED marks these &#39;recoded&#39; but HISCO_OVERRIDE has no entry, &quot;</span>
+                         <span class="sa">f</span><span class="s2">&quot;so the old code would stand: </span><span class="si">{</span><span class="n">missing</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">contested</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">k</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">ADJUDICATED</span> <span class="k">if</span> <span class="s2">&quot;review&quot;</span> <span class="ow">in</span> <span class="n">HISCO_OVERRIDE</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="p">{}))</span>
+    <span class="k">if</span> <span class="n">contested</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;HISCO_OVERRIDE sets `review` for adjudicated keys; ADJUDICATED owns &quot;</span>
+                         <span class="sa">f</span><span class="s2">&quot;the flag and these would fight over it: </span><span class="si">{</span><span class="n">contested</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">absent</span><span class="p">,</span> <span class="n">counts</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">{</span><span class="s2">&quot;keep&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;recoded&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;open&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">}</span>
+    <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">verdict</span> <span class="ow">in</span> <span class="n">ADJUDICATED</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">m</span> <span class="o">=</span> <span class="n">cur</span><span class="p">[</span><span class="s2">&quot;key&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">key</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">m</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+            <span class="n">absent</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+            <span class="k">continue</span>
+        <span class="n">kind</span> <span class="o">=</span> <span class="n">verdict</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;:&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">counts</span><span class="p">[</span><span class="n">kind</span><span class="p">]</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">kind</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="n">cur</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">m</span><span class="p">,</span> <span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">ADJUDICATED_ON</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">verdict</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="n">cur</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">m</span><span class="p">,</span> <span class="s2">&quot;review&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;1&quot;</span> <span class="k">if</span> <span class="n">kind</span> <span class="o">==</span> <span class="s2">&quot;open&quot;</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;adjudicated&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">ADJUDICATED</span><span class="p">)</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">absent</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  adjudicated </span><span class="si">{</span><span class="n">ADJUDICATED_ON</span><span class="si">}</span><span class="s2">: &quot;</span>
+          <span class="o">+</span> <span class="s2">&quot;  &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">k</span><span class="si">}</span><span class="s2">=</span><span class="si">{</span><span class="n">v</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">counts</span><span class="o">.</span><span class="n">items</span><span class="p">()))</span>
+    <span class="k">if</span> <span class="n">absent</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  note: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">absent</span><span class="p">)</span><span class="si">}</span><span class="s2"> adjudicated keys are not in the skeleton: </span><span class="si">{</span><span class="n">absent</span><span class="p">[:</span><span class="mi">10</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-run_link_bridge-bridge_report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">bridge_report</span><span class="p">(</span><span class="n">cur</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span></pre>
+<p class="calls"><b>Called by</b> <code>utils/reference_tools/occupations/build_czisco_bridge.py</code></p>
+<details><summary>source · lines 248–270 (23 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">bridge_report</span><span class="p">(</span><span class="n">cur</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">coded</span> <span class="o">=</span> <span class="n">cur</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">n_cov</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">to_numeric</span><span class="p">(</span><span class="n">cur</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">coded</span><span class="p">,</span> <span class="s2">&quot;n&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
+    <span class="n">n_all</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">to_numeric</span><span class="p">(</span><span class="n">cur</span><span class="p">[</span><span class="s2">&quot;n&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Curation after the bridge&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  keys with a HISCO code  </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">coded</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> / </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">cur</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  records those cover     </span><span class="si">{</span><span class="n">n_cov</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="n">n_all</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> in the skeleton &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">n_cov</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">n_all</span><span class="si">:</span><span class="s2">.1%</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+    <span class="n">flagged</span> <span class="o">=</span> <span class="n">cur</span><span class="p">[</span><span class="s2">&quot;review&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">answered</span> <span class="o">=</span> <span class="n">cur</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  adjudicated             </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">answered</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">to_numeric</span><span class="p">(</span><span class="n">cur</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">answered</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;n&#39;</span><span class="p">])</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> records)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  still flagged for review </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">flagged</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">to_numeric</span><span class="p">(</span><span class="n">cur</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">flagged</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;n&#39;</span><span class="p">])</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> records)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  by source:&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">cur</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">coded</span><span class="p">,</span> <span class="s2">&quot;source&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">k</span><span class="si">:</span><span class="s2">&lt;10</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">v</span><span class="si">:</span><span class="s2">&gt;5,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">top_uncoded</span> <span class="o">=</span> <span class="n">cur</span><span class="p">[</span><span class="o">~</span><span class="n">coded</span><span class="p">]</span><span class="o">.</span><span class="n">head</span><span class="p">(</span><span class="mi">15</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">top_uncoded</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  largest keys still uncoded:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">top_uncoded</span><span class="o">.</span><span class="n">itertuples</span><span class="p">():</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">n</span><span class="p">))</span><span class="si">:</span><span class="s2">&gt;6,</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">r</span><span class="o">.</span><span class="n">key</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-occupations-run_link_bridge-main">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 273–292 (20 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()[</span><span class="mi">1</span><span class="p">])</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--overwrite&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;re-derive codes even where the curation already has one&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+
+    <span class="c1"># A key written twice in czech_glosses.py is invisible at runtime — the dict is already</span>
+    <span class="c1"># built by then — so check the source before trusting either dict.</span>
+    <span class="n">dupes</span> <span class="o">=</span> <span class="n">duplicate_keys</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">dupes</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span>
+            <span class="s2">&quot;czech_glosses.py defines the same key more than once; Python keeps the last &quot;</span>
+            <span class="s2">&quot;silently:</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">k</span><span class="si">!r}</span><span class="s2"> at lines </span><span class="si">{</span><span class="n">v</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">dupes</span><span class="o">.</span><span class="n">items</span><span class="p">()))</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Bridging Czech glosses -&gt; HISCO …&quot;</span><span class="p">)</span>
+    <span class="n">cur</span> <span class="o">=</span> <span class="n">bridge</span><span class="p">(</span><span class="n">overwrite</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">overwrite</span><span class="p">)</span>
+    <span class="n">bridge_report</span><span class="p">(</span><span class="n">cur</span><span class="p">)</span>
+    <span class="n">cur</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">CURATION</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Updated </span><span class="si">{</span><span class="n">CURATION</span><span class="o">.</span><span class="n">relative_to</span><span class="p">(</span><span class="n">ROOT</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-reference_tools-occupations-run_link_bridge-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-run_link_bridge-LINK"><pre class="sig">LINK<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;data&#39;</span> <span class="o">/</span> <span class="s1">&#39;raw&#39;</span> <span class="o">/</span> <span class="s1">&#39;hisco&#39;</span> <span class="o">/</span> <span class="s1">&#39;hisco_occupation_link_combined.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-run_link_bridge-AUTHORITY"><pre class="sig">AUTHORITY<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;reference&#39;</span> <span class="o">/</span> <span class="s1">&#39;occupations&#39;</span> <span class="o">/</span> <span class="s1">&#39;hisco_authority.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-run_link_bridge-CURATION"><pre class="sig">CURATION<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;reference&#39;</span> <span class="o">/</span> <span class="s1">&#39;occupations&#39;</span> <span class="o">/</span> <span class="s1">&#39;occupation_hisco_curation.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-occupations-run_link_bridge-GERMAN_LANGS"><pre class="sig">GERMAN_LANGS<span class="kind">set · 2 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;GE&#39;</span><span class="p">,</span> <span class="s1">&#39;DE&#39;</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/reference_tools/occupations/run_link_bridge.py · 296 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">run_link_bridge.py — resolve the Czech glosses to HISCO codes via the German link table</span>
+<span class="sd">=======================================================================================</span>
+<span class="sd">Applies ``czech_glosses.py`` to the curation skeleton and fills in the codes:</span>
+
+<span class="sd">  1. ``de_gloss`` / ``en_gloss`` are written into the curation from ``CZ_GLOSS``.</span>
+<span class="sd">  2. The German gloss is looked up **exactly** (case- and diacritic-insensitive) in the</span>
+<span class="sd">     ``lang_code == &#39;GE&#39;`` rows of ``hisco_occupation_link_combined.csv`` -&gt; ``link_hisco``.</span>
+<span class="sd">     A gloss that resolves to more than one HISCO code is *not* auto-assigned; it is</span>
+<span class="sd">     flagged ``review`` with the candidates in ``note``.</span>
+<span class="sd">  3. Where a gloss misses, the English gloss is matched against the authority&#39;s own</span>
+<span class="sd">     ``label_en`` — **exact only**. No fuzzy matching anywhere: HISCO labels are formal</span>
+<span class="sd">     (&quot;Metal Moulder, General&quot;), colloquial glosses are not, and a near-miss between two</span>
+<span class="sd">     formal labels is far more likely to be a different occupation than a spelling</span>
+<span class="sd">     variant. Anything that misses is flagged for hand assignment instead.</span>
+<span class="sd">  4. ``HISCO_OVERRIDE`` is applied after the bridge and always wins, so a documented</span>
+<span class="sd">     judgement call cannot be overwritten by it.</span>
+<span class="sd">  5. ``ADJUDICATED`` is applied last, and it is the **only** writer of ``review``. A key</span>
+<span class="sd">     answered ``keep`` or ``recoded`` in the 2026-08-26 workbook has its flag cleared and</span>
+<span class="sd">     its verdict written to the ``verdict`` column; a key answered ``open`` keeps the flag</span>
+<span class="sd">     and carries the reason it survived. Anything never adjudicated keeps whatever the</span>
+<span class="sd">     bridge decided, so a new ambiguous key still arrives flagged.</span>
+
+<span class="sd">Hand-entered values already in the curation are preserved: the script only fills blanks</span>
+<span class="sd">unless ``--overwrite`` is passed.</span>
+
+<span class="sd">Run:  python utils/reference_tools/occupations/run_link_bridge.py [--overwrite]</span>
+<span class="sd">Emits: updates reference/occupations/occupation_hisco_curation.csv in place</span>
+<span class="sd">Independent check: utils/reference_tools/occupations/run_occcanine_check.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">unicodedata</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">))</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.reference_tools.occupations.czech_glosses</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span><span class="n">ADJUDICATED</span><span class="p">,</span> <span class="n">ADJUDICATED_ON</span><span class="p">,</span> <span class="n">CZ_GLOSS</span><span class="p">,</span>
+                                                 <span class="n">HISCO_OVERRIDE</span><span class="p">,</span> <span class="n">duplicate_keys</span><span class="p">)</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.2.0&quot;</span>   <span class="c1"># + the adjudication register</span>
+
+<span class="n">LINK</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;data&quot;</span> <span class="o">/</span> <span class="s2">&quot;raw&quot;</span> <span class="o">/</span> <span class="s2">&quot;hisco&quot;</span> <span class="o">/</span> <span class="s2">&quot;hisco_occupation_link_combined.csv&quot;</span>
+<span class="n">AUTHORITY</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;occupations&quot;</span> <span class="o">/</span> <span class="s2">&quot;hisco_authority.csv&quot;</span>
+<span class="n">CURATION</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;occupations&quot;</span> <span class="o">/</span> <span class="s2">&quot;occupation_hisco_curation.csv&quot;</span>
+
+<span class="n">GERMAN_LANGS</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;GE&quot;</span><span class="p">,</span> <span class="s2">&quot;DE&quot;</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_fold</span><span class="p">(</span><span class="n">s</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">unicodedata</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="s2">&quot;NFD&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">s</span><span class="p">))</span>
+                <span class="k">if</span> <span class="n">unicodedata</span><span class="o">.</span><span class="n">category</span><span class="p">(</span><span class="n">c</span><span class="p">)</span> <span class="o">!=</span> <span class="s2">&quot;Mn&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span><span class="o">.</span><span class="n">split</span><span class="p">())</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">load_authority_codes</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Every HISCO code the authority can resolve to a label and the HISCLASS/HISCAM scales.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="nb">set</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">AUTHORITY</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;hisco&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">})[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">dropna</span><span class="p">())</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_pad_hisco</span><span class="p">(</span><span class="n">code</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">known</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Restore a leading zero the link table dropped — but only when that is demonstrably right.</span>
+
+<span class="sd">    HISCO is a **5-digit** scheme and the authority stores it that way, but</span>
+<span class="sd">    ``hisco_occupation_link_combined.csv`` writes the id unpadded: an obstetrician is ``7310``</span>
+<span class="sd">    where the authority has ``07310``. 1,827 of its rows are 4-digit and 1,167 are 2-digit.</span>
+
+<span class="sd">    Blanket ``zfill(5)`` would be wrong — the same column also carries the sentinels ``-1``,</span>
+<span class="sd">    ``-2`` and ``0`` (no code), and coarser hierarchy levels (``1200``, ``2100``) that are not</span>
+<span class="sd">    occupations at all. So the padded form is accepted **only if the authority actually has it**;</span>
+<span class="sd">    anything else is returned untouched and left for the caller&#39;s validity check to reject.</span>
+<span class="sd">    Without this, ``Schiffer`` was coded ``4217`` and ``Ökonom`` ``9010`` — both real codes</span>
+<span class="sd">    (``04217`` Ship&#39;s Master, ``09010`` Economist) that no downstream lookup could resolve,</span>
+<span class="sd">    which is what the ``data_checks`` HISCO-authority invariant caught.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">c</span> <span class="o">=</span> <span class="p">(</span><span class="n">code</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">c</span> <span class="ow">and</span> <span class="n">c</span><span class="o">.</span><span class="n">isdigit</span><span class="p">()</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">c</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">5</span><span class="p">:</span>
+        <span class="n">padded</span> <span class="o">=</span> <span class="n">c</span><span class="o">.</span><span class="n">zfill</span><span class="p">(</span><span class="mi">5</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">padded</span> <span class="ow">in</span> <span class="n">known</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">padded</span>
+    <span class="k">return</span> <span class="n">c</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">load_german_index</span><span class="p">(</span><span class="n">known</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Folded German label -&gt; the link rows carrying it (HISCO ids zero-padded, see :func:`_pad_hisco`).&quot;&quot;&quot;</span>
+    <span class="n">known</span> <span class="o">=</span> <span class="n">load_authority_codes</span><span class="p">()</span> <span class="k">if</span> <span class="n">known</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">known</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">LINK</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">&quot;;&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">de</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;lang_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">GERMAN_LANGS</span><span class="p">)]</span>
+    <span class="n">idx</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">n_pad</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">de</span><span class="o">.</span><span class="n">itertuples</span><span class="p">():</span>
+        <span class="n">code</span> <span class="o">=</span> <span class="n">_pad_hisco</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">hisco_id</span><span class="p">,</span> <span class="n">known</span><span class="p">)</span>
+        <span class="n">n_pad</span> <span class="o">+=</span> <span class="n">code</span> <span class="o">!=</span> <span class="n">r</span><span class="o">.</span><span class="n">hisco_id</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="n">idx</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">_fold</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">label</span><span class="p">),</span> <span class="p">[])</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+            <span class="p">{</span><span class="s2">&quot;hisco&quot;</span><span class="p">:</span> <span class="n">code</span><span class="p">,</span> <span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">status_id</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+             <span class="s2">&quot;relation&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">relation_id</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span> <span class="s2">&quot;product&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">product_id</span><span class="o">.</span><span class="n">strip</span><span class="p">()})</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  German link labels: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">idx</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> distinct over </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">de</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> rows &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">n_pad</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> HISCO ids zero-padded to 5 digits)&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">idx</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">load_label_index</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Folded English authority label -&gt; HISCO codes.&quot;&quot;&quot;</span>
+    <span class="n">auth</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">AUTHORITY</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;hisco&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">})</span>
+    <span class="n">auth</span> <span class="o">=</span> <span class="n">auth</span><span class="p">[</span><span class="n">auth</span><span class="p">[</span><span class="s2">&quot;label_en&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()]</span>
+    <span class="n">idx</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">lab</span><span class="p">,</span> <span class="n">hisco</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">auth</span><span class="p">[</span><span class="s2">&quot;label_en&quot;</span><span class="p">],</span> <span class="n">auth</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]):</span>
+        <span class="n">idx</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">_fold</span><span class="p">(</span><span class="n">lab</span><span class="p">),</span> <span class="p">[])</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">hisco</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">v</span><span class="p">))</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">idx</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_norm_modifier</span><span class="p">(</span><span class="n">v</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The link table writes &#39;no modifier&#39; as 0; the authority (from HSN) uses -9.&quot;&quot;&quot;</span>
+    <span class="n">v</span> <span class="o">=</span> <span class="p">(</span><span class="n">v</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">return</span> <span class="s2">&quot;-9&quot;</span> <span class="k">if</span> <span class="n">v</span> <span class="ow">in</span> <span class="p">{</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;0&quot;</span><span class="p">,</span> <span class="s2">&quot;-9&quot;</span><span class="p">}</span> <span class="k">else</span> <span class="n">v</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">bridge</span><span class="p">(</span><span class="n">overwrite</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+    <span class="n">cur</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">CURATION</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">de_idx</span> <span class="o">=</span> <span class="n">load_german_index</span><span class="p">()</span>
+    <span class="n">en_idx</span> <span class="o">=</span> <span class="n">load_label_index</span><span class="p">()</span>
+
+    <span class="k">if</span> <span class="s2">&quot;verdict&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">cur</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="n">cur</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+
+    <span class="n">stats</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;gloss&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;de_exact&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;de_ambiguous&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;en_exact&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+             <span class="s2">&quot;override&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;kept&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;none&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">}</span>
+
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">cur</span><span class="o">.</span><span class="n">iterrows</span><span class="p">():</span>
+        <span class="n">key</span> <span class="o">=</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;key&quot;</span><span class="p">]</span>
+        <span class="n">has_code</span> <span class="o">=</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">has_code</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">overwrite</span> <span class="ow">and</span> <span class="n">key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">HISCO_OVERRIDE</span><span class="p">:</span>
+            <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;kept&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">continue</span>
+
+        <span class="n">gloss</span> <span class="o">=</span> <span class="n">CZ_GLOSS</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">gloss</span><span class="p">:</span>
+            <span class="n">de</span><span class="p">,</span> <span class="n">en</span> <span class="o">=</span> <span class="n">gloss</span>
+            <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;de_gloss&quot;</span><span class="p">],</span> <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;en_gloss&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">de</span><span class="p">,</span> <span class="n">en</span>
+            <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;gloss&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+
+            <span class="n">hits</span> <span class="o">=</span> <span class="n">de_idx</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">_fold</span><span class="p">(</span><span class="n">de</span><span class="p">),</span> <span class="p">[])</span>
+            <span class="n">codes</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">({</span><span class="n">h</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">h</span> <span class="ow">in</span> <span class="n">hits</span><span class="p">})</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">codes</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="n">h</span> <span class="o">=</span> <span class="n">hits</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;link_hisco&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">codes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;hisco&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">codes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;status&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">_norm_modifier</span><span class="p">(</span><span class="n">h</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">])</span>
+                <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;relation&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">_norm_modifier</span><span class="p">(</span><span class="n">h</span><span class="p">[</span><span class="s2">&quot;relation&quot;</span><span class="p">])</span>
+                <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;product&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">_norm_modifier</span><span class="p">(</span><span class="n">h</span><span class="p">[</span><span class="s2">&quot;product&quot;</span><span class="p">])</span>
+                <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;source&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;link&quot;</span>
+                <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;de_exact&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">elif</span> <span class="nb">len</span><span class="p">(</span><span class="n">codes</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;link_hisco&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">codes</span><span class="p">)</span>
+                <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;review&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;1&quot;</span>
+                <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;note&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;German gloss </span><span class="si">{</span><span class="n">de</span><span class="si">!r}</span><span class="s2"> maps to </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">codes</span><span class="p">)</span><span class="si">}</span><span class="s2"> codes&quot;</span>
+                <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;de_ambiguous&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">en_codes</span> <span class="o">=</span> <span class="n">en_idx</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">_fold</span><span class="p">(</span><span class="n">en</span><span class="p">),</span> <span class="p">[])</span>
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">en_codes</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                    <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;hisco&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">en_codes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                    <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;link_hisco&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">en_codes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                    <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;source&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;label_en&quot;</span>
+                    <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;en_exact&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;review&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;1&quot;</span>
+                    <span class="n">cur</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="s2">&quot;note&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;no German link for </span><span class="si">{</span><span class="n">de</span><span class="si">!r}</span><span class="s2">; &quot;</span>
+                        <span class="sa">f</span><span class="s2">&quot;English label matched </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">en_codes</span><span class="p">)</span><span class="si">}</span><span class="s2"> codes&quot;</span><span class="p">)</span>
+                    <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;none&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+
+    <span class="c1"># Overrides win outright.</span>
+    <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">spec</span> <span class="ow">in</span> <span class="n">HISCO_OVERRIDE</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">m</span> <span class="o">=</span> <span class="n">cur</span><span class="p">[</span><span class="s2">&quot;key&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">key</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">m</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+            <span class="k">continue</span>
+        <span class="k">for</span> <span class="n">col</span><span class="p">,</span> <span class="n">val</span> <span class="ow">in</span> <span class="n">spec</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">cur</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">m</span><span class="p">,</span> <span class="n">col</span><span class="p">]</span> <span class="o">=</span> <span class="n">val</span>
+        <span class="c1"># `source` is part of the spec for the compounds curated whole under D-29, which are</span>
+        <span class="c1"># a different kind of judgement from a plain hand override and stay labelled as one.</span>
+        <span class="n">cur</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">m</span><span class="p">,</span> <span class="s2">&quot;source&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">spec</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;source&quot;</span><span class="p">,</span> <span class="s2">&quot;manual&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;status&quot;</span><span class="p">,</span> <span class="s2">&quot;relation&quot;</span><span class="p">,</span> <span class="s2">&quot;product&quot;</span><span class="p">):</span>
+            <span class="n">blank</span> <span class="o">=</span> <span class="n">m</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">cur</span><span class="p">[</span><span class="n">col</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">==</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+            <span class="n">cur</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">blank</span><span class="p">,</span> <span class="n">col</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;-9&quot;</span>
+        <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;override&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+
+    <span class="n">apply_adjudication</span><span class="p">(</span><span class="n">cur</span><span class="p">,</span> <span class="n">stats</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  &quot;</span> <span class="o">+</span> <span class="s2">&quot;  &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">k</span><span class="si">}</span><span class="s2">=</span><span class="si">{</span><span class="n">v</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">stats</span><span class="o">.</span><span class="n">items</span><span class="p">()))</span>
+    <span class="n">missing_keys</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">HISCO_OVERRIDE</span><span class="p">)</span> <span class="o">-</span> <span class="nb">set</span><span class="p">(</span><span class="n">cur</span><span class="p">[</span><span class="s2">&quot;key&quot;</span><span class="p">]))</span>
+    <span class="k">if</span> <span class="n">missing_keys</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  note: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">missing_keys</span><span class="p">)</span><span class="si">}</span><span class="s2"> override keys are not in the skeleton: &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">missing_keys</span><span class="p">[:</span><span class="mi">10</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">unused</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">CZ_GLOSS</span><span class="p">)</span> <span class="o">-</span> <span class="nb">set</span><span class="p">(</span><span class="n">cur</span><span class="p">[</span><span class="s2">&quot;key&quot;</span><span class="p">]))</span>
+    <span class="k">if</span> <span class="n">unused</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  note: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">unused</span><span class="p">)</span><span class="si">}</span><span class="s2"> glossed keys are not in the skeleton: </span><span class="si">{</span><span class="n">unused</span><span class="p">[:</span><span class="mi">10</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">cur</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">apply_adjudication</span><span class="p">(</span><span class="n">cur</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">stats</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Write the human verdicts, and let them — and only them — clear a ``review`` flag.</span>
+
+<span class="sd">    Ordering matters and is deliberate. The bridge raises ``review`` wherever a German gloss</span>
+<span class="sd">    reached several codes, and it must keep doing so: that is how a key added next month</span>
+<span class="sd">    arrives flagged. What it must not do is re-raise a flag a human has already answered, so</span>
+<span class="sd">    this runs last and overwrites.</span>
+
+<span class="sd">    Two guards, both for the same failure — a verdict recorded while the code it implies</span>
+<span class="sd">    never lands, which would leave the curation *looking* settled at the old code:</span>
+
+<span class="sd">    * a key marked ``recoded`` must have an entry in ``HISCO_OVERRIDE``, since that is where</span>
+<span class="sd">      the new code lives;</span>
+<span class="sd">    * ``HISCO_OVERRIDE`` may not set ``review`` for an adjudicated key, or the two would be</span>
+<span class="sd">      arguing about the flag and the winner would be whichever ran second.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">missing</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">k</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">ADJUDICATED</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+                     <span class="k">if</span> <span class="n">v</span> <span class="o">==</span> <span class="s2">&quot;recoded&quot;</span> <span class="ow">and</span> <span class="n">k</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">HISCO_OVERRIDE</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">missing</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;ADJUDICATED marks these &#39;recoded&#39; but HISCO_OVERRIDE has no entry, &quot;</span>
+                         <span class="sa">f</span><span class="s2">&quot;so the old code would stand: </span><span class="si">{</span><span class="n">missing</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">contested</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">k</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">ADJUDICATED</span> <span class="k">if</span> <span class="s2">&quot;review&quot;</span> <span class="ow">in</span> <span class="n">HISCO_OVERRIDE</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="p">{}))</span>
+    <span class="k">if</span> <span class="n">contested</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;HISCO_OVERRIDE sets `review` for adjudicated keys; ADJUDICATED owns &quot;</span>
+                         <span class="sa">f</span><span class="s2">&quot;the flag and these would fight over it: </span><span class="si">{</span><span class="n">contested</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">absent</span><span class="p">,</span> <span class="n">counts</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">{</span><span class="s2">&quot;keep&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;recoded&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;open&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">}</span>
+    <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">verdict</span> <span class="ow">in</span> <span class="n">ADJUDICATED</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">m</span> <span class="o">=</span> <span class="n">cur</span><span class="p">[</span><span class="s2">&quot;key&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">key</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">m</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+            <span class="n">absent</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+            <span class="k">continue</span>
+        <span class="n">kind</span> <span class="o">=</span> <span class="n">verdict</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;:&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">counts</span><span class="p">[</span><span class="n">kind</span><span class="p">]</span> <span class="o">=</span> <span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">kind</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="n">cur</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">m</span><span class="p">,</span> <span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">ADJUDICATED_ON</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">verdict</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="n">cur</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">m</span><span class="p">,</span> <span class="s2">&quot;review&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;1&quot;</span> <span class="k">if</span> <span class="n">kind</span> <span class="o">==</span> <span class="s2">&quot;open&quot;</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;adjudicated&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">ADJUDICATED</span><span class="p">)</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">absent</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  adjudicated </span><span class="si">{</span><span class="n">ADJUDICATED_ON</span><span class="si">}</span><span class="s2">: &quot;</span>
+          <span class="o">+</span> <span class="s2">&quot;  &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">k</span><span class="si">}</span><span class="s2">=</span><span class="si">{</span><span class="n">v</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">counts</span><span class="o">.</span><span class="n">items</span><span class="p">()))</span>
+    <span class="k">if</span> <span class="n">absent</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  note: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">absent</span><span class="p">)</span><span class="si">}</span><span class="s2"> adjudicated keys are not in the skeleton: </span><span class="si">{</span><span class="n">absent</span><span class="p">[:</span><span class="mi">10</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">bridge_report</span><span class="p">(</span><span class="n">cur</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">coded</span> <span class="o">=</span> <span class="n">cur</span><span class="p">[</span><span class="s2">&quot;hisco&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">n_cov</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">to_numeric</span><span class="p">(</span><span class="n">cur</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">coded</span><span class="p">,</span> <span class="s2">&quot;n&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
+    <span class="n">n_all</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">to_numeric</span><span class="p">(</span><span class="n">cur</span><span class="p">[</span><span class="s2">&quot;n&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Curation after the bridge&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  keys with a HISCO code  </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">coded</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> / </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">cur</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  records those cover     </span><span class="si">{</span><span class="n">n_cov</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="n">n_all</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> in the skeleton &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">n_cov</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">n_all</span><span class="si">:</span><span class="s2">.1%</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+    <span class="n">flagged</span> <span class="o">=</span> <span class="n">cur</span><span class="p">[</span><span class="s2">&quot;review&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">answered</span> <span class="o">=</span> <span class="n">cur</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  adjudicated             </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">answered</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">to_numeric</span><span class="p">(</span><span class="n">cur</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">answered</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;n&#39;</span><span class="p">])</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> records)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  still flagged for review </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">flagged</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">to_numeric</span><span class="p">(</span><span class="n">cur</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">flagged</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;n&#39;</span><span class="p">])</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> records)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  by source:&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">cur</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">coded</span><span class="p">,</span> <span class="s2">&quot;source&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">k</span><span class="si">:</span><span class="s2">&lt;10</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">v</span><span class="si">:</span><span class="s2">&gt;5,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">top_uncoded</span> <span class="o">=</span> <span class="n">cur</span><span class="p">[</span><span class="o">~</span><span class="n">coded</span><span class="p">]</span><span class="o">.</span><span class="n">head</span><span class="p">(</span><span class="mi">15</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">top_uncoded</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  largest keys still uncoded:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">top_uncoded</span><span class="o">.</span><span class="n">itertuples</span><span class="p">():</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">n</span><span class="p">))</span><span class="si">:</span><span class="s2">&gt;6,</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">r</span><span class="o">.</span><span class="n">key</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()[</span><span class="mi">1</span><span class="p">])</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--overwrite&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+                    <span class="n">help</span><span class="o">=</span><span class="s2">&quot;re-derive codes even where the curation already has one&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+
+    <span class="c1"># A key written twice in czech_glosses.py is invisible at runtime — the dict is already</span>
+    <span class="c1"># built by then — so check the source before trusting either dict.</span>
+    <span class="n">dupes</span> <span class="o">=</span> <span class="n">duplicate_keys</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">dupes</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span>
+            <span class="s2">&quot;czech_glosses.py defines the same key more than once; Python keeps the last &quot;</span>
+            <span class="s2">&quot;silently:</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">k</span><span class="si">!r}</span><span class="s2"> at lines </span><span class="si">{</span><span class="n">v</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">dupes</span><span class="o">.</span><span class="n">items</span><span class="p">()))</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Bridging Czech glosses -&gt; HISCO …&quot;</span><span class="p">)</span>
+    <span class="n">cur</span> <span class="o">=</span> <span class="n">bridge</span><span class="p">(</span><span class="n">overwrite</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">overwrite</span><span class="p">)</span>
+    <span class="n">bridge_report</span><span class="p">(</span><span class="n">cur</span><span class="p">)</span>
+    <span class="n">cur</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">CURATION</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Updated </span><span class="si">{</span><span class="n">CURATION</span><span class="o">.</span><span class="n">relative_to</span><span class="p">(</span><span class="n">ROOT</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>
