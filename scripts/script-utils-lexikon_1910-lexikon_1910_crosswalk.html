@@ -1,0 +1,705 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Both volumes print the same 1910 municipalities of Bohemia, each under both names — the Czech one
+<code>Dílce, Diletz</code>, the German one <code>Diletz, Dílce</code> — but each numbers them in its own alphabet, so
+Dílce is No. 7 of court Jičín in the Czech volume and No. 9 in the German one. A German place the
+route read but could not name (no line on the reader's parts list, and the German table is never
+read) can still be found through the Czech volume, whose table prints every municipality's German
+name. Three steps per court, each refusing what it cannot settle:</p><p class="tldr-facts"><b>1910 register</b> · v1.0.0 · 219 lines · 6 public functions · 1 constant · used by <code>utils/lexikon_1910/build_register_walkthrough.py</code>, <code>utils/lexikon_1910/lexikon_1910_register.py</code> · <code>utils/lexikon_1910/lexikon_1910_crosswalk.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_crosswalk-german_key">german_key</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_crosswalk-pair_court">pair_court</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_crosswalk-pair_parts">pair_parts</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_crosswalk-order_holdout">order_holdout</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_crosswalk-crosswalk_editions">crosswalk_editions</a><a class="chip" href="#fn-utils-lexikon_1910-lexikon_1910_crosswalk-crosswalk_report">crosswalk_report</a><a class="chip const" href="#c-utils-lexikon_1910-lexikon_1910_crosswalk-INHERITED">INHERITED</a></div>
+<h2>How it works</h2><ol>
+<li><strong>settlement</strong> — the two places anchored to the same <code>settlement_id</code> (each id once per side);</li>
+<li><strong>name</strong> — a German place's printed forms against the Czech place's cell, through
+   <code>lexikon_1910_names.anchor_blocks</code> (≥ 84, margin 5, ties refused, one to one);</li>
+<li><strong>order</strong> — the German volume numbers a court's municipalities in alphabetical order of their
+   German names, accents folded (Altsedlowitz 3, Bausnitz 4, Burkersdorf 6, Döberle 8 … on
+   Trutnov, where the Czech page holds all 33). Between two paired municipalities the German
+   numbers form a closed run of slots; the Czech municipalities whose German name sorts between the
+   two pairs' names fill it, in order — <strong>only if there are exactly as many as there are slots</strong>,
+   which is what proves no municipality is missing from the Czech pages read. Ends of a court are
+   closed only on a full run (<code>complete</code>). A court whose paired names do not rise with the German
+   numbers is refused the order step whole (a collation the rule does not know).</li>
+</ol>
+<p>A German place that its own names left unanchored takes the Czech place's <code>settlement_id</code>
+(<code>via_czech_name</code> / <code>via_czech_order</code>). Where both anchored on their own, <code>crosswalk_agrees</code>
+records whether they agree (never on a settlement pair, which agrees by construction).
+<code>order_holdout</code> tests the order rule itself: each known pair is dropped in turn and the
+order step asked to find it again. Parts are paired by settlement
+and by name only: their German order is not yet verified on any page.</p>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_crosswalk-german_key">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">german_key</span><span class="p">(</span><span class="n">cell</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<div class="fndoc"><p>The sort key of a Czech name cell's German name: its last form that is not a Czech
+alternate (<code>také …</code>), accents folded, <code>ß</code> as <code>ss</code>; a cell with one name is its own
+(a Czech-only place prints its Czech name in the German volume too).</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_register_build.py</code></p>
+<details><summary>source · lines 46–53 (8 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">46</span>
+<span class="normal">47</span>
+<span class="normal">48</span>
+<span class="normal">49</span>
+<span class="normal">50</span>
+<span class="normal">51</span>
+<span class="normal">52</span>
+<span class="normal">53</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">german_key</span><span class="p">(</span><span class="n">cell</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The sort key of a Czech name cell&#39;s German name: its last form that is not a Czech</span>
+<span class="sd">    alternate (``také …``), accents folded, ``ß`` as ``ss``; a cell with one name is its own</span>
+<span class="sd">    (a Czech-only place prints its Czech name in the German volume too).&quot;&quot;&quot;</span>
+    <span class="n">forms</span> <span class="o">=</span> <span class="p">[</span><span class="n">f</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">cell</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">f</span><span class="o">.</span><span class="n">strip</span><span class="p">()]</span>
+    <span class="n">forms</span> <span class="o">=</span> <span class="p">[</span><span class="n">f</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">forms</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">_ALTERNATE_RE</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">f</span><span class="p">)]</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="n">forms</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">forms</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">2</span> <span class="k">else</span> <span class="p">(</span><span class="n">forms</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">if</span> <span class="n">forms</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">lxn</span><span class="o">.</span><span class="n">normalise</span><span class="p">(</span><span class="n">name</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;ß&quot;</span><span class="p">,</span> <span class="s2">&quot;ss&quot;</span><span class="p">))</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_crosswalk-pair_court">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">pair_court</span><span class="p">(</span><span class="n">de</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">cz</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">complete</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">str</span><span class="p">]],</span> <span class="nb">str</span><span class="p">]</span></pre>
+<div class="fndoc"><p><code>({German index: (Czech index, how)}, order status)</code> for one court's municipalities.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_register_build.py</code> <code>utils/lexikon_1910/build_register_walkthrough.py</code></p>
+<details><summary>source · lines 112–121 (10 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">pair_court</span><span class="p">(</span><span class="n">de</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">cz</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">complete</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+               <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">str</span><span class="p">]],</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``({German index: (Czech index, how)}, order status)`` for one court&#39;s municipalities.&quot;&quot;&quot;</span>
+    <span class="n">pairs</span> <span class="o">=</span> <span class="p">{</span><span class="n">d</span><span class="p">:</span> <span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="s2">&quot;settlement&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">d</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">_settlement_pairs</span><span class="p">(</span><span class="n">de</span><span class="p">,</span> <span class="n">cz</span><span class="p">)</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="n">rest_de</span> <span class="o">=</span> <span class="n">de</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="n">pairs</span><span class="p">))</span>
+    <span class="n">rest_cz</span> <span class="o">=</span> <span class="n">cz</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">pairs</span><span class="o">.</span><span class="n">values</span><span class="p">()])</span>
+    <span class="n">pairs</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="n">d</span><span class="p">:</span> <span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="s2">&quot;name&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">d</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">_name_pairs</span><span class="p">(</span><span class="n">rest_de</span><span class="p">,</span> <span class="n">rest_cz</span><span class="p">)</span><span class="o">.</span><span class="n">items</span><span class="p">()})</span>
+    <span class="n">order</span><span class="p">,</span> <span class="n">status</span> <span class="o">=</span> <span class="n">_order_pairs</span><span class="p">(</span><span class="n">de</span><span class="p">,</span> <span class="n">cz</span><span class="p">,</span> <span class="p">{</span><span class="n">d</span><span class="p">:</span> <span class="n">c</span> <span class="k">for</span> <span class="n">d</span><span class="p">,</span> <span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">_h</span><span class="p">)</span> <span class="ow">in</span> <span class="n">pairs</span><span class="o">.</span><span class="n">items</span><span class="p">()},</span> <span class="n">complete</span><span class="p">)</span>
+    <span class="n">pairs</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="n">d</span><span class="p">:</span> <span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="s2">&quot;order&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">d</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">order</span><span class="o">.</span><span class="n">items</span><span class="p">()})</span>
+    <span class="k">return</span> <span class="n">pairs</span><span class="p">,</span> <span class="n">status</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_crosswalk-pair_parts">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">pair_parts</span><span class="p">(</span><span class="n">de</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">cz</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span></pre>
+<div class="fndoc"><p><code>{German index: (Czech index, how)}</code> for the parts of one paired municipality.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 124–130 (7 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">pair_parts</span><span class="p">(</span><span class="n">de</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">cz</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``{German index: (Czech index, how)}`` for the parts of one paired municipality.&quot;&quot;&quot;</span>
+    <span class="n">pairs</span> <span class="o">=</span> <span class="p">{</span><span class="n">d</span><span class="p">:</span> <span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="s2">&quot;settlement&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">d</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">_settlement_pairs</span><span class="p">(</span><span class="n">de</span><span class="p">,</span> <span class="n">cz</span><span class="p">)</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="n">rest_de</span> <span class="o">=</span> <span class="n">de</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="n">pairs</span><span class="p">))</span>
+    <span class="n">rest_cz</span> <span class="o">=</span> <span class="n">cz</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">pairs</span><span class="o">.</span><span class="n">values</span><span class="p">()])</span>
+    <span class="n">pairs</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="n">d</span><span class="p">:</span> <span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="s2">&quot;name&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">d</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">_name_pairs</span><span class="p">(</span><span class="n">rest_de</span><span class="p">,</span> <span class="n">rest_cz</span><span class="p">)</span><span class="o">.</span><span class="n">items</span><span class="p">()})</span>
+    <span class="k">return</span> <span class="n">pairs</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_crosswalk-order_holdout">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">order_holdout</span><span class="p">(</span><span class="n">places</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Leave-one-out test of the order step: per court, each settlement or name pair is removed
+from the anchors, and the step is asked to fill the slot it leaves. One row per held-out pair:
+<code>predicted</code> (the slot was filled) and <code>correct</code> (with the pair's own Czech place).</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_register_build.py</code> <code>utils/lexikon_1910/build_register_walkthrough.py</code></p>
+<details><summary>source · lines 133–153 (21 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">order_holdout</span><span class="p">(</span><span class="n">places</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Leave-one-out test of the order step: per court, each settlement or name pair is removed</span>
+<span class="sd">    from the anchors, and the step is asked to fill the slot it leaves. One row per held-out pair:</span>
+<span class="sd">    ``predicted`` (the slot was filled) and ``correct`` (with the pair&#39;s own Czech place).&quot;&quot;&quot;</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">de_all</span><span class="p">,</span> <span class="n">cz_all</span> <span class="o">=</span> <span class="n">places</span><span class="p">[</span><span class="n">places</span><span class="p">[</span><span class="s2">&quot;edition&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">GERMAN</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">(),</span> <span class="n">places</span><span class="p">[</span><span class="n">places</span><span class="p">[</span><span class="s2">&quot;edition&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">CZECH</span><span class="p">]</span>
+    <span class="n">inherited</span> <span class="o">=</span> <span class="n">de_all</span><span class="p">[</span><span class="s2">&quot;anchor_status&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">INHERITED</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>   <span class="c1"># only the German&#39;s own anchors</span>
+    <span class="n">de_all</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">inherited</span><span class="p">,</span> <span class="s2">&quot;settlement_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span>                 <span class="c1"># may count as known pairs</span>
+    <span class="k">for</span> <span class="n">ck</span><span class="p">,</span> <span class="n">de_c</span> <span class="ow">in</span> <span class="n">de_all</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;court_key&quot;</span><span class="p">):</span>
+        <span class="n">cz_c</span> <span class="o">=</span> <span class="n">cz_all</span><span class="p">[</span><span class="n">cz_all</span><span class="p">[</span><span class="s2">&quot;court_key&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">ck</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">cz_c</span><span class="o">.</span><span class="n">empty</span> <span class="ow">or</span> <span class="ow">not</span> <span class="nb">str</span><span class="p">(</span><span class="n">ck</span><span class="p">)</span><span class="o">.</span><span class="n">isdigit</span><span class="p">():</span>
+            <span class="k">continue</span>
+        <span class="n">de_m</span><span class="p">,</span> <span class="n">cz_m</span> <span class="o">=</span> <span class="p">(</span><span class="n">f</span><span class="p">[</span><span class="n">f</span><span class="p">[</span><span class="s2">&quot;settlement_seq&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="p">(</span><span class="n">de_c</span><span class="p">,</span> <span class="n">cz_c</span><span class="p">))</span>
+        <span class="n">known</span> <span class="o">=</span> <span class="p">{</span><span class="n">d</span><span class="p">:</span> <span class="n">c</span> <span class="k">for</span> <span class="n">d</span><span class="p">,</span> <span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">how</span><span class="p">)</span> <span class="ow">in</span> <span class="n">pair_court</span><span class="p">(</span><span class="n">de_m</span><span class="p">,</span> <span class="n">cz_m</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">how</span> <span class="o">!=</span> <span class="s2">&quot;order&quot;</span><span class="p">}</span>
+        <span class="k">for</span> <span class="n">d</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">known</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">rest</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">known</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">k</span> <span class="o">!=</span> <span class="n">d</span><span class="p">}</span>
+            <span class="n">got</span><span class="p">,</span> <span class="n">_status</span> <span class="o">=</span> <span class="n">_order_pairs</span><span class="p">(</span><span class="n">de_m</span><span class="p">,</span> <span class="n">cz_m</span><span class="p">,</span> <span class="n">rest</span><span class="p">,</span> <span class="n">complete</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+            <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;court_key&quot;</span><span class="p">:</span> <span class="n">ck</span><span class="p">,</span> <span class="s2">&quot;de_muni&quot;</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">de_m</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">d</span><span class="p">,</span> <span class="s2">&quot;muni_seq&quot;</span><span class="p">]),</span>
+                         <span class="s2">&quot;cz_muni&quot;</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">cz_m</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">c</span><span class="p">,</span> <span class="s2">&quot;muni_seq&quot;</span><span class="p">]),</span> <span class="s2">&quot;predicted&quot;</span><span class="p">:</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">got</span><span class="p">,</span>
+                         <span class="s2">&quot;correct&quot;</span><span class="p">:</span> <span class="n">got</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">d</span><span class="p">)</span> <span class="o">==</span> <span class="n">c</span><span class="p">})</span>
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;court_key&quot;</span><span class="p">,</span> <span class="s2">&quot;de_muni&quot;</span><span class="p">,</span> <span class="s2">&quot;cz_muni&quot;</span><span class="p">,</span> <span class="s2">&quot;predicted&quot;</span><span class="p">,</span> <span class="s2">&quot;correct&quot;</span><span class="p">])</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_crosswalk-crosswalk_editions">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">crosswalk_editions</span><span class="p">(</span><span class="n">places</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">anchored</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">complete</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="nb">dict</span><span class="p">]</span></pre>
+<div class="fndoc"><p>Pair every German Böhmen place with its Czech counterpart and inherit what it lacks.</p>
+<p>Adds <code>cz_muni_seq</code>, <code>cz_settlement_seq</code>, <code>crosswalk</code> (settlement / name / order) and
+<code>crosswalk_agrees</code> to the German rows. Returns the frame and <code>{court_key: order status}</code>.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_register_build.py</code> <code>utils/lexikon_1910/lexikon_1910_register.py</code></p>
+<details><summary>source · lines 156–183 (28 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">crosswalk_editions</span><span class="p">(</span><span class="n">places</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">anchored</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">complete</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+                       <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Pair every German Böhmen place with its Czech counterpart and inherit what it lacks.</span>
+
+<span class="sd">    Adds ``cz_muni_seq``, ``cz_settlement_seq``, ``crosswalk`` (settlement / name / order) and</span>
+<span class="sd">    ``crosswalk_agrees`` to the German rows. Returns the frame and ``{court_key: order status}``.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">places</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">col</span><span class="p">,</span> <span class="n">dtype</span> <span class="ow">in</span> <span class="p">((</span><span class="s2">&quot;cz_muni_seq&quot;</span><span class="p">,</span> <span class="s2">&quot;Int64&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;cz_settlement_seq&quot;</span><span class="p">,</span> <span class="s2">&quot;Int64&quot;</span><span class="p">),</span>
+                       <span class="p">(</span><span class="s2">&quot;crosswalk&quot;</span><span class="p">,</span> <span class="s2">&quot;string&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;crosswalk_agrees&quot;</span><span class="p">,</span> <span class="s2">&quot;boolean&quot;</span><span class="p">)):</span>
+        <span class="n">out</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="n">out</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span>
+    <span class="n">status</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">de_all</span><span class="p">,</span> <span class="n">cz_all</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;edition&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">GERMAN</span><span class="p">],</span> <span class="n">out</span><span class="p">[</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;edition&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">CZECH</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">de_all</span><span class="o">.</span><span class="n">empty</span> <span class="ow">or</span> <span class="n">cz_all</span><span class="o">.</span><span class="n">empty</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">out</span><span class="p">,</span> <span class="n">status</span>
+    <span class="k">for</span> <span class="n">ck</span><span class="p">,</span> <span class="n">de_c</span> <span class="ow">in</span> <span class="n">de_all</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;court_key&quot;</span><span class="p">):</span>
+        <span class="n">cz_c</span> <span class="o">=</span> <span class="n">cz_all</span><span class="p">[</span><span class="n">cz_all</span><span class="p">[</span><span class="s2">&quot;court_key&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">ck</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">cz_c</span><span class="o">.</span><span class="n">empty</span> <span class="ow">or</span> <span class="ow">not</span> <span class="nb">str</span><span class="p">(</span><span class="n">ck</span><span class="p">)</span><span class="o">.</span><span class="n">isdigit</span><span class="p">():</span>
+            <span class="k">continue</span>
+        <span class="n">de_m</span><span class="p">,</span> <span class="n">cz_m</span> <span class="o">=</span> <span class="p">(</span><span class="n">f</span><span class="p">[</span><span class="n">f</span><span class="p">[</span><span class="s2">&quot;settlement_seq&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="p">(</span><span class="n">de_c</span><span class="p">,</span> <span class="n">cz_c</span><span class="p">))</span>
+        <span class="n">munis</span><span class="p">,</span> <span class="n">status</span><span class="p">[</span><span class="n">ck</span><span class="p">]</span> <span class="o">=</span> <span class="n">pair_court</span><span class="p">(</span><span class="n">de_m</span><span class="p">,</span> <span class="n">cz_m</span><span class="p">,</span> <span class="n">complete</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">d</span><span class="p">,</span> <span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">how</span><span class="p">)</span> <span class="ow">in</span> <span class="n">munis</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">_link</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="n">d</span><span class="p">,</span> <span class="n">c</span><span class="p">,</span> <span class="n">how</span><span class="p">,</span> <span class="n">anchored</span><span class="p">)</span>
+            <span class="n">parts</span> <span class="o">=</span> <span class="n">pair_parts</span><span class="p">(</span><span class="n">de_c</span><span class="p">[(</span><span class="n">de_c</span><span class="p">[</span><span class="s2">&quot;muni_seq&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">out</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">d</span><span class="p">,</span> <span class="s2">&quot;muni_seq&quot;</span><span class="p">])</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">de_c</span><span class="p">[</span><span class="s2">&quot;settlement_seq&quot;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)],</span>
+                               <span class="n">cz_c</span><span class="p">[(</span><span class="n">cz_c</span><span class="p">[</span><span class="s2">&quot;muni_seq&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">out</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">c</span><span class="p">,</span> <span class="s2">&quot;muni_seq&quot;</span><span class="p">])</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">cz_c</span><span class="p">[</span><span class="s2">&quot;settlement_seq&quot;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)])</span>
+            <span class="k">for</span> <span class="n">dp</span><span class="p">,</span> <span class="p">(</span><span class="n">cp</span><span class="p">,</span> <span class="n">how_p</span><span class="p">)</span> <span class="ow">in</span> <span class="n">parts</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="n">_link</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="n">dp</span><span class="p">,</span> <span class="n">cp</span><span class="p">,</span> <span class="n">how_p</span><span class="p">,</span> <span class="n">anchored</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span><span class="p">,</span> <span class="n">status</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-lexikon_1910_crosswalk-crosswalk_report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">crosswalk_report</span><span class="p">(</span><span class="n">places</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">status</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<div class="fndoc"><p>How many German places paired, by step, how many inherited, and how often the two agree.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/lexikon_1910/lexikon_1910_register.py</code> <code>utils/parsing/ruian.py</code></p>
+<details><summary>source · lines 199–219 (21 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">crosswalk_report</span><span class="p">(</span><span class="n">places</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">status</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;How many German places paired, by step, how many inherited, and how often the two agree.&quot;&quot;&quot;</span>
+    <span class="n">de</span> <span class="o">=</span> <span class="n">places</span><span class="p">[</span><span class="n">places</span><span class="p">[</span><span class="s2">&quot;edition&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">GERMAN</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">de</span><span class="o">.</span><span class="n">empty</span> <span class="ow">or</span> <span class="s2">&quot;crosswalk&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">de</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">&quot;  crosswalk: no German Böhmen places in this build&quot;</span>
+    <span class="n">by</span> <span class="o">=</span> <span class="n">de</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;place_level&quot;</span><span class="p">)</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;  crosswalk to the Czech volume (German Böhmen places):&quot;</span><span class="p">]</span>
+    <span class="k">for</span> <span class="n">level</span><span class="p">,</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">by</span><span class="p">:</span>
+        <span class="n">how</span> <span class="o">=</span> <span class="n">g</span><span class="p">[</span><span class="s2">&quot;crosswalk&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span>
+        <span class="n">agree</span> <span class="o">=</span> <span class="n">g</span><span class="p">[</span><span class="s2">&quot;crosswalk_agrees&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">dropna</span><span class="p">()</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">level</span><span class="si">:</span><span class="s2">12s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">g</span><span class="p">)</span><span class="si">:</span><span class="s2">4d</span><span class="si">}</span><span class="s2"> places, paired </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">g</span><span class="p">[</span><span class="s1">&#39;crosswalk&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">how</span><span class="si">}</span><span class="s2">; &quot;</span>
+                     <span class="sa">f</span><span class="s2">&quot;inherited </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">g</span><span class="p">[</span><span class="s1">&#39;anchor_status&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">INHERITED</span><span class="o">.</span><span class="n">values</span><span class="p">())</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">}</span><span class="s2">; &quot;</span>
+                     <span class="sa">f</span><span class="s2">&quot;both anchored </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">agree</span><span class="p">)</span><span class="si">}</span><span class="s2">, agree </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">agree</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">hold</span> <span class="o">=</span> <span class="n">order_holdout</span><span class="p">(</span><span class="n">places</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">hold</span><span class="p">):</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    order rule, leave-one-out on </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">hold</span><span class="p">)</span><span class="si">}</span><span class="s2"> known pairs: predicted &quot;</span>
+                     <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">hold</span><span class="p">[</span><span class="s1">&#39;predicted&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">}</span><span class="s2">, of those correct </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">hold</span><span class="p">[</span><span class="s1">&#39;correct&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">refused</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">k</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">status</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">s</span> <span class="o">==</span> <span class="s2">&quot;not monotone&quot;</span><span class="p">)</span>
+    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    order step by court: </span><span class="si">{</span><span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">(</span><span class="n">status</span><span class="p">)</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">status</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{}</span><span class="si">}</span><span class="s2">&quot;</span>
+                 <span class="o">+</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot;; refused (not monotone): </span><span class="si">{</span><span class="n">refused</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">if</span> <span class="n">refused</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+    <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-lexikon_1910-lexikon_1910_crosswalk-INHERITED"><pre class="sig">INHERITED<span class="kind">dict · 2 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="s1">&#39;via_czech_name&#39;</span><span class="p">,</span> <span class="s1">&#39;order&#39;</span><span class="p">:</span> <span class="s1">&#39;via_czech_order&#39;</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<h2>Used by</h2><p><code>utils/lexikon_1910/build_register_walkthrough.py</code> <code>utils/lexikon_1910/lexikon_1910_register.py</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/lexikon_1910/lexikon_1910_crosswalk.py · 219 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;lexikon_1910_crosswalk — the German Böhmen volume&#39;s places paired with the Czech volume&#39;s (D-150)</span>
+<span class="sd">=================================================================================================</span>
+<span class="sd">Both volumes print the same 1910 municipalities of Bohemia, each under both names — the Czech one</span>
+<span class="sd">``Dílce, Diletz``, the German one ``Diletz, Dílce`` — but each numbers them in its own alphabet, so</span>
+<span class="sd">Dílce is No. 7 of court Jičín in the Czech volume and No. 9 in the German one. A German place the</span>
+<span class="sd">route read but could not name (no line on the reader&#39;s parts list, and the German table is never</span>
+<span class="sd">read) can still be found through the Czech volume, whose table prints every municipality&#39;s German</span>
+<span class="sd">name. Three steps per court, each refusing what it cannot settle:</span>
+
+<span class="sd">1. **settlement** — the two places anchored to the same ``settlement_id`` (each id once per side);</span>
+<span class="sd">2. **name** — a German place&#39;s printed forms against the Czech place&#39;s cell, through</span>
+<span class="sd">   :func:`lexikon_1910_names.anchor_blocks` (≥ 84, margin 5, ties refused, one to one);</span>
+<span class="sd">3. **order** — the German volume numbers a court&#39;s municipalities in alphabetical order of their</span>
+<span class="sd">   German names, accents folded (Altsedlowitz 3, Bausnitz 4, Burkersdorf 6, Döberle 8 … on</span>
+<span class="sd">   Trutnov, where the Czech page holds all 33). Between two paired municipalities the German</span>
+<span class="sd">   numbers form a closed run of slots; the Czech municipalities whose German name sorts between the</span>
+<span class="sd">   two pairs&#39; names fill it, in order — **only if there are exactly as many as there are slots**,</span>
+<span class="sd">   which is what proves no municipality is missing from the Czech pages read. Ends of a court are</span>
+<span class="sd">   closed only on a full run (``complete``). A court whose paired names do not rise with the German</span>
+<span class="sd">   numbers is refused the order step whole (a collation the rule does not know).</span>
+
+<span class="sd">A German place that its own names left unanchored takes the Czech place&#39;s ``settlement_id``</span>
+<span class="sd">(``via_czech_name`` / ``via_czech_order``). Where both anchored on their own, ``crosswalk_agrees``</span>
+<span class="sd">records whether they agree (never on a settlement pair, which agrees by construction).</span>
+<span class="sd">:func:`order_holdout` tests the order rule itself: each known pair is dropped in turn and the</span>
+<span class="sd">order step asked to find it again. Parts are paired by settlement</span>
+<span class="sd">and by name only: their German order is not yet verified on any page.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">types</span><span class="w"> </span><span class="kn">import</span> <span class="n">SimpleNamespace</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_names</span> <span class="k">as</span> <span class="n">lxn</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.0.0&quot;</span>   <span class="c1"># first crosswalk, 2026-10-29 (D-150)</span>
+
+<span class="n">CZECH</span><span class="p">,</span> <span class="n">GERMAN</span> <span class="o">=</span> <span class="s2">&quot;cz&quot;</span><span class="p">,</span> <span class="s2">&quot;de-bohemia&quot;</span>
+<span class="n">INHERITED</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;via_czech_name&quot;</span><span class="p">,</span> <span class="s2">&quot;order&quot;</span><span class="p">:</span> <span class="s2">&quot;via_czech_order&quot;</span><span class="p">}</span>
+<span class="n">_ALTERNATE_RE</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;^(také|auch)\s&quot;</span><span class="p">,</span> <span class="n">re</span><span class="o">.</span><span class="n">IGNORECASE</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">german_key</span><span class="p">(</span><span class="n">cell</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The sort key of a Czech name cell&#39;s German name: its last form that is not a Czech</span>
+<span class="sd">    alternate (``také …``), accents folded, ``ß`` as ``ss``; a cell with one name is its own</span>
+<span class="sd">    (a Czech-only place prints its Czech name in the German volume too).&quot;&quot;&quot;</span>
+    <span class="n">forms</span> <span class="o">=</span> <span class="p">[</span><span class="n">f</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">cell</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">f</span><span class="o">.</span><span class="n">strip</span><span class="p">()]</span>
+    <span class="n">forms</span> <span class="o">=</span> <span class="p">[</span><span class="n">f</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">forms</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">_ALTERNATE_RE</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="n">f</span><span class="p">)]</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="n">forms</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">forms</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">2</span> <span class="k">else</span> <span class="p">(</span><span class="n">forms</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">if</span> <span class="n">forms</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">lxn</span><span class="o">.</span><span class="n">normalise</span><span class="p">(</span><span class="n">name</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;ß&quot;</span><span class="p">,</span> <span class="s2">&quot;ss&quot;</span><span class="p">))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_sid</span><span class="p">(</span><span class="n">value</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">return</span> <span class="kc">None</span> <span class="k">if</span> <span class="n">value</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">value</span><span class="p">)</span> <span class="k">else</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_settlement_pairs</span><span class="p">(</span><span class="n">de</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">cz</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;German index → Czech index, where each side anchored the id exactly once.&quot;&quot;&quot;</span>
+    <span class="n">de_ids</span><span class="p">,</span> <span class="n">cz_ids</span> <span class="o">=</span> <span class="n">de</span><span class="p">[</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">dropna</span><span class="p">(),</span> <span class="n">cz</span><span class="p">[</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">dropna</span><span class="p">()</span>
+    <span class="n">once_de</span> <span class="o">=</span> <span class="n">de_ids</span><span class="p">[</span><span class="o">~</span><span class="n">de_ids</span><span class="o">.</span><span class="n">duplicated</span><span class="p">(</span><span class="n">keep</span><span class="o">=</span><span class="kc">False</span><span class="p">)]</span>
+    <span class="n">once_cz</span> <span class="o">=</span> <span class="n">cz_ids</span><span class="p">[</span><span class="o">~</span><span class="n">cz_ids</span><span class="o">.</span><span class="n">duplicated</span><span class="p">(</span><span class="n">keep</span><span class="o">=</span><span class="kc">False</span><span class="p">)]</span>
+    <span class="n">by_id</span> <span class="o">=</span> <span class="p">{</span><span class="n">sid</span><span class="p">:</span> <span class="n">i</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">sid</span> <span class="ow">in</span> <span class="n">once_cz</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="k">return</span> <span class="p">{</span><span class="n">i</span><span class="p">:</span> <span class="n">by_id</span><span class="p">[</span><span class="n">sid</span><span class="p">]</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">sid</span> <span class="ow">in</span> <span class="n">once_de</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">sid</span> <span class="ow">in</span> <span class="n">by_id</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_name_pairs</span><span class="p">(</span><span class="n">de</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">cz</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;German index → Czech index by printed names (one to one, ties refused).&quot;&quot;&quot;</span>
+    <span class="n">named</span> <span class="o">=</span> <span class="n">de</span><span class="p">[</span><span class="n">de</span><span class="p">[</span><span class="s2">&quot;printed_name&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">named</span><span class="o">.</span><span class="n">empty</span> <span class="ow">or</span> <span class="n">cz</span><span class="o">.</span><span class="n">empty</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">{}</span>
+    <span class="n">cands</span> <span class="o">=</span> <span class="p">[</span><span class="n">lxn</span><span class="o">.</span><span class="n">Obec</span><span class="p">(</span><span class="n">cs_name</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">i</span><span class="p">),</span> <span class="n">okres_id</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">okres_1910</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span>
+                      <span class="n">variants</span><span class="o">=</span><span class="nb">set</span><span class="p">(</span><span class="n">lxn</span><span class="o">.</span><span class="n">parse_name_cell</span><span class="p">(</span><span class="n">cell</span><span class="p">)))</span>
+             <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">cell</span> <span class="ow">in</span> <span class="n">cz</span><span class="p">[</span><span class="s2">&quot;printed_name&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">items</span><span class="p">()]</span>
+    <span class="n">blocks</span> <span class="o">=</span> <span class="p">[</span><span class="n">SimpleNamespace</span><span class="p">(</span><span class="n">block_id</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">i</span><span class="p">),</span> <span class="n">name</span><span class="o">=</span><span class="n">cell</span><span class="p">,</span> <span class="n">municipality</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="n">cell</span><span class="p">})</span>
+              <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">cell</span> <span class="ow">in</span> <span class="n">named</span><span class="p">[</span><span class="s2">&quot;printed_name&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">()]</span>
+    <span class="k">return</span> <span class="p">{</span><span class="nb">int</span><span class="p">(</span><span class="n">a</span><span class="o">.</span><span class="n">block_id</span><span class="p">):</span> <span class="nb">int</span><span class="p">(</span><span class="n">a</span><span class="o">.</span><span class="n">obec</span><span class="o">.</span><span class="n">cs_name</span><span class="p">)</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">lxn</span><span class="o">.</span><span class="n">anchor_blocks</span><span class="p">(</span><span class="n">blocks</span><span class="p">,</span> <span class="n">cands</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">a</span><span class="o">.</span><span class="n">verdict</span> <span class="o">==</span> <span class="s2">&quot;matched&quot;</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_order_pairs</span><span class="p">(</span><span class="n">de</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">cz</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">pairs</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span>
+                 <span class="n">complete</span><span class="p">:</span> <span class="nb">bool</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;German index → Czech index by German alphabetical order between pairs (module docstring).</span>
+
+<span class="sd">    Returns the new pairs and the court&#39;s order status: ``filled``, ``nothing to fill``,</span>
+<span class="sd">    ``not monotone`` (refused) or ``no anchors``.&quot;&quot;&quot;</span>
+    <span class="n">key</span> <span class="o">=</span> <span class="n">cz</span><span class="p">[</span><span class="s2">&quot;printed_name&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">german_key</span><span class="p">)</span>
+    <span class="n">anchors</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">((</span><span class="nb">int</span><span class="p">(</span><span class="n">de</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">d</span><span class="p">,</span> <span class="s2">&quot;muni_seq&quot;</span><span class="p">]),</span> <span class="n">key</span><span class="p">[</span><span class="n">c</span><span class="p">])</span> <span class="k">for</span> <span class="n">d</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">pairs</span><span class="o">.</span><span class="n">items</span><span class="p">())</span>
+    <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">k1</span> <span class="o">&gt;=</span> <span class="n">k2</span> <span class="k">for</span> <span class="p">(</span><span class="n">_</span><span class="p">,</span> <span class="n">k1</span><span class="p">),</span> <span class="p">(</span><span class="n">_</span><span class="p">,</span> <span class="n">k2</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">anchors</span><span class="p">,</span> <span class="n">anchors</span><span class="p">[</span><span class="mi">1</span><span class="p">:])):</span>
+        <span class="k">return</span> <span class="p">{},</span> <span class="s2">&quot;not monotone&quot;</span>
+    <span class="k">if</span> <span class="n">complete</span><span class="p">:</span>
+        <span class="n">anchors</span> <span class="o">=</span> <span class="p">[(</span><span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span> <span class="o">*</span><span class="n">anchors</span><span class="p">,</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">cz</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;￿&quot;</span><span class="p">)]</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">anchors</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">{},</span> <span class="s2">&quot;no anchors&quot;</span>
+    <span class="n">used</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">pairs</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+    <span class="n">free</span> <span class="o">=</span> <span class="n">key</span><span class="p">[[</span><span class="n">i</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">cz</span><span class="o">.</span><span class="n">index</span> <span class="k">if</span> <span class="n">i</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">used</span><span class="p">]]</span>
+    <span class="n">de_by_num</span> <span class="o">=</span> <span class="p">{</span><span class="nb">int</span><span class="p">(</span><span class="n">n</span><span class="p">):</span> <span class="n">i</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">de</span><span class="p">[</span><span class="s2">&quot;muni_seq&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="n">out</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">ka</span><span class="p">),</span> <span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="n">kb</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">anchors</span><span class="p">,</span> <span class="n">anchors</span><span class="p">[</span><span class="mi">1</span><span class="p">:]):</span>
+        <span class="n">slots</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">a</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">b</span><span class="p">))</span>
+        <span class="n">between</span> <span class="o">=</span> <span class="n">free</span><span class="p">[(</span><span class="n">free</span> <span class="o">&gt;</span> <span class="n">ka</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">free</span> <span class="o">&lt;</span> <span class="n">kb</span><span class="p">)]</span><span class="o">.</span><span class="n">sort_values</span><span class="p">()</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">slots</span> <span class="ow">or</span> <span class="nb">len</span><span class="p">(</span><span class="n">between</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">slots</span><span class="p">)</span> <span class="ow">or</span> <span class="n">between</span><span class="o">.</span><span class="n">duplicated</span><span class="p">()</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+            <span class="k">continue</span>
+        <span class="k">for</span> <span class="n">num</span><span class="p">,</span> <span class="n">cz_index</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">slots</span><span class="p">,</span> <span class="n">between</span><span class="o">.</span><span class="n">index</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">num</span> <span class="ow">in</span> <span class="n">de_by_num</span><span class="p">:</span>
+                <span class="n">out</span><span class="p">[</span><span class="n">de_by_num</span><span class="p">[</span><span class="n">num</span><span class="p">]]</span> <span class="o">=</span> <span class="n">cz_index</span>
+    <span class="k">return</span> <span class="n">out</span><span class="p">,</span> <span class="s2">&quot;filled&quot;</span> <span class="k">if</span> <span class="n">out</span> <span class="k">else</span> <span class="s2">&quot;nothing to fill&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">pair_court</span><span class="p">(</span><span class="n">de</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">cz</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">complete</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+               <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">str</span><span class="p">]],</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``({German index: (Czech index, how)}, order status)`` for one court&#39;s municipalities.&quot;&quot;&quot;</span>
+    <span class="n">pairs</span> <span class="o">=</span> <span class="p">{</span><span class="n">d</span><span class="p">:</span> <span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="s2">&quot;settlement&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">d</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">_settlement_pairs</span><span class="p">(</span><span class="n">de</span><span class="p">,</span> <span class="n">cz</span><span class="p">)</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="n">rest_de</span> <span class="o">=</span> <span class="n">de</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="n">pairs</span><span class="p">))</span>
+    <span class="n">rest_cz</span> <span class="o">=</span> <span class="n">cz</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">pairs</span><span class="o">.</span><span class="n">values</span><span class="p">()])</span>
+    <span class="n">pairs</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="n">d</span><span class="p">:</span> <span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="s2">&quot;name&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">d</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">_name_pairs</span><span class="p">(</span><span class="n">rest_de</span><span class="p">,</span> <span class="n">rest_cz</span><span class="p">)</span><span class="o">.</span><span class="n">items</span><span class="p">()})</span>
+    <span class="n">order</span><span class="p">,</span> <span class="n">status</span> <span class="o">=</span> <span class="n">_order_pairs</span><span class="p">(</span><span class="n">de</span><span class="p">,</span> <span class="n">cz</span><span class="p">,</span> <span class="p">{</span><span class="n">d</span><span class="p">:</span> <span class="n">c</span> <span class="k">for</span> <span class="n">d</span><span class="p">,</span> <span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">_h</span><span class="p">)</span> <span class="ow">in</span> <span class="n">pairs</span><span class="o">.</span><span class="n">items</span><span class="p">()},</span> <span class="n">complete</span><span class="p">)</span>
+    <span class="n">pairs</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="n">d</span><span class="p">:</span> <span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="s2">&quot;order&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">d</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">order</span><span class="o">.</span><span class="n">items</span><span class="p">()})</span>
+    <span class="k">return</span> <span class="n">pairs</span><span class="p">,</span> <span class="n">status</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">pair_parts</span><span class="p">(</span><span class="n">de</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">cz</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``{German index: (Czech index, how)}`` for the parts of one paired municipality.&quot;&quot;&quot;</span>
+    <span class="n">pairs</span> <span class="o">=</span> <span class="p">{</span><span class="n">d</span><span class="p">:</span> <span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="s2">&quot;settlement&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">d</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">_settlement_pairs</span><span class="p">(</span><span class="n">de</span><span class="p">,</span> <span class="n">cz</span><span class="p">)</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="n">rest_de</span> <span class="o">=</span> <span class="n">de</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="n">pairs</span><span class="p">))</span>
+    <span class="n">rest_cz</span> <span class="o">=</span> <span class="n">cz</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">pairs</span><span class="o">.</span><span class="n">values</span><span class="p">()])</span>
+    <span class="n">pairs</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="n">d</span><span class="p">:</span> <span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="s2">&quot;name&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">d</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">_name_pairs</span><span class="p">(</span><span class="n">rest_de</span><span class="p">,</span> <span class="n">rest_cz</span><span class="p">)</span><span class="o">.</span><span class="n">items</span><span class="p">()})</span>
+    <span class="k">return</span> <span class="n">pairs</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">order_holdout</span><span class="p">(</span><span class="n">places</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Leave-one-out test of the order step: per court, each settlement or name pair is removed</span>
+<span class="sd">    from the anchors, and the step is asked to fill the slot it leaves. One row per held-out pair:</span>
+<span class="sd">    ``predicted`` (the slot was filled) and ``correct`` (with the pair&#39;s own Czech place).&quot;&quot;&quot;</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">de_all</span><span class="p">,</span> <span class="n">cz_all</span> <span class="o">=</span> <span class="n">places</span><span class="p">[</span><span class="n">places</span><span class="p">[</span><span class="s2">&quot;edition&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">GERMAN</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">(),</span> <span class="n">places</span><span class="p">[</span><span class="n">places</span><span class="p">[</span><span class="s2">&quot;edition&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">CZECH</span><span class="p">]</span>
+    <span class="n">inherited</span> <span class="o">=</span> <span class="n">de_all</span><span class="p">[</span><span class="s2">&quot;anchor_status&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">INHERITED</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>   <span class="c1"># only the German&#39;s own anchors</span>
+    <span class="n">de_all</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">inherited</span><span class="p">,</span> <span class="s2">&quot;settlement_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">NA</span>                 <span class="c1"># may count as known pairs</span>
+    <span class="k">for</span> <span class="n">ck</span><span class="p">,</span> <span class="n">de_c</span> <span class="ow">in</span> <span class="n">de_all</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;court_key&quot;</span><span class="p">):</span>
+        <span class="n">cz_c</span> <span class="o">=</span> <span class="n">cz_all</span><span class="p">[</span><span class="n">cz_all</span><span class="p">[</span><span class="s2">&quot;court_key&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">ck</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">cz_c</span><span class="o">.</span><span class="n">empty</span> <span class="ow">or</span> <span class="ow">not</span> <span class="nb">str</span><span class="p">(</span><span class="n">ck</span><span class="p">)</span><span class="o">.</span><span class="n">isdigit</span><span class="p">():</span>
+            <span class="k">continue</span>
+        <span class="n">de_m</span><span class="p">,</span> <span class="n">cz_m</span> <span class="o">=</span> <span class="p">(</span><span class="n">f</span><span class="p">[</span><span class="n">f</span><span class="p">[</span><span class="s2">&quot;settlement_seq&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="p">(</span><span class="n">de_c</span><span class="p">,</span> <span class="n">cz_c</span><span class="p">))</span>
+        <span class="n">known</span> <span class="o">=</span> <span class="p">{</span><span class="n">d</span><span class="p">:</span> <span class="n">c</span> <span class="k">for</span> <span class="n">d</span><span class="p">,</span> <span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">how</span><span class="p">)</span> <span class="ow">in</span> <span class="n">pair_court</span><span class="p">(</span><span class="n">de_m</span><span class="p">,</span> <span class="n">cz_m</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">how</span> <span class="o">!=</span> <span class="s2">&quot;order&quot;</span><span class="p">}</span>
+        <span class="k">for</span> <span class="n">d</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">known</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">rest</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">known</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">k</span> <span class="o">!=</span> <span class="n">d</span><span class="p">}</span>
+            <span class="n">got</span><span class="p">,</span> <span class="n">_status</span> <span class="o">=</span> <span class="n">_order_pairs</span><span class="p">(</span><span class="n">de_m</span><span class="p">,</span> <span class="n">cz_m</span><span class="p">,</span> <span class="n">rest</span><span class="p">,</span> <span class="n">complete</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+            <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;court_key&quot;</span><span class="p">:</span> <span class="n">ck</span><span class="p">,</span> <span class="s2">&quot;de_muni&quot;</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">de_m</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">d</span><span class="p">,</span> <span class="s2">&quot;muni_seq&quot;</span><span class="p">]),</span>
+                         <span class="s2">&quot;cz_muni&quot;</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">cz_m</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">c</span><span class="p">,</span> <span class="s2">&quot;muni_seq&quot;</span><span class="p">]),</span> <span class="s2">&quot;predicted&quot;</span><span class="p">:</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">got</span><span class="p">,</span>
+                         <span class="s2">&quot;correct&quot;</span><span class="p">:</span> <span class="n">got</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">d</span><span class="p">)</span> <span class="o">==</span> <span class="n">c</span><span class="p">})</span>
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;court_key&quot;</span><span class="p">,</span> <span class="s2">&quot;de_muni&quot;</span><span class="p">,</span> <span class="s2">&quot;cz_muni&quot;</span><span class="p">,</span> <span class="s2">&quot;predicted&quot;</span><span class="p">,</span> <span class="s2">&quot;correct&quot;</span><span class="p">])</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">crosswalk_editions</span><span class="p">(</span><span class="n">places</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">anchored</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="n">complete</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+                       <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Pair every German Böhmen place with its Czech counterpart and inherit what it lacks.</span>
+
+<span class="sd">    Adds ``cz_muni_seq``, ``cz_settlement_seq``, ``crosswalk`` (settlement / name / order) and</span>
+<span class="sd">    ``crosswalk_agrees`` to the German rows. Returns the frame and ``{court_key: order status}``.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">places</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">col</span><span class="p">,</span> <span class="n">dtype</span> <span class="ow">in</span> <span class="p">((</span><span class="s2">&quot;cz_muni_seq&quot;</span><span class="p">,</span> <span class="s2">&quot;Int64&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;cz_settlement_seq&quot;</span><span class="p">,</span> <span class="s2">&quot;Int64&quot;</span><span class="p">),</span>
+                       <span class="p">(</span><span class="s2">&quot;crosswalk&quot;</span><span class="p">,</span> <span class="s2">&quot;string&quot;</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;crosswalk_agrees&quot;</span><span class="p">,</span> <span class="s2">&quot;boolean&quot;</span><span class="p">)):</span>
+        <span class="n">out</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">NA</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="n">out</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span>
+    <span class="n">status</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">de_all</span><span class="p">,</span> <span class="n">cz_all</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;edition&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">GERMAN</span><span class="p">],</span> <span class="n">out</span><span class="p">[</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;edition&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">CZECH</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">de_all</span><span class="o">.</span><span class="n">empty</span> <span class="ow">or</span> <span class="n">cz_all</span><span class="o">.</span><span class="n">empty</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">out</span><span class="p">,</span> <span class="n">status</span>
+    <span class="k">for</span> <span class="n">ck</span><span class="p">,</span> <span class="n">de_c</span> <span class="ow">in</span> <span class="n">de_all</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;court_key&quot;</span><span class="p">):</span>
+        <span class="n">cz_c</span> <span class="o">=</span> <span class="n">cz_all</span><span class="p">[</span><span class="n">cz_all</span><span class="p">[</span><span class="s2">&quot;court_key&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">ck</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">cz_c</span><span class="o">.</span><span class="n">empty</span> <span class="ow">or</span> <span class="ow">not</span> <span class="nb">str</span><span class="p">(</span><span class="n">ck</span><span class="p">)</span><span class="o">.</span><span class="n">isdigit</span><span class="p">():</span>
+            <span class="k">continue</span>
+        <span class="n">de_m</span><span class="p">,</span> <span class="n">cz_m</span> <span class="o">=</span> <span class="p">(</span><span class="n">f</span><span class="p">[</span><span class="n">f</span><span class="p">[</span><span class="s2">&quot;settlement_seq&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="p">(</span><span class="n">de_c</span><span class="p">,</span> <span class="n">cz_c</span><span class="p">))</span>
+        <span class="n">munis</span><span class="p">,</span> <span class="n">status</span><span class="p">[</span><span class="n">ck</span><span class="p">]</span> <span class="o">=</span> <span class="n">pair_court</span><span class="p">(</span><span class="n">de_m</span><span class="p">,</span> <span class="n">cz_m</span><span class="p">,</span> <span class="n">complete</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">d</span><span class="p">,</span> <span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">how</span><span class="p">)</span> <span class="ow">in</span> <span class="n">munis</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">_link</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="n">d</span><span class="p">,</span> <span class="n">c</span><span class="p">,</span> <span class="n">how</span><span class="p">,</span> <span class="n">anchored</span><span class="p">)</span>
+            <span class="n">parts</span> <span class="o">=</span> <span class="n">pair_parts</span><span class="p">(</span><span class="n">de_c</span><span class="p">[(</span><span class="n">de_c</span><span class="p">[</span><span class="s2">&quot;muni_seq&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">out</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">d</span><span class="p">,</span> <span class="s2">&quot;muni_seq&quot;</span><span class="p">])</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">de_c</span><span class="p">[</span><span class="s2">&quot;settlement_seq&quot;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)],</span>
+                               <span class="n">cz_c</span><span class="p">[(</span><span class="n">cz_c</span><span class="p">[</span><span class="s2">&quot;muni_seq&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">out</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">c</span><span class="p">,</span> <span class="s2">&quot;muni_seq&quot;</span><span class="p">])</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">cz_c</span><span class="p">[</span><span class="s2">&quot;settlement_seq&quot;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)])</span>
+            <span class="k">for</span> <span class="n">dp</span><span class="p">,</span> <span class="p">(</span><span class="n">cp</span><span class="p">,</span> <span class="n">how_p</span><span class="p">)</span> <span class="ow">in</span> <span class="n">parts</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="n">_link</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="n">dp</span><span class="p">,</span> <span class="n">cp</span><span class="p">,</span> <span class="n">how_p</span><span class="p">,</span> <span class="n">anchored</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span><span class="p">,</span> <span class="n">status</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_link</span><span class="p">(</span><span class="n">out</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">d</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">c</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">how</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">anchored</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Record one pair on the German row; inherit the Czech settlement where the German has none.&quot;&quot;&quot;</span>
+    <span class="n">out</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">d</span><span class="p">,</span> <span class="s2">&quot;cz_muni_seq&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">out</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">c</span><span class="p">,</span> <span class="s2">&quot;muni_seq&quot;</span><span class="p">])</span>
+    <span class="n">out</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">d</span><span class="p">,</span> <span class="s2">&quot;cz_settlement_seq&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">out</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">c</span><span class="p">,</span> <span class="s2">&quot;settlement_seq&quot;</span><span class="p">])</span>
+    <span class="n">out</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">d</span><span class="p">,</span> <span class="s2">&quot;crosswalk&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">how</span>
+    <span class="n">de_sid</span><span class="p">,</span> <span class="n">cz_sid</span> <span class="o">=</span> <span class="n">_sid</span><span class="p">(</span><span class="n">out</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">d</span><span class="p">,</span> <span class="s2">&quot;settlement_id&quot;</span><span class="p">]),</span> <span class="n">_sid</span><span class="p">(</span><span class="n">out</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">c</span><span class="p">,</span> <span class="s2">&quot;settlement_id&quot;</span><span class="p">])</span>
+    <span class="k">if</span> <span class="n">de_sid</span> <span class="ow">and</span> <span class="n">cz_sid</span> <span class="ow">and</span> <span class="n">how</span> <span class="o">!=</span> <span class="s2">&quot;settlement&quot;</span><span class="p">:</span>       <span class="c1"># a settlement pair agrees by construction</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">d</span><span class="p">,</span> <span class="s2">&quot;crosswalk_agrees&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">de_sid</span> <span class="o">==</span> <span class="n">cz_sid</span>
+    <span class="k">elif</span> <span class="n">cz_sid</span> <span class="ow">and</span> <span class="n">out</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">d</span><span class="p">,</span> <span class="s2">&quot;anchor_status&quot;</span><span class="p">]</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">anchored</span> <span class="ow">and</span> <span class="n">how</span> <span class="ow">in</span> <span class="n">INHERITED</span><span class="p">:</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">d</span><span class="p">,</span> <span class="s2">&quot;settlement_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cz_sid</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">d</span><span class="p">,</span> <span class="s2">&quot;anchor_status&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">INHERITED</span><span class="p">[</span><span class="n">how</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">crosswalk_report</span><span class="p">(</span><span class="n">places</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">status</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;How many German places paired, by step, how many inherited, and how often the two agree.&quot;&quot;&quot;</span>
+    <span class="n">de</span> <span class="o">=</span> <span class="n">places</span><span class="p">[</span><span class="n">places</span><span class="p">[</span><span class="s2">&quot;edition&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">GERMAN</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">de</span><span class="o">.</span><span class="n">empty</span> <span class="ow">or</span> <span class="s2">&quot;crosswalk&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">de</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">&quot;  crosswalk: no German Böhmen places in this build&quot;</span>
+    <span class="n">by</span> <span class="o">=</span> <span class="n">de</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;place_level&quot;</span><span class="p">)</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;  crosswalk to the Czech volume (German Böhmen places):&quot;</span><span class="p">]</span>
+    <span class="k">for</span> <span class="n">level</span><span class="p">,</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">by</span><span class="p">:</span>
+        <span class="n">how</span> <span class="o">=</span> <span class="n">g</span><span class="p">[</span><span class="s2">&quot;crosswalk&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span>
+        <span class="n">agree</span> <span class="o">=</span> <span class="n">g</span><span class="p">[</span><span class="s2">&quot;crosswalk_agrees&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">dropna</span><span class="p">()</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">level</span><span class="si">:</span><span class="s2">12s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">g</span><span class="p">)</span><span class="si">:</span><span class="s2">4d</span><span class="si">}</span><span class="s2"> places, paired </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">g</span><span class="p">[</span><span class="s1">&#39;crosswalk&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">how</span><span class="si">}</span><span class="s2">; &quot;</span>
+                     <span class="sa">f</span><span class="s2">&quot;inherited </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">g</span><span class="p">[</span><span class="s1">&#39;anchor_status&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">INHERITED</span><span class="o">.</span><span class="n">values</span><span class="p">())</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">}</span><span class="s2">; &quot;</span>
+                     <span class="sa">f</span><span class="s2">&quot;both anchored </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">agree</span><span class="p">)</span><span class="si">}</span><span class="s2">, agree </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">agree</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">hold</span> <span class="o">=</span> <span class="n">order_holdout</span><span class="p">(</span><span class="n">places</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">hold</span><span class="p">):</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    order rule, leave-one-out on </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">hold</span><span class="p">)</span><span class="si">}</span><span class="s2"> known pairs: predicted &quot;</span>
+                     <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">hold</span><span class="p">[</span><span class="s1">&#39;predicted&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">}</span><span class="s2">, of those correct </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">hold</span><span class="p">[</span><span class="s1">&#39;correct&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">refused</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">k</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">status</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">s</span> <span class="o">==</span> <span class="s2">&quot;not monotone&quot;</span><span class="p">)</span>
+    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    order step by court: </span><span class="si">{</span><span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">(</span><span class="n">status</span><span class="p">)</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">status</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{}</span><span class="si">}</span><span class="s2">&quot;</span>
+                 <span class="o">+</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot;; refused (not monotone): </span><span class="si">{</span><span class="n">refused</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">if</span> <span class="n">refused</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+    <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>

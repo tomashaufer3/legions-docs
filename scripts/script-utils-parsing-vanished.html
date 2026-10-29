@@ -1,0 +1,508 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>RÚIAN and Geonames list what exists today. A 1910 settlement that has since disappeared — a
+German hamlet left empty after 1945, a village cleared for a reservoir or a military area, a
+farmstead that fell in — is on neither, so the crosswalk (<code>utils.parsing.ruian</code>) cannot
+place it however good the name match. This module supplies the places that are gone.</p><p class="tldr-facts"><b>Output &amp; support</b> · v1.0.0 · 164 lines · 3 public functions · 5 constants · used by <code>02_data_cleaning.ipynb</code>, <code>utils/parsing/ruian.py</code> · <code>utils/parsing/vanished.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-parsing-vanished-fetch_vanished">fetch_vanished</a><a class="chip" href="#fn-utils-parsing-vanished-build_vanished">build_vanished</a><a class="chip" href="#fn-utils-parsing-vanished-vanished_report">vanished_report</a><a class="chip const" href="#c-utils-parsing-vanished-ENDPOINT">ENDPOINT</a><a class="chip const" href="#c-utils-parsing-vanished-USER_AGENT">USER_AGENT</a><a class="chip const" href="#c-utils-parsing-vanished-SETTLEMENT_CLASSES">SETTLEMENT_CLASSES</a><a class="chip const" href="#c-utils-parsing-vanished-CLASSES">CLASSES</a><a class="chip const" href="#c-utils-parsing-vanished-QUERY">QUERY</a></div>
+<h2>How it works</h2><h4>Source</h4>
+<p>One SPARQL query to the <a class="cite" data-ref="wikidata" href="#references" onclick="return bibGo(event)">Wikidata</a> Query Service (CC0). It returns every item that</p>
+<ul>
+<li>carries a <strong>zanikleobce.cz ID</strong> (P3003) — the volunteer register <em>Zaniklé obce a objekty po
+  roce 1945</em> (https://www.zanikleobce.cz), whose identifiers <a class="cite" data-ref="wikidata" href="#references" onclick="return bibGo(event)">Wikidata</a> imported item by item; or</li>
+<li>is an instance (P31) of <em>abandoned village</em> (Q350895), <em>abandoned hamlet</em> (Q27654220),
+  <em>deserted farmyard</em> (Q28807616) or <em>former entity</em> (Q15893266) located in Czechia (P17 Q213).</li>
+</ul>
+<p>Per item: QID, Czech and German labels, coordinates (P625), classes, the zanikleobce.cz ID,
+the administrative unit it is filed under (P131), inception (P571) and dissolution (P576).
+zanikleobce.cz itself is <strong>not</strong> fetched: its robots.txt asks crawlers off its query pages and
+it states no licence; <a class="cite" data-ref="wikidata" href="#references" onclick="return bibGo(event)">Wikidata</a>'s copy of its identifiers is CC0, and every point keeps the ID so
+it can be cited back to the page it came from (<code>https://www.zanikleobce.cz/index.php?obec=&amp;lt;id&amp;gt;</code>).</p>
+<p>The raw result is cached under <code>data/raw/geo/wikidata_vanished/</code> beside a <code>SOURCE.txt</code>
+holding the query text, the endpoint, the retrieval time (UTC), the row count and the sha256 of
+the file — so the build can be re-run without re-querying, and the exact query is on record.</p>
+<p>Output: <code>vanished_places</code> [<code>qid</code>] — labels, point, classes, <code>zanikleobce_id</code>, the 1910 court
+and okres the point falls in, and the modern obec whose territory holds the site today.</p>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-parsing-vanished-fetch_vanished">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">fetch_vanished</span><span class="p">(</span><span class="n">cache_path</span><span class="p">,</span> <span class="n">refresh</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>The raw query result (CSV), from the cache unless <em>refresh</em> or the cache is missing.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/parsing/ruian.py</code></p>
+<details><summary>source · lines 94–119 (26 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">fetch_vanished</span><span class="p">(</span><span class="n">cache_path</span><span class="p">,</span> <span class="n">refresh</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The raw query result (CSV), from the cache unless *refresh* or the cache is missing.&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">requests</span>
+
+    <span class="n">cache_path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">cache_path</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">cache_path</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">refresh</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">cache_path</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span>
+    <span class="n">resp</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">ENDPOINT</span><span class="p">,</span> <span class="n">params</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;query&quot;</span><span class="p">:</span> <span class="n">QUERY</span><span class="p">},</span>
+                        <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;Accept&quot;</span><span class="p">:</span> <span class="s2">&quot;text/csv&quot;</span><span class="p">,</span> <span class="s2">&quot;User-Agent&quot;</span><span class="p">:</span> <span class="n">USER_AGENT</span><span class="p">},</span> <span class="n">timeout</span><span class="o">=</span><span class="mi">300</span><span class="p">)</span>
+    <span class="n">resp</span><span class="o">.</span><span class="n">raise_for_status</span><span class="p">()</span>
+    <span class="n">cache_path</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">cache_path</span><span class="o">.</span><span class="n">write_bytes</span><span class="p">(</span><span class="n">resp</span><span class="o">.</span><span class="n">content</span><span class="p">)</span>
+    <span class="n">raw</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">cache_path</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span>
+    <span class="p">(</span><span class="n">cache_path</span><span class="o">.</span><span class="n">parent</span> <span class="o">/</span> <span class="s2">&quot;SOURCE.txt&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span>
+        <span class="s2">&quot;Wikidata Query Service — vanished / abandoned settlements of Czechia</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;endpoint:   </span><span class="si">{</span><span class="n">ENDPOINT</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;retrieved:  </span><span class="si">{</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">timezone</span><span class="o">.</span><span class="n">utc</span><span class="p">)</span><span class="o">.</span><span class="n">isoformat</span><span class="p">(</span><span class="n">timespec</span><span class="o">=</span><span class="s1">&#39;seconds&#39;</span><span class="p">)</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;file:       </span><span class="si">{</span><span class="n">cache_path</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;rows:       </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;bytes:      </span><span class="si">{</span><span class="n">cache_path</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;sha256:     </span><span class="si">{</span><span class="n">_sha256</span><span class="p">(</span><span class="n">cache_path</span><span class="p">)</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="s2">&quot;licence:    CC0 (Wikidata). zanikleobce.cz IDs (P3003) cite https://www.zanikleobce.cz</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;built by:   utils/parsing/vanished.py </span><span class="si">{</span><span class="n">__version__</span><span class="si">}</span><span class="s2"> (fetch_vanished)</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="s2">&quot;approved:   by the author in chat, 2026-10-29</span><span class="se">\n\n</span><span class="s2">&quot;</span>
+        <span class="s2">&quot;query:</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="n">QUERY</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">raw</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-vanished-build_vanished">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">build_vanished</span><span class="p">(</span><span class="n">raw</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">locator</span><span class="p">,</span> <span class="n">obce</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Tidy the query result; locate each point in the 1910 courts and in today's obce.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/parsing/ruian.py</code></p>
+<details><summary>source · lines 130–155 (26 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">build_vanished</span><span class="p">(</span><span class="n">raw</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">locator</span><span class="p">,</span> <span class="n">obce</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Tidy the query result; locate each point in the 1910 courts and in today&#39;s obce.&quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing</span><span class="w"> </span><span class="kn">import</span> <span class="n">ruian</span> <span class="k">as</span> <span class="n">ru</span>
+
+    <span class="n">out</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">({</span><span class="s2">&quot;qid&quot;</span><span class="p">:</span> <span class="n">raw</span><span class="p">[</span><span class="s2">&quot;item&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">rsplit</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">,</span> <span class="n">n</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">str</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]})</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;label_cs&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">raw</span><span class="p">[</span><span class="s2">&quot;label_cs&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;label_de&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">raw</span><span class="p">[</span><span class="s2">&quot;label_de&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="n">ll</span> <span class="o">=</span> <span class="n">raw</span><span class="p">[</span><span class="s2">&quot;coord&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_point</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;lon&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">a</span> <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">_b</span> <span class="ow">in</span> <span class="n">ll</span><span class="p">]</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;lat&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">b</span> <span class="k">for</span> <span class="n">_a</span><span class="p">,</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">ll</span><span class="p">]</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;n_coord&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_numeric</span><span class="p">(</span><span class="n">raw</span><span class="p">[</span><span class="s2">&quot;n_coord&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;zanikleobce_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">raw</span><span class="p">[</span><span class="s2">&quot;zanikleobce_id&quot;</span><span class="p">]</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;classes&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">raw</span><span class="p">[</span><span class="s2">&quot;classes&quot;</span><span class="p">]</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;settlement_like&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;classes&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;|&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">map</span><span class="p">(</span>
+        <span class="k">lambda</span> <span class="n">cs</span><span class="p">:</span> <span class="nb">any</span><span class="p">(</span><span class="n">c</span> <span class="ow">in</span> <span class="n">SETTLEMENT_CLASSES</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cs</span><span class="p">))</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;admin_qid&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">raw</span><span class="p">[</span><span class="s2">&quot;admin&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">rsplit</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">,</span> <span class="n">n</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">str</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;admin_cs&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">raw</span><span class="p">[</span><span class="s2">&quot;admin_cs&quot;</span><span class="p">]</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;inception&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">raw</span><span class="p">[</span><span class="s2">&quot;inception&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="p">[:</span><span class="mi">10</span><span class="p">]</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;dissolved&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">raw</span><span class="p">[</span><span class="s2">&quot;dissolved&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="p">[:</span><span class="mi">10</span><span class="p">]</span>
+    <span class="n">court</span><span class="p">,</span> <span class="n">okres</span> <span class="o">=</span> <span class="n">ru</span><span class="o">.</span><span class="n">locate_courts</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;lon&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(</span><span class="nb">float</span><span class="p">),</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;lat&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(</span><span class="nb">float</span><span class="p">),</span> <span class="n">locator</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;court_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">court</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;okres_id_1910&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">okres</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+    <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">ru</span><span class="o">.</span><span class="n">wgs84_to_sjtsk</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;lon&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(</span><span class="nb">float</span><span class="p">),</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;lat&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(</span><span class="nb">float</span><span class="p">))</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;obec_kod&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">ru</span><span class="o">.</span><span class="n">locate_obce</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">obce</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;qid&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">is_unique</span> <span class="ow">and</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;qid&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-vanished-vanished_report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">vanished_report</span><span class="p">(</span><span class="n">v</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span></pre>
+<div class="fndoc"><p>Counts: with a point, inside the Czech-lands 1910 courts, with a zanikleobce.cz ID.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/parsing/ruian.py</code></p>
+<details><summary>source · lines 158–164 (7 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">vanished_report</span><span class="p">(</span><span class="n">v</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Counts: with a point, inside the Czech-lands 1910 courts, with a zanikleobce.cz ID.&quot;&quot;&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Vanished places (Wikidata): </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">; with a point </span><span class="si">{</span><span class="n">v</span><span class="p">[</span><span class="s1">&#39;lat&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(several points on </span><span class="si">{</span><span class="nb">int</span><span class="p">((</span><span class="n">v</span><span class="p">[</span><span class="s1">&#39;n_coord&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">}</span><span class="s2">); in a 1910 Czech-lands court &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">v</span><span class="p">[</span><span class="s1">&#39;court_id&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">; with a zanikleobce.cz ID &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">v</span><span class="p">[</span><span class="s1">&#39;zanikleobce_id&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">; German label </span><span class="si">{</span><span class="n">v</span><span class="p">[</span><span class="s1">&#39;label_de&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">; &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;settlement-like (matchable) </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">v</span><span class="p">[</span><span class="s1">&#39;settlement_like&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-parsing-vanished-ENDPOINT"><pre class="sig">ENDPOINT<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;https://query.wikidata.org/sparql&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-parsing-vanished-USER_AGENT"><pre class="sig">USER_AGENT<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;Legions-thesis utils/parsing/vanished.py/1.0 (research; one query, cached)&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-parsing-vanished-SETTLEMENT_CLASSES"><pre class="sig">SETTLEMENT_CLASSES<span class="kind">dict · 13 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;Q350895&#39;</span><span class="p">:</span> <span class="s1">&#39;abandoned village&#39;</span><span class="p">,</span> <span class="s1">&#39;Q27654220&#39;</span><span class="p">:</span> <span class="s1">&#39;abandoned hamlet&#39;</span><span class="p">,</span> <span class="s1">&#39;Q28807616&#39;</span><span class="p">:</span> <span class="s1">&#39;deserted farmyard&#39;</span><span class="p">,</span> <span class="s1">&#39;Q1138414&#39;</span><span class="p">:</span> <span class="s1">&#39;isolated settlement&#39;</span><span class="p">,</span> <span class="s1">&#39;Q5084&#39;</span><span class="p">:</span> <span class="s1">&#39;hamlet&#39;</span><span class="p">,</span> <span class="s1">&#39;Q532&#39;</span><span class="p">:</span> <span class="s1">&#39;village&#39;</span><span class="p">,</span> <span class="s1">&#39;Q486972&#39;</span><span class="p">:</span> <span class="s1">&#39;human settlement&#39;</span><span class="p">,</span> <span class="s1">&#39;Q5153359&#39;</span><span class="p">:</span> <span class="s1">&#39;municipality of the Czech Republic&#39;</span><span class="p">,</span> <span class="s1">&#39;Q61089180&#39;</span><span class="p">:</span> <span class="s1">&#39;municipal part of the Czech Republic&#39;</span><span class="p">,</span> <span class="s1">&#39;Q329245&#39;</span><span class="p">:</span> <span class="s1">&#39;basic unit of settlement&#39;</span><span class="p">,</span> <span class="s1">&#39;Q20871353&#39;</span><span class="p">:</span> <span class="s1">&#39;cadastral area in the Czech Republic&#39;</span><span class="p">,</span> <span class="s1">&#39;Q56822897&#39;</span><span class="p">:</span> <span class="s1">&#39;mill building&#39;</span><span class="p">,</span> <span class="s1">&#39;Q185187&#39;</span><span class="p">:</span> <span class="s1">&#39;watermill&#39;</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-parsing-vanished-CLASSES"><pre class="sig">CLASSES<span class="kind">dict · 4 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;Q350895&#39;</span><span class="p">:</span> <span class="s1">&#39;abandoned village&#39;</span><span class="p">,</span> <span class="s1">&#39;Q27654220&#39;</span><span class="p">:</span> <span class="s1">&#39;abandoned hamlet&#39;</span><span class="p">,</span> <span class="s1">&#39;Q28807616&#39;</span><span class="p">:</span> <span class="s1">&#39;deserted farmyard&#39;</span><span class="p">,</span> <span class="s1">&#39;Q15893266&#39;</span><span class="p">:</span> <span class="s1">&#39;former entity&#39;</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-parsing-vanished-QUERY"><pre class="sig">QUERY<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">SELECT ?item</span><span class="se">\n</span><span class="s1">       (SAMPLE(?csL) AS ?label_cs) (SAMPLE(?deL) AS ?label_de)</span><span class="se">\n</span><span class="s1">       (SAMPLE(?c) AS ?coord) (COUNT(DISTINCT ?c) AS ?n_coord)</span><span class="se">\n</span><span class="s1">       (SAMPLE(?z) AS ?zanikleobce_id)</span><span class="se">\n</span><span class="s1">       (GROUP_CONCAT(DISTINCT STRAFTER(STR(?cls), &quot;entity/&quot;); separator=&quot;|&quot;) AS ?classes)</span><span class="se">\n</span><span class="s1">       (SAMPLE(?adm) AS ?admin) (SAMPLE(?admL) AS ?admin_cs)</span><span class="se">\n</span><span class="s1">       (SAMPLE(?inc) AS ?inception) (SAMPLE(?dis) AS ?dissolved)</span><span class="se">\n</span><span class="s1">WHERE {</span><span class="se">\n</span><span class="s1">  { ?item wdt:P3003 ?z0 }</span><span class="se">\n</span><span class="s1">  UNION</span><span class="se">\n</span><span class="s1">  { VALUES ?k { %CLASSES% } ?item wdt:P31 ?k ; wdt:P17 wd:Q213 }</span><span class="se">\n</span><span class="s1">  OPTIONAL { ?item wdt:P3003 ?z }</span><span class="se">\n</span><span class="s1">  OPTIONAL { ?item rdfs:label ?csL FILTER(LANG(?csL) = &quot;cs&quot;) }</span><span class="se">\n</span><span class="s1">  OPTIONAL { ?item rdfs:label ?deL FILTER(LANG(?deL) = &quot;de&quot;) }</span><span class="se">\n</span><span class="s1">  OPTIONAL { ?item wdt:P625 ?c }</span><span class="se">\n</span><span class="s1">  OPTIONAL { ?item wdt:P31 ?cls }</span><span class="se">\n</span><span class="s1">  OPTIONAL { ?item wdt:P131 ?adm . OPTIONAL { ?adm rdfs:label ?admL FILTER(LANG(?admL) = &quot;cs&quot;) } }</span><span class="se">\n</span><span class="s1">  OPTIONAL { ?item wdt:P571 ?inc }</span><span class="se">\n</span><span class="s1">  OPTIONAL { ?item wdt:P576 ?dis }</span><span class="se">\n</span><span class="s1">}</span><span class="se">\n</span><span class="s1">GROUP BY ?item</span><span class="se">\n</span><span class="s1">&#39;</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;%CLASSES%&#39;</span><span class="p">,</span> <span class="s1">&#39; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">((</span><span class="sa">f</span><span class="s1">&#39;wd:</span><span class="si">{</span><span class="n">q</span><span class="si">}</span><span class="s1">&#39;</span> <span class="k">for</span> <span class="n">q</span> <span class="ow">in</span> <span class="n">CLASSES</span><span class="p">)))</span>
+</pre></div>
+</details></div>
+<h2>Used by</h2><p><code>02_data_cleaning.ipynb</code> <code>utils/parsing/ruian.py</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/parsing/vanished.py · 164 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">vanished.py — vanished and abandoned settlements of the Czech lands, from Wikidata</span>
+<span class="sd">=================================================================================</span>
+<span class="sd">RÚIAN and Geonames list what exists today. A 1910 settlement that has since disappeared — a</span>
+<span class="sd">German hamlet left empty after 1945, a village cleared for a reservoir or a military area, a</span>
+<span class="sd">farmstead that fell in — is on neither, so the crosswalk (:mod:`utils.parsing.ruian`) cannot</span>
+<span class="sd">place it however good the name match. This module supplies the places that are gone.</span>
+
+<span class="sd">Source</span>
+<span class="sd">------</span>
+<span class="sd">One SPARQL query to the Wikidata Query Service (CC0). It returns every item that</span>
+
+<span class="sd">* carries a **zanikleobce.cz ID** (P3003) — the volunteer register *Zaniklé obce a objekty po</span>
+<span class="sd">  roce 1945* (https://www.zanikleobce.cz), whose identifiers Wikidata imported item by item; or</span>
+<span class="sd">* is an instance (P31) of *abandoned village* (Q350895), *abandoned hamlet* (Q27654220),</span>
+<span class="sd">  *deserted farmyard* (Q28807616) or *former entity* (Q15893266) located in Czechia (P17 Q213).</span>
+
+<span class="sd">Per item: QID, Czech and German labels, coordinates (P625), classes, the zanikleobce.cz ID,</span>
+<span class="sd">the administrative unit it is filed under (P131), inception (P571) and dissolution (P576).</span>
+<span class="sd">zanikleobce.cz itself is **not** fetched: its robots.txt asks crawlers off its query pages and</span>
+<span class="sd">it states no licence; Wikidata&#39;s copy of its identifiers is CC0, and every point keeps the ID so</span>
+<span class="sd">it can be cited back to the page it came from (``https://www.zanikleobce.cz/index.php?obec=&lt;id&gt;``).</span>
+
+<span class="sd">The raw result is cached under ``data/raw/geo/wikidata_vanished/`` beside a ``SOURCE.txt``</span>
+<span class="sd">holding the query text, the endpoint, the retrieval time (UTC), the row count and the sha256 of</span>
+<span class="sd">the file — so the build can be re-run without re-querying, and the exact query is on record.</span>
+
+<span class="sd">Output: ``vanished_places`` [``qid``] — labels, point, classes, ``zanikleobce_id``, the 1910 court</span>
+<span class="sd">and okres the point falls in, and the modern obec whose territory holds the site today.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">hashlib</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">datetime</span><span class="w"> </span><span class="kn">import</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timezone</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.0.0&quot;</span>   <span class="c1"># first build (2026-10-29)</span>
+
+<span class="n">ENDPOINT</span> <span class="o">=</span> <span class="s2">&quot;https://query.wikidata.org/sparql&quot;</span>
+<span class="c1"># Polite and anonymous: the script names itself, never the author (project scraping rule).</span>
+<span class="n">USER_AGENT</span> <span class="o">=</span> <span class="s2">&quot;Legions-thesis utils/parsing/vanished.py/1.0 (research; one query, cached)&quot;</span>
+<span class="c1"># Classes that make an item a place a person could have lived in — the only items the</span>
+<span class="c1"># crosswalk will match. Churches, chapels, synagogues, monuments, streets and trees are kept in</span>
+<span class="c1"># the table (``settlement_like`` False) but never matched to a settlement name. Labels as</span>
+<span class="c1"># Wikidata gives them (wbgetentities, 2026-10-29).</span>
+<span class="n">SETTLEMENT_CLASSES</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;Q350895&quot;</span><span class="p">:</span> <span class="s2">&quot;abandoned village&quot;</span><span class="p">,</span> <span class="s2">&quot;Q27654220&quot;</span><span class="p">:</span> <span class="s2">&quot;abandoned hamlet&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Q28807616&quot;</span><span class="p">:</span> <span class="s2">&quot;deserted farmyard&quot;</span><span class="p">,</span> <span class="s2">&quot;Q1138414&quot;</span><span class="p">:</span> <span class="s2">&quot;isolated settlement&quot;</span><span class="p">,</span> <span class="s2">&quot;Q5084&quot;</span><span class="p">:</span> <span class="s2">&quot;hamlet&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Q532&quot;</span><span class="p">:</span> <span class="s2">&quot;village&quot;</span><span class="p">,</span> <span class="s2">&quot;Q486972&quot;</span><span class="p">:</span> <span class="s2">&quot;human settlement&quot;</span><span class="p">,</span> <span class="s2">&quot;Q5153359&quot;</span><span class="p">:</span> <span class="s2">&quot;municipality of the Czech Republic&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Q61089180&quot;</span><span class="p">:</span> <span class="s2">&quot;municipal part of the Czech Republic&quot;</span><span class="p">,</span> <span class="s2">&quot;Q329245&quot;</span><span class="p">:</span> <span class="s2">&quot;basic unit of settlement&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Q20871353&quot;</span><span class="p">:</span> <span class="s2">&quot;cadastral area in the Czech Republic&quot;</span><span class="p">,</span> <span class="s2">&quot;Q56822897&quot;</span><span class="p">:</span> <span class="s2">&quot;mill building&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Q185187&quot;</span><span class="p">:</span> <span class="s2">&quot;watermill&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="n">CLASSES</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;Q350895&quot;</span><span class="p">:</span> <span class="s2">&quot;abandoned village&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Q27654220&quot;</span><span class="p">:</span> <span class="s2">&quot;abandoned hamlet&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Q28807616&quot;</span><span class="p">:</span> <span class="s2">&quot;deserted farmyard&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Q15893266&quot;</span><span class="p">:</span> <span class="s2">&quot;former entity&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="n">QUERY</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">SELECT ?item</span>
+<span class="s2">       (SAMPLE(?csL) AS ?label_cs) (SAMPLE(?deL) AS ?label_de)</span>
+<span class="s2">       (SAMPLE(?c) AS ?coord) (COUNT(DISTINCT ?c) AS ?n_coord)</span>
+<span class="s2">       (SAMPLE(?z) AS ?zanikleobce_id)</span>
+<span class="s2">       (GROUP_CONCAT(DISTINCT STRAFTER(STR(?cls), &quot;entity/&quot;); separator=&quot;|&quot;) AS ?classes)</span>
+<span class="s2">       (SAMPLE(?adm) AS ?admin) (SAMPLE(?admL) AS ?admin_cs)</span>
+<span class="s2">       (SAMPLE(?inc) AS ?inception) (SAMPLE(?dis) AS ?dissolved)</span>
+<span class="s2">WHERE {</span>
+<span class="s2">  { ?item wdt:P3003 ?z0 }</span>
+<span class="s2">  UNION</span>
+<span class="s2">  { VALUES ?k { %CLASSES% } ?item wdt:P31 ?k ; wdt:P17 wd:Q213 }</span>
+<span class="s2">  OPTIONAL { ?item wdt:P3003 ?z }</span>
+<span class="s2">  OPTIONAL { ?item rdfs:label ?csL FILTER(LANG(?csL) = &quot;cs&quot;) }</span>
+<span class="s2">  OPTIONAL { ?item rdfs:label ?deL FILTER(LANG(?deL) = &quot;de&quot;) }</span>
+<span class="s2">  OPTIONAL { ?item wdt:P625 ?c }</span>
+<span class="s2">  OPTIONAL { ?item wdt:P31 ?cls }</span>
+<span class="s2">  OPTIONAL { ?item wdt:P131 ?adm . OPTIONAL { ?adm rdfs:label ?admL FILTER(LANG(?admL) = &quot;cs&quot;) } }</span>
+<span class="s2">  OPTIONAL { ?item wdt:P571 ?inc }</span>
+<span class="s2">  OPTIONAL { ?item wdt:P576 ?dis }</span>
+<span class="s2">}</span>
+<span class="s2">GROUP BY ?item</span>
+<span class="s2">&quot;&quot;&quot;</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;%CLASSES%&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;wd:</span><span class="si">{</span><span class="n">q</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">q</span> <span class="ow">in</span> <span class="n">CLASSES</span><span class="p">))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_sha256</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">sha256</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span><span class="o">.</span><span class="n">read_bytes</span><span class="p">())</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">fetch_vanished</span><span class="p">(</span><span class="n">cache_path</span><span class="p">,</span> <span class="n">refresh</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The raw query result (CSV), from the cache unless *refresh* or the cache is missing.&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">requests</span>
+
+    <span class="n">cache_path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">cache_path</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">cache_path</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">refresh</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">cache_path</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span>
+    <span class="n">resp</span> <span class="o">=</span> <span class="n">requests</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">ENDPOINT</span><span class="p">,</span> <span class="n">params</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;query&quot;</span><span class="p">:</span> <span class="n">QUERY</span><span class="p">},</span>
+                        <span class="n">headers</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;Accept&quot;</span><span class="p">:</span> <span class="s2">&quot;text/csv&quot;</span><span class="p">,</span> <span class="s2">&quot;User-Agent&quot;</span><span class="p">:</span> <span class="n">USER_AGENT</span><span class="p">},</span> <span class="n">timeout</span><span class="o">=</span><span class="mi">300</span><span class="p">)</span>
+    <span class="n">resp</span><span class="o">.</span><span class="n">raise_for_status</span><span class="p">()</span>
+    <span class="n">cache_path</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">cache_path</span><span class="o">.</span><span class="n">write_bytes</span><span class="p">(</span><span class="n">resp</span><span class="o">.</span><span class="n">content</span><span class="p">)</span>
+    <span class="n">raw</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">cache_path</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span>
+    <span class="p">(</span><span class="n">cache_path</span><span class="o">.</span><span class="n">parent</span> <span class="o">/</span> <span class="s2">&quot;SOURCE.txt&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span>
+        <span class="s2">&quot;Wikidata Query Service — vanished / abandoned settlements of Czechia</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;endpoint:   </span><span class="si">{</span><span class="n">ENDPOINT</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;retrieved:  </span><span class="si">{</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(</span><span class="n">timezone</span><span class="o">.</span><span class="n">utc</span><span class="p">)</span><span class="o">.</span><span class="n">isoformat</span><span class="p">(</span><span class="n">timespec</span><span class="o">=</span><span class="s1">&#39;seconds&#39;</span><span class="p">)</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;file:       </span><span class="si">{</span><span class="n">cache_path</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;rows:       </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;bytes:      </span><span class="si">{</span><span class="n">cache_path</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;sha256:     </span><span class="si">{</span><span class="n">_sha256</span><span class="p">(</span><span class="n">cache_path</span><span class="p">)</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="s2">&quot;licence:    CC0 (Wikidata). zanikleobce.cz IDs (P3003) cite https://www.zanikleobce.cz</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;built by:   utils/parsing/vanished.py </span><span class="si">{</span><span class="n">__version__</span><span class="si">}</span><span class="s2"> (fetch_vanished)</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="s2">&quot;approved:   by the author in chat, 2026-10-29</span><span class="se">\n\n</span><span class="s2">&quot;</span>
+        <span class="s2">&quot;query:</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="n">QUERY</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">raw</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_point</span><span class="p">(</span><span class="n">wkt</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``&#39;Point(14.1 50.2)&#39;`` → ``(lon, lat)``.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">wkt</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">wkt</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;Point(&quot;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+    <span class="n">lon</span><span class="p">,</span> <span class="n">lat</span> <span class="o">=</span> <span class="n">wkt</span><span class="p">[</span><span class="mi">6</span><span class="p">:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">split</span><span class="p">()[:</span><span class="mi">2</span><span class="p">]</span>
+    <span class="k">return</span> <span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">lon</span><span class="p">),</span> <span class="nb">float</span><span class="p">(</span><span class="n">lat</span><span class="p">))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">build_vanished</span><span class="p">(</span><span class="n">raw</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">locator</span><span class="p">,</span> <span class="n">obce</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Tidy the query result; locate each point in the 1910 courts and in today&#39;s obce.&quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing</span><span class="w"> </span><span class="kn">import</span> <span class="n">ruian</span> <span class="k">as</span> <span class="n">ru</span>
+
+    <span class="n">out</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">({</span><span class="s2">&quot;qid&quot;</span><span class="p">:</span> <span class="n">raw</span><span class="p">[</span><span class="s2">&quot;item&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">rsplit</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">,</span> <span class="n">n</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">str</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]})</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;label_cs&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">raw</span><span class="p">[</span><span class="s2">&quot;label_cs&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;label_de&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">raw</span><span class="p">[</span><span class="s2">&quot;label_de&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="n">ll</span> <span class="o">=</span> <span class="n">raw</span><span class="p">[</span><span class="s2">&quot;coord&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">_point</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;lon&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">a</span> <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">_b</span> <span class="ow">in</span> <span class="n">ll</span><span class="p">]</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;lat&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">b</span> <span class="k">for</span> <span class="n">_a</span><span class="p">,</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">ll</span><span class="p">]</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;n_coord&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_numeric</span><span class="p">(</span><span class="n">raw</span><span class="p">[</span><span class="s2">&quot;n_coord&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;zanikleobce_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">raw</span><span class="p">[</span><span class="s2">&quot;zanikleobce_id&quot;</span><span class="p">]</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;classes&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">raw</span><span class="p">[</span><span class="s2">&quot;classes&quot;</span><span class="p">]</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;settlement_like&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;classes&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;|&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">map</span><span class="p">(</span>
+        <span class="k">lambda</span> <span class="n">cs</span><span class="p">:</span> <span class="nb">any</span><span class="p">(</span><span class="n">c</span> <span class="ow">in</span> <span class="n">SETTLEMENT_CLASSES</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cs</span><span class="p">))</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;admin_qid&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">raw</span><span class="p">[</span><span class="s2">&quot;admin&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">rsplit</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">,</span> <span class="n">n</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">str</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;admin_cs&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">raw</span><span class="p">[</span><span class="s2">&quot;admin_cs&quot;</span><span class="p">]</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;inception&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">raw</span><span class="p">[</span><span class="s2">&quot;inception&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="p">[:</span><span class="mi">10</span><span class="p">]</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;dissolved&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">raw</span><span class="p">[</span><span class="s2">&quot;dissolved&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="p">[:</span><span class="mi">10</span><span class="p">]</span>
+    <span class="n">court</span><span class="p">,</span> <span class="n">okres</span> <span class="o">=</span> <span class="n">ru</span><span class="o">.</span><span class="n">locate_courts</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;lon&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(</span><span class="nb">float</span><span class="p">),</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;lat&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(</span><span class="nb">float</span><span class="p">),</span> <span class="n">locator</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;court_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">court</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;okres_id_1910&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">okres</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+    <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">ru</span><span class="o">.</span><span class="n">wgs84_to_sjtsk</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;lon&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(</span><span class="nb">float</span><span class="p">),</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;lat&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(</span><span class="nb">float</span><span class="p">))</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;obec_kod&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">ru</span><span class="o">.</span><span class="n">locate_obce</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">obce</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;qid&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">is_unique</span> <span class="ow">and</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;qid&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">vanished_report</span><span class="p">(</span><span class="n">v</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Counts: with a point, inside the Czech-lands 1910 courts, with a zanikleobce.cz ID.&quot;&quot;&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Vanished places (Wikidata): </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">; with a point </span><span class="si">{</span><span class="n">v</span><span class="p">[</span><span class="s1">&#39;lat&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(several points on </span><span class="si">{</span><span class="nb">int</span><span class="p">((</span><span class="n">v</span><span class="p">[</span><span class="s1">&#39;n_coord&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">}</span><span class="s2">); in a 1910 Czech-lands court &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">v</span><span class="p">[</span><span class="s1">&#39;court_id&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">; with a zanikleobce.cz ID &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">v</span><span class="p">[</span><span class="s1">&#39;zanikleobce_id&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">; German label </span><span class="si">{</span><span class="n">v</span><span class="p">[</span><span class="s1">&#39;label_de&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">; &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;settlement-like (matchable) </span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">v</span><span class="p">[</span><span class="s1">&#39;settlement_like&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>

@@ -1,0 +1,428 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>1910 Austrian Silesia did not end at today's Czech border: the eastern half of the Teschen
+duchy — okres Bílsko and most of okres Těšín, with parts of Frýštát — went to Poland in 1920.
+The ČSÚ lexicon and RÚIAN stop at the border, so for those 1910 parts the only official modern
+gazetteer is the Polish one.</p><p class="tldr-facts"><b>Output &amp; support</b> · v1.0.0 · 125 lines · 5 public functions · 1 constant · used by <code>02_data_cleaning.ipynb</code>, <code>utils/parsing/ruian.py</code> · <code>utils/parsing/prng.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-parsing-prng-parse_dms">parse_dms</a><a class="chip" href="#fn-utils-parsing-prng-read_prng">read_prng</a><a class="chip" href="#fn-utils-parsing-prng-silesia_okres_ids">silesia_okres_ids</a><a class="chip" href="#fn-utils-parsing-prng-add_court_1910">add_court_1910</a><a class="chip" href="#fn-utils-parsing-prng-prng_report">prng_report</a><a class="chip const" href="#c-utils-parsing-prng-SILESIA_OKRES_CS">SILESIA_OKRES_CS</a></div>
+<h2>How it works</h2><p>Source: <code>PRNG_MIEJSCOWOSCI_XLSX.zip</code> from GUGiK, https://opendata.geoportal.gov.pl/prng/ —
+the localities (<em>miejscowości</em>) half of the register, refreshed daily; the geoportal states the
+data are "bezpłatnie i do dowolnego wykorzystania" (free, for any use). Coordinates are given in
+WGS 84 as degrees-minutes-seconds text (<code>50°43'05" 16°39'17"</code>, latitude first), read by
+<code>parse_dms</code>; the PL-1992 pair beside them is not needed.</p>
+<p>Only the area of the 1910 Silesian courts is kept — the caller passes the <a class="cite" data-ref="mpidr_2012" href="#references" onclick="return bibGo(event)">MPIDR</a> court locator,
+and a locality is kept when its point falls inside a court of <code>SILESIA_OKRES_IDS</code>.</p>
+<p>Output: <code>prng_places</code> [<code>prng_id</code>] — name, kind, parent locality, gmina/powiat, lat/lon,
+the German name where PRNG records one, and the 1910 <code>court_id</code> / <code>okres_id</code> it falls in.</p>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-parsing-prng-parse_dms">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">parse_dms</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span></pre>
+<div class="fndoc"><p><code>'50°43\'05" 16°39\'17"'</code> → <code>(lat, lon)</code> in decimal degrees; NaNs if unreadable.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_ruian.py</code></p>
+<details><summary>source · lines 50–60 (11 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">50</span>
+<span class="normal">51</span>
+<span class="normal">52</span>
+<span class="normal">53</span>
+<span class="normal">54</span>
+<span class="normal">55</span>
+<span class="normal">56</span>
+<span class="normal">57</span>
+<span class="normal">58</span>
+<span class="normal">59</span>
+<span class="normal">60</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">parse_dms</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``&#39;50°43\\&#39;05&quot; 16°39\\&#39;17&quot;&#39;`` → ``(lat, lon)`` in decimal degrees; NaNs if unreadable.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">_DMS</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="n">s</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">m</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+    <span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">c</span><span class="p">),</span> <span class="p">(</span><span class="n">d</span><span class="p">,</span> <span class="n">e</span><span class="p">,</span> <span class="n">f</span><span class="p">)</span> <span class="o">=</span> <span class="n">m</span><span class="p">[:</span><span class="mi">2</span><span class="p">]</span>
+    <span class="n">lat</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">b</span><span class="p">)</span> <span class="o">/</span> <span class="mi">60</span> <span class="o">+</span> <span class="nb">float</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">,</span> <span class="s2">&quot;.&quot;</span><span class="p">))</span> <span class="o">/</span> <span class="mi">3600</span>
+    <span class="n">lon</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">d</span><span class="p">)</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">e</span><span class="p">)</span> <span class="o">/</span> <span class="mi">60</span> <span class="o">+</span> <span class="nb">float</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">,</span> <span class="s2">&quot;.&quot;</span><span class="p">))</span> <span class="o">/</span> <span class="mi">3600</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">lat</span><span class="p">,</span> <span class="n">lon</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-prng-read_prng">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">read_prng</span><span class="p">(</span><span class="n">xlsx_path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Read the localities workbook (<code>openpyxl</code>, read-only) into a frame, Silesian voivodeships
+only. <em>xlsx_path</em> may be the downloaded zip itself; the workbook is read from inside it.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/parsing/ruian.py</code></p>
+<details><summary>source · lines 63–91 (29 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">63</span>
+<span class="normal">64</span>
+<span class="normal">65</span>
+<span class="normal">66</span>
+<span class="normal">67</span>
+<span class="normal">68</span>
+<span class="normal">69</span>
+<span class="normal">70</span>
+<span class="normal">71</span>
+<span class="normal">72</span>
+<span class="normal">73</span>
+<span class="normal">74</span>
+<span class="normal">75</span>
+<span class="normal">76</span>
+<span class="normal">77</span>
+<span class="normal">78</span>
+<span class="normal">79</span>
+<span class="normal">80</span>
+<span class="normal">81</span>
+<span class="normal">82</span>
+<span class="normal">83</span>
+<span class="normal">84</span>
+<span class="normal">85</span>
+<span class="normal">86</span>
+<span class="normal">87</span>
+<span class="normal">88</span>
+<span class="normal">89</span>
+<span class="normal">90</span>
+<span class="normal">91</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">read_prng</span><span class="p">(</span><span class="n">xlsx_path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Read the localities workbook (``openpyxl``, read-only) into a frame, Silesian voivodeships</span>
+<span class="sd">    only. *xlsx_path* may be the downloaded zip itself; the workbook is read from inside it.&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">io</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">zipfile</span>
+
+    <span class="kn">import</span><span class="w"> </span><span class="nn">openpyxl</span>
+
+    <span class="k">if</span> <span class="nb">str</span><span class="p">(</span><span class="n">xlsx_path</span><span class="p">)</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;.zip&quot;</span><span class="p">):</span>
+        <span class="k">with</span> <span class="n">zipfile</span><span class="o">.</span><span class="n">ZipFile</span><span class="p">(</span><span class="n">xlsx_path</span><span class="p">)</span> <span class="k">as</span> <span class="n">zf</span><span class="p">:</span>
+            <span class="n">member</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">n</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">zf</span><span class="o">.</span><span class="n">namelist</span><span class="p">()</span> <span class="k">if</span> <span class="n">n</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;_XLSX.xlsx&quot;</span><span class="p">))</span>
+            <span class="n">xlsx_path</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">BytesIO</span><span class="p">(</span><span class="n">zf</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">member</span><span class="p">))</span>
+    <span class="n">wb</span> <span class="o">=</span> <span class="n">openpyxl</span><span class="o">.</span><span class="n">load_workbook</span><span class="p">(</span><span class="n">xlsx_path</span><span class="p">,</span> <span class="n">read_only</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">rows</span> <span class="o">=</span> <span class="n">wb</span><span class="p">[</span><span class="n">wb</span><span class="o">.</span><span class="n">sheetnames</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span><span class="o">.</span><span class="n">iter_rows</span><span class="p">(</span><span class="n">values_only</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">header</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">next</span><span class="p">(</span><span class="n">rows</span><span class="p">))</span>
+        <span class="n">idx</span> <span class="o">=</span> <span class="p">{</span><span class="n">out</span><span class="p">:</span> <span class="n">header</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="n">src</span><span class="p">)</span> <span class="k">for</span> <span class="n">src</span><span class="p">,</span> <span class="n">out</span> <span class="ow">in</span> <span class="n">_COLS</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+        <span class="n">iw</span> <span class="o">=</span> <span class="n">idx</span><span class="p">[</span><span class="s2">&quot;wojewodztwo&quot;</span><span class="p">]</span>
+        <span class="n">recs</span> <span class="o">=</span> <span class="p">[{</span><span class="n">out</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="k">for</span> <span class="n">out</span><span class="p">,</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">idx</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="n">iw</span><span class="p">]</span> <span class="ow">in</span> <span class="n">_VOIVODESHIPS</span><span class="p">]</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="n">wb</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">recs</span><span class="p">)</span>
+    <span class="n">ll</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;dms&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">parse_dms</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;lat&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">a</span> <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">_b</span> <span class="ow">in</span> <span class="n">ll</span><span class="p">]</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;lon&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">b</span> <span class="k">for</span> <span class="n">_a</span><span class="p">,</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">ll</span><span class="p">]</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;prng_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;prng_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;int64&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;name_historical&quot;</span><span class="p">,</span> <span class="s2">&quot;name_other&quot;</span><span class="p">,</span> <span class="s2">&quot;name_other_lang&quot;</span><span class="p">):</span>
+        <span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">df</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;dms&quot;</span><span class="p">])</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-prng-silesia_okres_ids">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">silesia_okres_ids</span><span class="p">(</span><span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">set</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span></pre>
+<div class="fndoc"><p><code>okres_id</code> (<code>region * 1000 + district</code>) of <code>SILESIA_OKRES_CS</code> in the backbone.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/parsing/ruian.py</code></p>
+<details><summary>source · lines 100–105 (6 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">silesia_okres_ids</span><span class="p">(</span><span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">set</span><span class="p">[</span><span class="nb">int</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``okres_id`` (``region * 1000 + district``) of :data:`SILESIA_OKRES_CS` in the backbone.&quot;&quot;&quot;</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="n">districts</span><span class="p">[</span><span class="n">districts</span><span class="p">[</span><span class="s2">&quot;okres_cs&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">SILESIA_OKRES_CS</span><span class="p">)]</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;okres_code&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">set</span><span class="p">(</span><span class="n">rows</span><span class="p">[</span><span class="s2">&quot;okres_cs&quot;</span><span class="p">])</span> <span class="o">!=</span> <span class="nb">set</span><span class="p">(</span><span class="n">SILESIA_OKRES_CS</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;backbone lacks </span><span class="si">{</span><span class="nb">set</span><span class="p">(</span><span class="n">SILESIA_OKRES_CS</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nb">set</span><span class="p">(</span><span class="n">rows</span><span class="p">[</span><span class="s1">&#39;okres_cs&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="nb">int</span><span class="p">(</span><span class="n">r</span><span class="p">)</span> <span class="o">*</span> <span class="mi">1000</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">d</span><span class="p">)</span> <span class="k">for</span> <span class="n">r</span><span class="p">,</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;-&quot;</span><span class="p">)}</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-prng-add_court_1910">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">add_court_1910</span><span class="p">(</span><span class="n">places</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">locator</span><span class="p">,</span> <span class="n">okres_ids</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">int</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Locate each place in the <a class="cite" data-ref="mpidr_2012" href="#references" onclick="return bibGo(event)">MPIDR</a> courts; keep those inside an okres of <em>okres_ids</em>.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/parsing/ruian.py</code></p>
+<details><summary>source · lines 108–118 (11 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">add_court_1910</span><span class="p">(</span><span class="n">places</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">locator</span><span class="p">,</span> <span class="n">okres_ids</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">int</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Locate each place in the MPIDR courts; keep those inside an okres of *okres_ids*.&quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing</span><span class="w"> </span><span class="kn">import</span> <span class="n">ruian</span> <span class="k">as</span> <span class="n">ru</span>
+
+    <span class="n">out</span> <span class="o">=</span> <span class="n">places</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">court</span><span class="p">,</span> <span class="n">okres</span> <span class="o">=</span> <span class="n">ru</span><span class="o">.</span><span class="n">locate_courts</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;lon&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;lat&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span> <span class="n">locator</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;court_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">court</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">okres</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">okres_ids</span><span class="p">)]</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;prng_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">is_unique</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-prng-prng_report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">prng_report</span><span class="p">(</span><span class="n">places</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span></pre>
+<div class="fndoc"><p>Localities kept, by 1910 okres and kind.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/parsing/ruian.py</code></p>
+<details><summary>source · lines 121–125 (5 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">prng_report</span><span class="p">(</span><span class="n">places</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Localities kept, by 1910 okres and kind.&quot;&quot;&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;PRNG localities in 1910 Těšín Silesia: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">places</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">places</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;okres_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">size</span><span class="p">()</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">places</span><span class="p">[</span><span class="s2">&quot;kind&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">head</span><span class="p">(</span><span class="mi">8</span><span class="p">)</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-parsing-prng-SILESIA_OKRES_CS"><pre class="sig">SILESIA_OKRES_CS<span class="kind">tuple · 4 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">(</span><span class="s1">&#39;Bílsko&#39;</span><span class="p">,</span> <span class="s1">&#39;Bílsko (město)&#39;</span><span class="p">,</span> <span class="s1">&#39;Fryštát&#39;</span><span class="p">,</span> <span class="s1">&#39;Těšín&#39;</span><span class="p">)</span>
+</pre></div>
+</details></div>
+<h2>Used by</h2><p><code>02_data_cleaning.ipynb</code> <code>utils/parsing/ruian.py</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/parsing/prng.py · 125 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">prng.py — Polish localities from the PRNG (Państwowy Rejestr Nazw Geograficznych), Těšín Silesia</span>
+<span class="sd">================================================================================================</span>
+<span class="sd">1910 Austrian Silesia did not end at today&#39;s Czech border: the eastern half of the Teschen</span>
+<span class="sd">duchy — okres Bílsko and most of okres Těšín, with parts of Frýštát — went to Poland in 1920.</span>
+<span class="sd">The ČSÚ lexicon and RÚIAN stop at the border, so for those 1910 parts the only official modern</span>
+<span class="sd">gazetteer is the Polish one.</span>
+
+<span class="sd">Source: ``PRNG_MIEJSCOWOSCI_XLSX.zip`` from GUGiK, https://opendata.geoportal.gov.pl/prng/ —</span>
+<span class="sd">the localities (*miejscowości*) half of the register, refreshed daily; the geoportal states the</span>
+<span class="sd">data are &quot;bezpłatnie i do dowolnego wykorzystania&quot; (free, for any use). Coordinates are given in</span>
+<span class="sd">WGS 84 as degrees-minutes-seconds text (``50°43&#39;05&quot; 16°39&#39;17&quot;``, latitude first), read by</span>
+<span class="sd">:func:`parse_dms`; the PL-1992 pair beside them is not needed.</span>
+
+<span class="sd">Only the area of the 1910 Silesian courts is kept — the caller passes the MPIDR court locator,</span>
+<span class="sd">and a locality is kept when its point falls inside a court of :data:`SILESIA_OKRES_IDS`.</span>
+
+<span class="sd">Output: ``prng_places`` [``prng_id``] — name, kind, parent locality, gmina/powiat, lat/lon,</span>
+<span class="sd">the German name where PRNG records one, and the 1910 ``court_id`` / ``okres_id`` it falls in.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.0.0&quot;</span>   <span class="c1"># first build (2026-10-29)</span>
+
+<span class="c1"># Columns read from the XLSX (Polish headers) → output names.</span>
+<span class="n">_COLS</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;identyfikator PRNG&quot;</span><span class="p">:</span> <span class="s2">&quot;prng_id&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;nazwa główna&quot;</span><span class="p">:</span> <span class="s2">&quot;name&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;rodzaj obiektu&quot;</span><span class="p">:</span> <span class="s2">&quot;kind&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;nazwa miejscowości nadrzędnej&quot;</span><span class="p">:</span> <span class="s2">&quot;parent_name&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;nazwa historyczna&quot;</span><span class="p">:</span> <span class="s2">&quot;name_historical&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;nazwa dodatkowa&quot;</span><span class="p">:</span> <span class="s2">&quot;name_other&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;język nazwy dodatkowej&quot;</span><span class="p">:</span> <span class="s2">&quot;name_other_lang&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;współrzędne geograficzne&quot;</span><span class="p">:</span> <span class="s2">&quot;dms&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;województwo&quot;</span><span class="p">:</span> <span class="s2">&quot;wojewodztwo&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;powiat&quot;</span><span class="p">:</span> <span class="s2">&quot;powiat&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;gmina&quot;</span><span class="p">:</span> <span class="s2">&quot;gmina&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="c1"># The two voivodeships that hold any of 1910 Austrian Silesia; a cheap first filter.</span>
+<span class="n">_VOIVODESHIPS</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;śląskie&quot;</span><span class="p">,</span> <span class="s2">&quot;małopolskie&quot;</span><span class="p">}</span>
+<span class="n">_DMS</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;(\d+)°(\d+)&#39;(\d+(?:[.,]\d+)?)</span><span class="se">\&quot;</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">parse_dms</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``&#39;50°43\\&#39;05&quot; 16°39\\&#39;17&quot;&#39;`` → ``(lat, lon)`` in decimal degrees; NaNs if unreadable.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">_DMS</span><span class="o">.</span><span class="n">findall</span><span class="p">(</span><span class="n">s</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">m</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">:</span>
+        <span class="k">return</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+    <span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">c</span><span class="p">),</span> <span class="p">(</span><span class="n">d</span><span class="p">,</span> <span class="n">e</span><span class="p">,</span> <span class="n">f</span><span class="p">)</span> <span class="o">=</span> <span class="n">m</span><span class="p">[:</span><span class="mi">2</span><span class="p">]</span>
+    <span class="n">lat</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">b</span><span class="p">)</span> <span class="o">/</span> <span class="mi">60</span> <span class="o">+</span> <span class="nb">float</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">,</span> <span class="s2">&quot;.&quot;</span><span class="p">))</span> <span class="o">/</span> <span class="mi">3600</span>
+    <span class="n">lon</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">d</span><span class="p">)</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">e</span><span class="p">)</span> <span class="o">/</span> <span class="mi">60</span> <span class="o">+</span> <span class="nb">float</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">,</span> <span class="s2">&quot;.&quot;</span><span class="p">))</span> <span class="o">/</span> <span class="mi">3600</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">lat</span><span class="p">,</span> <span class="n">lon</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">read_prng</span><span class="p">(</span><span class="n">xlsx_path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Read the localities workbook (``openpyxl``, read-only) into a frame, Silesian voivodeships</span>
+<span class="sd">    only. *xlsx_path* may be the downloaded zip itself; the workbook is read from inside it.&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">io</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">zipfile</span>
+
+    <span class="kn">import</span><span class="w"> </span><span class="nn">openpyxl</span>
+
+    <span class="k">if</span> <span class="nb">str</span><span class="p">(</span><span class="n">xlsx_path</span><span class="p">)</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;.zip&quot;</span><span class="p">):</span>
+        <span class="k">with</span> <span class="n">zipfile</span><span class="o">.</span><span class="n">ZipFile</span><span class="p">(</span><span class="n">xlsx_path</span><span class="p">)</span> <span class="k">as</span> <span class="n">zf</span><span class="p">:</span>
+            <span class="n">member</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">n</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">zf</span><span class="o">.</span><span class="n">namelist</span><span class="p">()</span> <span class="k">if</span> <span class="n">n</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;_XLSX.xlsx&quot;</span><span class="p">))</span>
+            <span class="n">xlsx_path</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">BytesIO</span><span class="p">(</span><span class="n">zf</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">member</span><span class="p">))</span>
+    <span class="n">wb</span> <span class="o">=</span> <span class="n">openpyxl</span><span class="o">.</span><span class="n">load_workbook</span><span class="p">(</span><span class="n">xlsx_path</span><span class="p">,</span> <span class="n">read_only</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">rows</span> <span class="o">=</span> <span class="n">wb</span><span class="p">[</span><span class="n">wb</span><span class="o">.</span><span class="n">sheetnames</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span><span class="o">.</span><span class="n">iter_rows</span><span class="p">(</span><span class="n">values_only</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">header</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">next</span><span class="p">(</span><span class="n">rows</span><span class="p">))</span>
+        <span class="n">idx</span> <span class="o">=</span> <span class="p">{</span><span class="n">out</span><span class="p">:</span> <span class="n">header</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="n">src</span><span class="p">)</span> <span class="k">for</span> <span class="n">src</span><span class="p">,</span> <span class="n">out</span> <span class="ow">in</span> <span class="n">_COLS</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+        <span class="n">iw</span> <span class="o">=</span> <span class="n">idx</span><span class="p">[</span><span class="s2">&quot;wojewodztwo&quot;</span><span class="p">]</span>
+        <span class="n">recs</span> <span class="o">=</span> <span class="p">[{</span><span class="n">out</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="k">for</span> <span class="n">out</span><span class="p">,</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">idx</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="n">iw</span><span class="p">]</span> <span class="ow">in</span> <span class="n">_VOIVODESHIPS</span><span class="p">]</span>
+    <span class="k">finally</span><span class="p">:</span>
+        <span class="n">wb</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">recs</span><span class="p">)</span>
+    <span class="n">ll</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;dms&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">parse_dms</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;lat&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">a</span> <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">_b</span> <span class="ow">in</span> <span class="n">ll</span><span class="p">]</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;lon&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">b</span> <span class="k">for</span> <span class="n">_a</span><span class="p">,</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">ll</span><span class="p">]</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;prng_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;prng_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;int64&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;name_historical&quot;</span><span class="p">,</span> <span class="s2">&quot;name_other&quot;</span><span class="p">,</span> <span class="s2">&quot;name_other_lang&quot;</span><span class="p">):</span>
+        <span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">df</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;dms&quot;</span><span class="p">])</span>
+
+
+<span class="c1"># The 1910 Silesian okresy that lie wholly or partly in today&#39;s Poland: Bílsko 303-1,</span>
+<span class="c1"># Bílsko (město) 303-2, Fryštát 303-3, Těšín 303-9. Resolved by name against the backbone in</span>
+<span class="c1"># :func:`silesia_okres_ids` — kept as names, not codes, so a renumbered backbone fails loudly.</span>
+<span class="n">SILESIA_OKRES_CS</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;Bílsko&quot;</span><span class="p">,</span> <span class="s2">&quot;Bílsko (město)&quot;</span><span class="p">,</span> <span class="s2">&quot;Fryštát&quot;</span><span class="p">,</span> <span class="s2">&quot;Těšín&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">silesia_okres_ids</span><span class="p">(</span><span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">set</span><span class="p">[</span><span class="nb">int</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``okres_id`` (``region * 1000 + district``) of :data:`SILESIA_OKRES_CS` in the backbone.&quot;&quot;&quot;</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="n">districts</span><span class="p">[</span><span class="n">districts</span><span class="p">[</span><span class="s2">&quot;okres_cs&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">SILESIA_OKRES_CS</span><span class="p">)]</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;okres_code&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">set</span><span class="p">(</span><span class="n">rows</span><span class="p">[</span><span class="s2">&quot;okres_cs&quot;</span><span class="p">])</span> <span class="o">!=</span> <span class="nb">set</span><span class="p">(</span><span class="n">SILESIA_OKRES_CS</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;backbone lacks </span><span class="si">{</span><span class="nb">set</span><span class="p">(</span><span class="n">SILESIA_OKRES_CS</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nb">set</span><span class="p">(</span><span class="n">rows</span><span class="p">[</span><span class="s1">&#39;okres_cs&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="nb">int</span><span class="p">(</span><span class="n">r</span><span class="p">)</span> <span class="o">*</span> <span class="mi">1000</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">d</span><span class="p">)</span> <span class="k">for</span> <span class="n">r</span><span class="p">,</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;-&quot;</span><span class="p">)}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">add_court_1910</span><span class="p">(</span><span class="n">places</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">locator</span><span class="p">,</span> <span class="n">okres_ids</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">int</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Locate each place in the MPIDR courts; keep those inside an okres of *okres_ids*.&quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing</span><span class="w"> </span><span class="kn">import</span> <span class="n">ruian</span> <span class="k">as</span> <span class="n">ru</span>
+
+    <span class="n">out</span> <span class="o">=</span> <span class="n">places</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">court</span><span class="p">,</span> <span class="n">okres</span> <span class="o">=</span> <span class="n">ru</span><span class="o">.</span><span class="n">locate_courts</span><span class="p">(</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;lon&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;lat&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span> <span class="n">locator</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;court_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">court</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">okres</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="n">out</span><span class="p">[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">okres_ids</span><span class="p">)]</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;prng_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">is_unique</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">prng_report</span><span class="p">(</span><span class="n">places</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Localities kept, by 1910 okres and kind.&quot;&quot;&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;PRNG localities in 1910 Těšín Silesia: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">places</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">places</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;okres_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">size</span><span class="p">()</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">places</span><span class="p">[</span><span class="s2">&quot;kind&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">head</span><span class="p">(</span><span class="mi">8</span><span class="p">)</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>
