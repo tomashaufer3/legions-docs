@@ -1,0 +1,603 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Pilot — the Matice česká and Matice moravská member registers, read into tables and
+summed to a measure per 1910 okres.</p><p class="tldr-facts"><b>Reference tools</b> · v— · 164 lines · 5 public functions · 6 constants · used by nothing else · <code>utils/reference_tools/places/run_matice_pilot.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-reference_tools-places-run_matice_pilot-add_places">add_places</a><a class="chip" href="#fn-utils-reference_tools-places-run_matice_pilot-add_occupations">add_occupations</a><a class="chip" href="#fn-utils-reference_tools-places-run_matice_pilot-report">report</a><a class="chip" href="#fn-utils-reference_tools-places-run_matice_pilot-theatre_check">theatre_check</a><a class="chip" href="#fn-utils-reference_tools-places-run_matice_pilot-main">main</a><a class="chip const" href="#c-utils-reference_tools-places-run_matice_pilot-ROOT">ROOT</a><a class="chip const" href="#c-utils-reference_tools-places-run_matice_pilot-LIBRARY">LIBRARY</a><a class="chip const" href="#c-utils-reference_tools-places-run_matice_pilot-GEO">GEO</a><a class="chip const" href="#c-utils-reference_tools-places-run_matice_pilot-CENSUS">CENSUS</a><a class="chip const" href="#c-utils-reference_tools-places-run_matice_pilot-THEATRE">THEATRE</a><a class="chip const" href="#c-utils-reference_tools-places-run_matice_pilot-OUT">OUT</a></div>
+<h2>How it works</h2><p>Offline: reads the page caches <code>utils/scraping/run_matice_downloads.py</code> left in
+<code>library/associations/</code> (and the 1878 Internet Archive PDF beside them), the 1910
+place tables in <code>data/final/geo/</code> and the pooled okres census, and writes nothing but
+<code>data/interim/matice/</code>:</p>
+<p><code>matice_entries.csv</code>
+    One row per printed entry (key <code>entry_id</code>), every field beside the entry's own
+    text, with <code>entry_year_from_no</code> (a deceased founder's entry year read off the
+    membership numbers), <code>number_order_outlier</code>, the parse <code>flags</code>, the 1910
+    settlement and okres its residence names (<code>utils.parsing.locative</code>, with
+    <code>place_status</code> and <code>place_how</code>), and the member's <code>occupation_class</code> and
+    <code>member_group</code> (posted / local / student / corporate / unknown).
+<code>matice_totals.csv</code>
+    Entries found against the totals each society printed.
+<code>matice_okres.csv</code>
+    The measure: one row per census okres (key <code>census_okres_id</code>, zeros kept), member
+    counts, rates per 1,000 inhabitants and per 1,000 Czech speakers, and
+    empirical-Bayes shrunk rates (<code>matice.okres_measure</code>).</p>
+<p>and prints what it found. Nothing reaches <code>data/final</code>.</p>
+<p>Usage::</p>
+<pre><code>python utils/reference_tools/places/run_matice_pilot.py
+python utils/reference_tools/places/run_matice_pilot.py --only mc1890 mm1909
+</code></pre>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-reference_tools-places-run_matice_pilot-add_places">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">add_places</span><span class="p">(</span><span class="n">entries</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>The 1910 settlement and okres of every residence (<code>locative.match_all</code>).</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 54–62 (9 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">54</span>
+<span class="normal">55</span>
+<span class="normal">56</span>
+<span class="normal">57</span>
+<span class="normal">58</span>
+<span class="normal">59</span>
+<span class="normal">60</span>
+<span class="normal">61</span>
+<span class="normal">62</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">add_places</span><span class="p">(</span><span class="n">entries</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The 1910 settlement and okres of every residence (``locative.match_all``).&quot;&quot;&quot;</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">lc</span><span class="o">.</span><span class="n">build_index</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">GEO</span> <span class="o">/</span> <span class="s2">&quot;settlements_1910.parquet&quot;</span><span class="p">),</span>
+                           <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">GEO</span> <span class="o">/</span> <span class="s2">&quot;settlement_aliases_1910.csv&quot;</span><span class="p">),</span>
+                           <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">GEO</span> <span class="o">/</span> <span class="s2">&quot;districts_1910.parquet&quot;</span><span class="p">))</span>
+    <span class="n">places</span> <span class="o">=</span> <span class="n">lc</span><span class="o">.</span><span class="n">match_all</span><span class="p">(</span><span class="n">entries</span><span class="p">[</span><span class="s2">&quot;residence&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">entries</span><span class="p">[</span><span class="s2">&quot;residence&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">)),</span> <span class="n">index</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">entries</span><span class="p">,</span> <span class="n">places</span><span class="p">],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-run_matice_pilot-add_occupations">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">add_occupations</span><span class="p">(</span><span class="n">entries</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 65–70 (6 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">65</span>
+<span class="normal">66</span>
+<span class="normal">67</span>
+<span class="normal">68</span>
+<span class="normal">69</span>
+<span class="normal">70</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">add_occupations</span><span class="p">(</span><span class="n">entries</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+    <span class="n">entries</span><span class="p">[</span><span class="s2">&quot;occupation_class&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="n">mt</span><span class="o">.</span><span class="n">occupation_class</span><span class="p">(</span><span class="n">o</span><span class="p">,</span> <span class="n">h</span><span class="p">,</span> <span class="nb">bool</span><span class="p">(</span><span class="n">c</span><span class="p">))</span> <span class="k">for</span> <span class="n">o</span><span class="p">,</span> <span class="n">h</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span>
+        <span class="nb">zip</span><span class="p">(</span><span class="n">entries</span><span class="p">[</span><span class="s2">&quot;occupation&quot;</span><span class="p">],</span> <span class="n">entries</span><span class="p">[</span><span class="s2">&quot;honorific&quot;</span><span class="p">],</span> <span class="n">entries</span><span class="p">[</span><span class="s2">&quot;is_corporate&quot;</span><span class="p">])]</span>
+    <span class="n">entries</span><span class="p">[</span><span class="s2">&quot;member_group&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">entries</span><span class="p">[</span><span class="s2">&quot;occupation_class&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">mt</span><span class="o">.</span><span class="n">member_group</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">entries</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-run_matice_pilot-report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">entries</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">totals</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">measure</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span></pre>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code> <code>03_visualisation.ipynb</code> <code>tests/test_religion_categories.py</code> <code>utils/docs/build_docs.py</code> <code>utils/lexikon_1910/build_de_page_map.py</code> <code>utils/lexikon_1910/build_mark_ledger.py</code> <code>utils/lexikon_1910/build_symbol_atlas_de.py</code> <code>utils/lexikon_1910/read_transcription_md.py</code> <code>utils/lexikon_1910/run_glyph_e3.py</code> <code>utils/lexikon_1910/score_certification.py</code> <code>utils/lexikon_1910/score_table_passes.py</code> <code>utils/linkage.py</code> <code>utils/parsing/clean.py</code> <code>utils/parsing/dates.py</code> <code>utils/parsing/exit_codes.py</code> <code>utils/parsing/habsburg.py</code> <code>utils/validation/data_checks.py</code></p>
+<details><summary>source · lines 73–109 (37 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">entries</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">totals</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">measure</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">matice </span><span class="si">{</span><span class="n">mt</span><span class="o">.</span><span class="n">__version__</span><span class="si">}</span><span class="s2"> / locative </span><span class="si">{</span><span class="n">lc</span><span class="o">.</span><span class="n">__version__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">entries</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> entries &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;from </span><span class="si">{</span><span class="n">entries</span><span class="p">[</span><span class="s1">&#39;source&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">nunique</span><span class="p">()</span><span class="si">}</span><span class="s2"> sources</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">entries</span><span class="o">.</span><span class="n">groupby</span><span class="p">([</span><span class="s2">&quot;source&quot;</span><span class="p">,</span> <span class="s2">&quot;list_kind&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">size</span><span class="p">()</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="s2">&quot;entries&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Against the printed totals:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">totals</span><span class="o">.</span><span class="n">to_string</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
+    <span class="n">mc</span> <span class="o">=</span> <span class="n">entries</span><span class="p">[</span><span class="n">entries</span><span class="p">[</span><span class="s2">&quot;society&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;MC&quot;</span><span class="p">]</span>
+    <span class="n">both</span> <span class="o">=</span> <span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">mc</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">mc</span><span class="p">[</span><span class="s2">&quot;source&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;mc1873&quot;</span><span class="p">,</span> <span class="s2">&quot;member_no&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">dropna</span><span class="p">())</span>
+            <span class="o">&amp;</span> <span class="nb">set</span><span class="p">(</span><span class="n">mc</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">mc</span><span class="p">[</span><span class="s2">&quot;source&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;mc1890&quot;</span><span class="p">,</span> <span class="s2">&quot;member_no&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">dropna</span><span class="p">()))</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Matice česká membership numbers in both issues: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">both</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Numbers whose entry year disagrees with their neighbours&#39;: &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">entries</span><span class="p">[</span><span class="s1">&#39;number_order_outlier&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Residences (share of entries):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">entries</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;society&quot;</span><span class="p">)[</span><span class="s2">&quot;place_status&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">(</span><span class="n">normalize</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+          <span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span><span class="o">.</span><span class="n">unstack</span><span class="p">(</span><span class="n">fill_value</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+    <span class="n">how</span> <span class="o">=</span> <span class="n">entries</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">entries</span><span class="p">[</span><span class="s2">&quot;place_status&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;matched&quot;</span><span class="p">,</span> <span class="s2">&quot;place_how&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;:&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">str</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">How a settlement was chosen (matched entries):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">how</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Member groups (persons, not corporate):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">entries</span><span class="p">[</span><span class="n">entries</span><span class="p">[</span><span class="s2">&quot;member_group&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;corporate&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;society&quot;</span><span class="p">)[</span><span class="s2">&quot;member_group&quot;</span><span class="p">]</span>
+          <span class="o">.</span><span class="n">value_counts</span><span class="p">(</span><span class="n">normalize</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span><span class="o">.</span><span class="n">unstack</span><span class="p">(</span><span class="n">fill_value</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+    <span class="n">cols</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;mc_founders&quot;</span><span class="p">,</span> <span class="s2">&quot;mc_founders_local&quot;</span><span class="p">,</span> <span class="s2">&quot;mm_members_1909&quot;</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">The measure: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">measure</span><span class="p">)</span><span class="si">}</span><span class="s2"> okresy; members placed in an okres:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">measure</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;land&quot;</span><span class="p">)[</span><span class="n">cols</span> <span class="o">+</span> <span class="p">[</span><span class="s2">&quot;mc_corporate&quot;</span><span class="p">,</span> <span class="s2">&quot;mm_members_1890&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Okresy with no founder at all: &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">int</span><span class="p">((</span><span class="n">measure</span><span class="p">[</span><span class="s1">&#39;mc_founders&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">measure</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">top</span> <span class="o">=</span> <span class="n">measure</span><span class="o">.</span><span class="n">sort_values</span><span class="p">(</span><span class="s2">&quot;mc_founders_per_1000_eb&quot;</span><span class="p">,</span> <span class="n">ascending</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Highest Matice česká founder rate per 1,000 (shrunk), 12 okresy:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">top</span><span class="p">[[</span><span class="s2">&quot;okres_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;land&quot;</span><span class="p">,</span> <span class="s2">&quot;pop_total&quot;</span><span class="p">,</span> <span class="s2">&quot;lang_czech_share&quot;</span><span class="p">,</span> <span class="s2">&quot;mc_founders&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;mc_founders_per_1000&quot;</span><span class="p">,</span> <span class="s2">&quot;mc_founders_per_1000_eb&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">head</span><span class="p">(</span><span class="mi">12</span><span class="p">)</span>
+          <span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span><span class="o">.</span><span class="n">to_string</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
+    <span class="n">rates</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">c</span><span class="si">}</span><span class="s2">_per_1000_eb&quot;</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cols</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Spearman correlations across okresy (shrunk rates, Czech share):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">measure</span><span class="p">[</span><span class="n">rates</span> <span class="o">+</span> <span class="p">[</span><span class="s2">&quot;lang_czech_share&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">corr</span><span class="p">(</span><span class="n">method</span><span class="o">=</span><span class="s2">&quot;spearman&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+    <span class="k">if</span> <span class="n">THEATRE</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Against the theatre measure:&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">theatre_check</span><span class="p">(</span><span class="n">measure</span><span class="p">)</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-run_matice_pilot-theatre_check">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">theatre_check</span><span class="p">(</span><span class="n">measure</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Spearman correlation of the Matice rates with Czech theatre companies active per
+1,000 inhabitants, 1880–1890 (certain), across okresy — whole sample and the
+okresy at least half Czech-speaking.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 112–131 (20 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">theatre_check</span><span class="p">(</span><span class="n">measure</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Spearman correlation of the Matice rates with Czech theatre companies active per</span>
+<span class="sd">    1,000 inhabitants, 1880–1890 (certain), across okresy — whole sample and the</span>
+<span class="sd">    okresy at least half Czech-speaking.&quot;&quot;&quot;</span>
+    <span class="n">t</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">THEATRE</span><span class="p">)</span>
+    <span class="n">xw</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">GEO</span> <span class="o">/</span> <span class="s2">&quot;okres_census_crosswalk.csv&quot;</span><span class="p">)</span>
+    <span class="n">t</span> <span class="o">=</span> <span class="n">t</span><span class="p">[(</span><span class="n">t</span><span class="p">[</span><span class="s2">&quot;year&quot;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="mi">1880</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="s2">&quot;year&quot;</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="mi">1890</span><span class="p">)]</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span>
+        <span class="n">xw</span><span class="p">[[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">,</span> <span class="s2">&quot;census_okres_id&quot;</span><span class="p">]],</span> <span class="n">on</span><span class="o">=</span><span class="s2">&quot;okres_id&quot;</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;left&quot;</span><span class="p">,</span> <span class="n">validate</span><span class="o">=</span><span class="s2">&quot;m:1&quot;</span><span class="p">)</span>
+    <span class="n">act</span> <span class="o">=</span> <span class="p">(</span><span class="n">t</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">)[</span><span class="s2">&quot;ensembles_active_certain&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="o">/</span> <span class="mi">11</span><span class="p">)</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="s2">&quot;theatre&quot;</span><span class="p">)</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">measure</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span><span class="n">act</span><span class="p">,</span> <span class="n">left_on</span><span class="o">=</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">,</span> <span class="n">right_index</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;left&quot;</span><span class="p">,</span>
+                      <span class="n">validate</span><span class="o">=</span><span class="s2">&quot;1:1&quot;</span><span class="p">)</span>
+    <span class="n">m</span><span class="p">[</span><span class="s2">&quot;theatre_per_1000&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">1000</span> <span class="o">*</span> <span class="n">m</span><span class="p">[</span><span class="s2">&quot;theatre&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="n">m</span><span class="p">[</span><span class="s2">&quot;pop_total&quot;</span><span class="p">]</span>
+    <span class="n">cols</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;mc_founders_per_1000_eb&quot;</span><span class="p">,</span> <span class="s2">&quot;mc_founders_local_per_1000_eb&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;mm_members_1890_per_1000_eb&quot;</span><span class="p">,</span> <span class="s2">&quot;mm_members_1909_per_1000_eb&quot;</span><span class="p">,</span> <span class="s2">&quot;matice_own_z&quot;</span><span class="p">]</span>
+    <span class="n">czech</span> <span class="o">=</span> <span class="n">m</span><span class="p">[</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;lang_czech_share&quot;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="mf">0.5</span><span class="p">]</span>
+    <span class="n">frames</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;all okresy&quot;</span><span class="p">:</span> <span class="n">m</span><span class="p">,</span> <span class="s2">&quot;Czech share &gt;= 0.5&quot;</span><span class="p">:</span> <span class="n">czech</span><span class="p">,</span>
+              <span class="s2">&quot;Böhmen, Czech &gt;= 0.5&quot;</span><span class="p">:</span> <span class="n">czech</span><span class="p">[</span><span class="n">czech</span><span class="p">[</span><span class="s2">&quot;land&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;Böhmen&quot;</span><span class="p">],</span>
+              <span class="s2">&quot;Mähren, Czech &gt;= 0.5&quot;</span><span class="p">:</span> <span class="n">czech</span><span class="p">[</span><span class="n">czech</span><span class="p">[</span><span class="s2">&quot;land&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;Mähren&quot;</span><span class="p">]}</span>
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">({</span><span class="n">label</span><span class="p">:</span> <span class="n">f</span><span class="p">[</span><span class="n">cols</span><span class="p">]</span><span class="o">.</span><span class="n">corrwith</span><span class="p">(</span><span class="n">f</span><span class="p">[</span><span class="s2">&quot;theatre_per_1000&quot;</span><span class="p">],</span> <span class="n">method</span><span class="o">=</span><span class="s2">&quot;spearman&quot;</span><span class="p">)</span>
+                         <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">frames</span><span class="o">.</span><span class="n">items</span><span class="p">()})</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-run_matice_pilot-main">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 134–160 (27 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">p</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">p</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--only&quot;</span><span class="p">,</span> <span class="n">nargs</span><span class="o">=</span><span class="s2">&quot;+&quot;</span><span class="p">,</span> <span class="n">choices</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="n">mt</span><span class="o">.</span><span class="n">SOURCES</span><span class="p">),</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">parse_args</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+
+    <span class="n">entries</span> <span class="o">=</span> <span class="n">mt</span><span class="o">.</span><span class="n">parse_all</span><span class="p">(</span><span class="n">LIBRARY</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">only</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">entries</span><span class="o">.</span><span class="n">empty</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No page caches found in </span><span class="si">{</span><span class="n">LIBRARY</span><span class="si">}</span><span class="s2">; run utils/scraping/run_matice_downloads.py.&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="mi">1</span>
+    <span class="k">assert</span> <span class="n">entries</span><span class="p">[</span><span class="s2">&quot;entry_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">is_unique</span> <span class="ow">and</span> <span class="n">entries</span><span class="p">[</span><span class="s2">&quot;entry_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
+    <span class="n">entries</span><span class="p">[</span><span class="s2">&quot;number_order_outlier&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">mt</span><span class="o">.</span><span class="n">mc_number_order</span><span class="p">(</span><span class="n">entries</span><span class="p">)</span>
+    <span class="n">entries</span><span class="p">[</span><span class="s2">&quot;entry_year_from_no&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">mt</span><span class="o">.</span><span class="n">entry_year_from_number</span><span class="p">(</span><span class="n">entries</span><span class="p">)</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">entries</span><span class="p">)</span>
+    <span class="n">entries</span> <span class="o">=</span> <span class="n">add_occupations</span><span class="p">(</span><span class="n">add_places</span><span class="p">(</span><span class="n">entries</span><span class="p">))</span>
+    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">entries</span><span class="p">)</span> <span class="o">==</span> <span class="n">n</span><span class="p">,</span> <span class="s2">&quot;place matching changed the row count&quot;</span>
+    <span class="n">totals</span> <span class="o">=</span> <span class="n">mt</span><span class="o">.</span><span class="n">totals_report</span><span class="p">(</span><span class="n">entries</span><span class="p">)</span>
+    <span class="n">measure</span> <span class="o">=</span> <span class="n">mt</span><span class="o">.</span><span class="n">okres_measure</span><span class="p">(</span><span class="n">entries</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">CENSUS</span><span class="p">),</span>
+                               <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">GEO</span> <span class="o">/</span> <span class="s2">&quot;okres_census_crosswalk.csv&quot;</span><span class="p">))</span>
+    <span class="k">assert</span> <span class="n">measure</span><span class="p">[</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">is_unique</span>
+
+    <span class="n">OUT</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">entries</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">OUT</span> <span class="o">/</span> <span class="s2">&quot;matice_entries.csv&quot;</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="n">totals</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">OUT</span> <span class="o">/</span> <span class="s2">&quot;matice_totals.csv&quot;</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="n">measure</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">OUT</span> <span class="o">/</span> <span class="s2">&quot;matice_okres.csv&quot;</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="n">report</span><span class="p">(</span><span class="n">entries</span><span class="p">,</span> <span class="n">totals</span><span class="p">,</span> <span class="n">measure</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">wrote </span><span class="si">{</span><span class="n">OUT</span><span class="o">.</span><span class="n">relative_to</span><span class="p">(</span><span class="n">ROOT</span><span class="p">)</span><span class="si">}</span><span class="s2">/matice_entries.csv, matice_totals.csv, matice_okres.csv&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-reference_tools-places-run_matice_pilot-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-run_matice_pilot-LIBRARY"><pre class="sig">LIBRARY<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;library&#39;</span> <span class="o">/</span> <span class="s1">&#39;associations&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-run_matice_pilot-GEO"><pre class="sig">GEO<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;data&#39;</span> <span class="o">/</span> <span class="s1">&#39;final&#39;</span> <span class="o">/</span> <span class="s1">&#39;geo&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-run_matice_pilot-CENSUS"><pre class="sig">CENSUS<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;data&#39;</span> <span class="o">/</span> <span class="s1">&#39;final&#39;</span> <span class="o">/</span> <span class="s1">&#39;census&#39;</span> <span class="o">/</span> <span class="s1">&#39;census_okres_1910_pooled.parquet&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-run_matice_pilot-THEATRE"><pre class="sig">THEATRE<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;data&#39;</span> <span class="o">/</span> <span class="s1">&#39;interim&#39;</span> <span class="o">/</span> <span class="s1">&#39;theatre&#39;</span> <span class="o">/</span> <span class="s1">&#39;okres_year_panel.parquet&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-run_matice_pilot-OUT"><pre class="sig">OUT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;data&#39;</span> <span class="o">/</span> <span class="s1">&#39;interim&#39;</span> <span class="o">/</span> <span class="s1">&#39;matice&#39;</span>
+</pre></div>
+</details></div>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/reference_tools/places/run_matice_pilot.py · 164 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span></pre></div></td><td class="code"><div><pre><span></span><span class="ch">#!/usr/bin/env python3</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Pilot — the Matice česká and Matice moravská member registers, read into tables and</span>
+<span class="sd">summed to a measure per 1910 okres.</span>
+
+<span class="sd">Offline: reads the page caches ``utils/scraping/run_matice_downloads.py`` left in</span>
+<span class="sd">``library/associations/`` (and the 1878 Internet Archive PDF beside them), the 1910</span>
+<span class="sd">place tables in ``data/final/geo/`` and the pooled okres census, and writes nothing but</span>
+<span class="sd">``data/interim/matice/``:</span>
+
+<span class="sd">``matice_entries.csv``</span>
+<span class="sd">    One row per printed entry (key ``entry_id``), every field beside the entry&#39;s own</span>
+<span class="sd">    text, with ``entry_year_from_no`` (a deceased founder&#39;s entry year read off the</span>
+<span class="sd">    membership numbers), ``number_order_outlier``, the parse ``flags``, the 1910</span>
+<span class="sd">    settlement and okres its residence names (``utils.parsing.locative``, with</span>
+<span class="sd">    ``place_status`` and ``place_how``), and the member&#39;s ``occupation_class`` and</span>
+<span class="sd">    ``member_group`` (posted / local / student / corporate / unknown).</span>
+<span class="sd">``matice_totals.csv``</span>
+<span class="sd">    Entries found against the totals each society printed.</span>
+<span class="sd">``matice_okres.csv``</span>
+<span class="sd">    The measure: one row per census okres (key ``census_okres_id``, zeros kept), member</span>
+<span class="sd">    counts, rates per 1,000 inhabitants and per 1,000 Czech speakers, and</span>
+<span class="sd">    empirical-Bayes shrunk rates (``matice.okres_measure``).</span>
+
+<span class="sd">and prints what it found. Nothing reaches ``data/final``.</span>
+
+<span class="sd">Usage::</span>
+
+<span class="sd">    python utils/reference_tools/places/run_matice_pilot.py</span>
+<span class="sd">    python utils/reference_tools/places/run_matice_pilot.py --only mc1890 mm1909</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">))</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing</span><span class="w"> </span><span class="kn">import</span> <span class="n">locative</span> <span class="k">as</span> <span class="n">lc</span>                                <span class="c1"># noqa: E402</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing</span><span class="w"> </span><span class="kn">import</span> <span class="n">matice</span> <span class="k">as</span> <span class="n">mt</span>                                  <span class="c1"># noqa: E402</span>
+
+<span class="n">LIBRARY</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;library&quot;</span> <span class="o">/</span> <span class="s2">&quot;associations&quot;</span>
+<span class="n">GEO</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;data&quot;</span> <span class="o">/</span> <span class="s2">&quot;final&quot;</span> <span class="o">/</span> <span class="s2">&quot;geo&quot;</span>
+<span class="n">CENSUS</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;data&quot;</span> <span class="o">/</span> <span class="s2">&quot;final&quot;</span> <span class="o">/</span> <span class="s2">&quot;census&quot;</span> <span class="o">/</span> <span class="s2">&quot;census_okres_1910_pooled.parquet&quot;</span>
+<span class="n">THEATRE</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;data&quot;</span> <span class="o">/</span> <span class="s2">&quot;interim&quot;</span> <span class="o">/</span> <span class="s2">&quot;theatre&quot;</span> <span class="o">/</span> <span class="s2">&quot;okres_year_panel.parquet&quot;</span>
+<span class="n">OUT</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;data&quot;</span> <span class="o">/</span> <span class="s2">&quot;interim&quot;</span> <span class="o">/</span> <span class="s2">&quot;matice&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">add_places</span><span class="p">(</span><span class="n">entries</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The 1910 settlement and okres of every residence (``locative.match_all``).&quot;&quot;&quot;</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="n">lc</span><span class="o">.</span><span class="n">build_index</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">GEO</span> <span class="o">/</span> <span class="s2">&quot;settlements_1910.parquet&quot;</span><span class="p">),</span>
+                           <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">GEO</span> <span class="o">/</span> <span class="s2">&quot;settlement_aliases_1910.csv&quot;</span><span class="p">),</span>
+                           <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">GEO</span> <span class="o">/</span> <span class="s2">&quot;districts_1910.parquet&quot;</span><span class="p">))</span>
+    <span class="n">places</span> <span class="o">=</span> <span class="n">lc</span><span class="o">.</span><span class="n">match_all</span><span class="p">(</span><span class="n">entries</span><span class="p">[</span><span class="s2">&quot;residence&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">entries</span><span class="p">[</span><span class="s2">&quot;residence&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">)),</span> <span class="n">index</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">entries</span><span class="p">,</span> <span class="n">places</span><span class="p">],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;Int64&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">add_occupations</span><span class="p">(</span><span class="n">entries</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+    <span class="n">entries</span><span class="p">[</span><span class="s2">&quot;occupation_class&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="n">mt</span><span class="o">.</span><span class="n">occupation_class</span><span class="p">(</span><span class="n">o</span><span class="p">,</span> <span class="n">h</span><span class="p">,</span> <span class="nb">bool</span><span class="p">(</span><span class="n">c</span><span class="p">))</span> <span class="k">for</span> <span class="n">o</span><span class="p">,</span> <span class="n">h</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span>
+        <span class="nb">zip</span><span class="p">(</span><span class="n">entries</span><span class="p">[</span><span class="s2">&quot;occupation&quot;</span><span class="p">],</span> <span class="n">entries</span><span class="p">[</span><span class="s2">&quot;honorific&quot;</span><span class="p">],</span> <span class="n">entries</span><span class="p">[</span><span class="s2">&quot;is_corporate&quot;</span><span class="p">])]</span>
+    <span class="n">entries</span><span class="p">[</span><span class="s2">&quot;member_group&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">entries</span><span class="p">[</span><span class="s2">&quot;occupation_class&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">mt</span><span class="o">.</span><span class="n">member_group</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">entries</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">entries</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">totals</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">measure</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">matice </span><span class="si">{</span><span class="n">mt</span><span class="o">.</span><span class="n">__version__</span><span class="si">}</span><span class="s2"> / locative </span><span class="si">{</span><span class="n">lc</span><span class="o">.</span><span class="n">__version__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">entries</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> entries &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;from </span><span class="si">{</span><span class="n">entries</span><span class="p">[</span><span class="s1">&#39;source&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">nunique</span><span class="p">()</span><span class="si">}</span><span class="s2"> sources</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">entries</span><span class="o">.</span><span class="n">groupby</span><span class="p">([</span><span class="s2">&quot;source&quot;</span><span class="p">,</span> <span class="s2">&quot;list_kind&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">size</span><span class="p">()</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="s2">&quot;entries&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Against the printed totals:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">totals</span><span class="o">.</span><span class="n">to_string</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
+    <span class="n">mc</span> <span class="o">=</span> <span class="n">entries</span><span class="p">[</span><span class="n">entries</span><span class="p">[</span><span class="s2">&quot;society&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;MC&quot;</span><span class="p">]</span>
+    <span class="n">both</span> <span class="o">=</span> <span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">mc</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">mc</span><span class="p">[</span><span class="s2">&quot;source&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;mc1873&quot;</span><span class="p">,</span> <span class="s2">&quot;member_no&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">dropna</span><span class="p">())</span>
+            <span class="o">&amp;</span> <span class="nb">set</span><span class="p">(</span><span class="n">mc</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">mc</span><span class="p">[</span><span class="s2">&quot;source&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;mc1890&quot;</span><span class="p">,</span> <span class="s2">&quot;member_no&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">dropna</span><span class="p">()))</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Matice česká membership numbers in both issues: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">both</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Numbers whose entry year disagrees with their neighbours&#39;: &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">int</span><span class="p">(</span><span class="n">entries</span><span class="p">[</span><span class="s1">&#39;number_order_outlier&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Residences (share of entries):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">entries</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;society&quot;</span><span class="p">)[</span><span class="s2">&quot;place_status&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">(</span><span class="n">normalize</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+          <span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span><span class="o">.</span><span class="n">unstack</span><span class="p">(</span><span class="n">fill_value</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+    <span class="n">how</span> <span class="o">=</span> <span class="n">entries</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">entries</span><span class="p">[</span><span class="s2">&quot;place_status&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;matched&quot;</span><span class="p">,</span> <span class="s2">&quot;place_how&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;:&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">str</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">How a settlement was chosen (matched entries):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">how</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Member groups (persons, not corporate):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">entries</span><span class="p">[</span><span class="n">entries</span><span class="p">[</span><span class="s2">&quot;member_group&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;corporate&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;society&quot;</span><span class="p">)[</span><span class="s2">&quot;member_group&quot;</span><span class="p">]</span>
+          <span class="o">.</span><span class="n">value_counts</span><span class="p">(</span><span class="n">normalize</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span><span class="o">.</span><span class="n">unstack</span><span class="p">(</span><span class="n">fill_value</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+    <span class="n">cols</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;mc_founders&quot;</span><span class="p">,</span> <span class="s2">&quot;mc_founders_local&quot;</span><span class="p">,</span> <span class="s2">&quot;mm_members_1909&quot;</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">The measure: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">measure</span><span class="p">)</span><span class="si">}</span><span class="s2"> okresy; members placed in an okres:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">measure</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;land&quot;</span><span class="p">)[</span><span class="n">cols</span> <span class="o">+</span> <span class="p">[</span><span class="s2">&quot;mc_corporate&quot;</span><span class="p">,</span> <span class="s2">&quot;mm_members_1890&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Okresy with no founder at all: &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">int</span><span class="p">((</span><span class="n">measure</span><span class="p">[</span><span class="s1">&#39;mc_founders&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">measure</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">top</span> <span class="o">=</span> <span class="n">measure</span><span class="o">.</span><span class="n">sort_values</span><span class="p">(</span><span class="s2">&quot;mc_founders_per_1000_eb&quot;</span><span class="p">,</span> <span class="n">ascending</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Highest Matice česká founder rate per 1,000 (shrunk), 12 okresy:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">top</span><span class="p">[[</span><span class="s2">&quot;okres_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;land&quot;</span><span class="p">,</span> <span class="s2">&quot;pop_total&quot;</span><span class="p">,</span> <span class="s2">&quot;lang_czech_share&quot;</span><span class="p">,</span> <span class="s2">&quot;mc_founders&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;mc_founders_per_1000&quot;</span><span class="p">,</span> <span class="s2">&quot;mc_founders_per_1000_eb&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">head</span><span class="p">(</span><span class="mi">12</span><span class="p">)</span>
+          <span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span><span class="o">.</span><span class="n">to_string</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
+    <span class="n">rates</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">c</span><span class="si">}</span><span class="s2">_per_1000_eb&quot;</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cols</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Spearman correlations across okresy (shrunk rates, Czech share):&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">measure</span><span class="p">[</span><span class="n">rates</span> <span class="o">+</span> <span class="p">[</span><span class="s2">&quot;lang_czech_share&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">corr</span><span class="p">(</span><span class="n">method</span><span class="o">=</span><span class="s2">&quot;spearman&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+    <span class="k">if</span> <span class="n">THEATRE</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Against the theatre measure:&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">theatre_check</span><span class="p">(</span><span class="n">measure</span><span class="p">)</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">theatre_check</span><span class="p">(</span><span class="n">measure</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Spearman correlation of the Matice rates with Czech theatre companies active per</span>
+<span class="sd">    1,000 inhabitants, 1880–1890 (certain), across okresy — whole sample and the</span>
+<span class="sd">    okresy at least half Czech-speaking.&quot;&quot;&quot;</span>
+    <span class="n">t</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">THEATRE</span><span class="p">)</span>
+    <span class="n">xw</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">GEO</span> <span class="o">/</span> <span class="s2">&quot;okres_census_crosswalk.csv&quot;</span><span class="p">)</span>
+    <span class="n">t</span> <span class="o">=</span> <span class="n">t</span><span class="p">[(</span><span class="n">t</span><span class="p">[</span><span class="s2">&quot;year&quot;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="mi">1880</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="s2">&quot;year&quot;</span><span class="p">]</span> <span class="o">&lt;=</span> <span class="mi">1890</span><span class="p">)]</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span>
+        <span class="n">xw</span><span class="p">[[</span><span class="s2">&quot;okres_id&quot;</span><span class="p">,</span> <span class="s2">&quot;census_okres_id&quot;</span><span class="p">]],</span> <span class="n">on</span><span class="o">=</span><span class="s2">&quot;okres_id&quot;</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;left&quot;</span><span class="p">,</span> <span class="n">validate</span><span class="o">=</span><span class="s2">&quot;m:1&quot;</span><span class="p">)</span>
+    <span class="n">act</span> <span class="o">=</span> <span class="p">(</span><span class="n">t</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">)[</span><span class="s2">&quot;ensembles_active_certain&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="o">/</span> <span class="mi">11</span><span class="p">)</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="s2">&quot;theatre&quot;</span><span class="p">)</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">measure</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span><span class="n">act</span><span class="p">,</span> <span class="n">left_on</span><span class="o">=</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">,</span> <span class="n">right_index</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;left&quot;</span><span class="p">,</span>
+                      <span class="n">validate</span><span class="o">=</span><span class="s2">&quot;1:1&quot;</span><span class="p">)</span>
+    <span class="n">m</span><span class="p">[</span><span class="s2">&quot;theatre_per_1000&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">1000</span> <span class="o">*</span> <span class="n">m</span><span class="p">[</span><span class="s2">&quot;theatre&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="n">m</span><span class="p">[</span><span class="s2">&quot;pop_total&quot;</span><span class="p">]</span>
+    <span class="n">cols</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;mc_founders_per_1000_eb&quot;</span><span class="p">,</span> <span class="s2">&quot;mc_founders_local_per_1000_eb&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;mm_members_1890_per_1000_eb&quot;</span><span class="p">,</span> <span class="s2">&quot;mm_members_1909_per_1000_eb&quot;</span><span class="p">,</span> <span class="s2">&quot;matice_own_z&quot;</span><span class="p">]</span>
+    <span class="n">czech</span> <span class="o">=</span> <span class="n">m</span><span class="p">[</span><span class="n">m</span><span class="p">[</span><span class="s2">&quot;lang_czech_share&quot;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="mf">0.5</span><span class="p">]</span>
+    <span class="n">frames</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;all okresy&quot;</span><span class="p">:</span> <span class="n">m</span><span class="p">,</span> <span class="s2">&quot;Czech share &gt;= 0.5&quot;</span><span class="p">:</span> <span class="n">czech</span><span class="p">,</span>
+              <span class="s2">&quot;Böhmen, Czech &gt;= 0.5&quot;</span><span class="p">:</span> <span class="n">czech</span><span class="p">[</span><span class="n">czech</span><span class="p">[</span><span class="s2">&quot;land&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;Böhmen&quot;</span><span class="p">],</span>
+              <span class="s2">&quot;Mähren, Czech &gt;= 0.5&quot;</span><span class="p">:</span> <span class="n">czech</span><span class="p">[</span><span class="n">czech</span><span class="p">[</span><span class="s2">&quot;land&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;Mähren&quot;</span><span class="p">]}</span>
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">({</span><span class="n">label</span><span class="p">:</span> <span class="n">f</span><span class="p">[</span><span class="n">cols</span><span class="p">]</span><span class="o">.</span><span class="n">corrwith</span><span class="p">(</span><span class="n">f</span><span class="p">[</span><span class="s2">&quot;theatre_per_1000&quot;</span><span class="p">],</span> <span class="n">method</span><span class="o">=</span><span class="s2">&quot;spearman&quot;</span><span class="p">)</span>
+                         <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">frames</span><span class="o">.</span><span class="n">items</span><span class="p">()})</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">p</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">p</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--only&quot;</span><span class="p">,</span> <span class="n">nargs</span><span class="o">=</span><span class="s2">&quot;+&quot;</span><span class="p">,</span> <span class="n">choices</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="n">mt</span><span class="o">.</span><span class="n">SOURCES</span><span class="p">),</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">parse_args</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+
+    <span class="n">entries</span> <span class="o">=</span> <span class="n">mt</span><span class="o">.</span><span class="n">parse_all</span><span class="p">(</span><span class="n">LIBRARY</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">only</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">entries</span><span class="o">.</span><span class="n">empty</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No page caches found in </span><span class="si">{</span><span class="n">LIBRARY</span><span class="si">}</span><span class="s2">; run utils/scraping/run_matice_downloads.py.&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="mi">1</span>
+    <span class="k">assert</span> <span class="n">entries</span><span class="p">[</span><span class="s2">&quot;entry_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">is_unique</span> <span class="ow">and</span> <span class="n">entries</span><span class="p">[</span><span class="s2">&quot;entry_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
+    <span class="n">entries</span><span class="p">[</span><span class="s2">&quot;number_order_outlier&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">mt</span><span class="o">.</span><span class="n">mc_number_order</span><span class="p">(</span><span class="n">entries</span><span class="p">)</span>
+    <span class="n">entries</span><span class="p">[</span><span class="s2">&quot;entry_year_from_no&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">mt</span><span class="o">.</span><span class="n">entry_year_from_number</span><span class="p">(</span><span class="n">entries</span><span class="p">)</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">entries</span><span class="p">)</span>
+    <span class="n">entries</span> <span class="o">=</span> <span class="n">add_occupations</span><span class="p">(</span><span class="n">add_places</span><span class="p">(</span><span class="n">entries</span><span class="p">))</span>
+    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">entries</span><span class="p">)</span> <span class="o">==</span> <span class="n">n</span><span class="p">,</span> <span class="s2">&quot;place matching changed the row count&quot;</span>
+    <span class="n">totals</span> <span class="o">=</span> <span class="n">mt</span><span class="o">.</span><span class="n">totals_report</span><span class="p">(</span><span class="n">entries</span><span class="p">)</span>
+    <span class="n">measure</span> <span class="o">=</span> <span class="n">mt</span><span class="o">.</span><span class="n">okres_measure</span><span class="p">(</span><span class="n">entries</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">CENSUS</span><span class="p">),</span>
+                               <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">GEO</span> <span class="o">/</span> <span class="s2">&quot;okres_census_crosswalk.csv&quot;</span><span class="p">))</span>
+    <span class="k">assert</span> <span class="n">measure</span><span class="p">[</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">is_unique</span>
+
+    <span class="n">OUT</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">entries</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">OUT</span> <span class="o">/</span> <span class="s2">&quot;matice_entries.csv&quot;</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="n">totals</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">OUT</span> <span class="o">/</span> <span class="s2">&quot;matice_totals.csv&quot;</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="n">measure</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">OUT</span> <span class="o">/</span> <span class="s2">&quot;matice_okres.csv&quot;</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="n">report</span><span class="p">(</span><span class="n">entries</span><span class="p">,</span> <span class="n">totals</span><span class="p">,</span> <span class="n">measure</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">wrote </span><span class="si">{</span><span class="n">OUT</span><span class="o">.</span><span class="n">relative_to</span><span class="p">(</span><span class="n">ROOT</span><span class="p">)</span><span class="si">}</span><span class="s2">/matice_entries.csv, matice_totals.csv, matice_okres.csv&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>

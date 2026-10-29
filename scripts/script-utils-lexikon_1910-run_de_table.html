@@ -1,0 +1,1066 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>The German volumes' table read by a model, block by block, as the Czech table arm reads (D-160).</p><p class="tldr-facts"><b>1910 register</b> · v0.1.0 · 290 lines · 11 public functions · 6 constants · used by <code>utils/lexikon_1910/run_frozen.py</code> · <code>utils/lexikon_1910/run_de_table.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-lexikon_1910-run_de_table-Arm">Arm</a><a class="chip" href="#fn-utils-lexikon_1910-run_de_table-make_reader">make_reader</a><a class="chip" href="#fn-utils-lexikon_1910-run_de_table-cache_key">cache_key</a><a class="chip" href="#fn-utils-lexikon_1910-run_de_table-cut">cut</a><a class="chip" href="#fn-utils-lexikon_1910-run_de_table-read_blocks">read_blocks</a><a class="chip" href="#fn-utils-lexikon_1910-run_de_table-assemble">assemble</a><a class="chip" href="#fn-utils-lexikon_1910-run_de_table-frozen_pass">frozen_pass</a><a class="chip" href="#fn-utils-lexikon_1910-run_de_table-estimate">estimate</a><a class="chip" href="#fn-utils-lexikon_1910-run_de_table-pilot_image_cap">pilot_image_cap</a><a class="chip" href="#fn-utils-lexikon_1910-run_de_table-page_spec">page_spec</a><a class="chip" href="#fn-utils-lexikon_1910-run_de_table-main">main</a><a class="chip const" href="#c-utils-lexikon_1910-run_de_table-HERE">HERE</a><a class="chip const" href="#c-utils-lexikon_1910-run_de_table-ROOT">ROOT</a><a class="chip const" href="#c-utils-lexikon_1910-run_de_table-WORKERS">WORKERS</a><a class="chip const" href="#c-utils-lexikon_1910-run_de_table-RETRIES">RETRIES</a><a class="chip const" href="#c-utils-lexikon_1910-run_de_table-ARMS">ARMS</a><a class="chip const" href="#c-utils-lexikon_1910-run_de_table-EST_OUTPUT">EST_OUTPUT</a></div>
+<h2>How it works</h2><p>The Czech table pass (<code>run_lexikon_1910_pilot.py</code> channel A, driven by <code>run_table_arm.py</code>
+and the frozen route) crops each municipality block where the ALTO found it and has a vision
+model read its columns. The German volumes have no ALTO and an OCR layer whose names are
+garbage, so the blocks are cut from the image (<code>lexikon_1910_de_table</code>) and the model reads
+everything, names included. The readers are the Czech table arm's two, with its settings:</p>
+<pre><code>gemini38   Gemini 3.8 Flash, thinking off, temperature 0     the reader of record
+haiku55    Claude Haiku 5.5, thinking adaptive at high        the second reader
+</code></pre>
+<p>One crop a block, frame to frame, scaled to the 2,576 px vision ceiling (one tile, as the
+Czech default); the prompt is the Czech one with the German volume's title, columns and the
+rules for its two name forms (<code>lexikon_1910_de_table.build_system</code>). A block's reply is
+cached under a key of the crop, the instruction, the model, the prompt and every reading
+setting, so a batch (<code>reader_batches.py</code>) fills the cache and the next run reads from it,
+and a rerun spends nothing.</p>
+<p>Writes <code>table_rows_&amp;lt;label&amp;gt;.csv</code> (channel <code>A</code>, one row per printed line, keyed by the block,
+with the block's kind and its district) and <code>table_checks_&amp;lt;label&amp;gt;.csv</code> (the volume's
+identities on every row, and each municipality's parts against it) to the German pass folder,
+where <code>bakeoff.find_pass_file</code> finds them for the register. <code>score_table_passes.py --german</code>
+scores a pass against the German gold tables.</p>
+<p>The frozen route calls <code>frozen_pass</code>. By hand, on Heavyhorse6 (D-68):</p>
+<pre><code>python utils/lexikon_1910/run_de_table.py --dry-run --volume boehmen_de --pages 142,276
+python utils/lexikon_1910/run_de_table.py --volume boehmen_de --pages gold --reader gemini38
+</code></pre>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-lexikon_1910-run_de_table-Arm">
+<pre class="sig"><span class="k">class</span><span class="w"> </span><span class="nc">Arm</span></pre>
+<p class="calls"><b>Called by</b> <code>tests/test_r5_german_notes.py</code> <code>utils/lexikon_1910/run_r5_german_notes.py</code></p>
+<details><summary>source · lines 64–71 (8 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">64</span>
+<span class="normal">65</span>
+<span class="normal">66</span>
+<span class="normal">67</span>
+<span class="normal">68</span>
+<span class="normal">69</span>
+<span class="normal">70</span>
+<span class="normal">71</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">Arm</span><span class="p">:</span>
+    <span class="n">route</span><span class="p">:</span> <span class="nb">str</span>                          <span class="c1"># &quot;gemini&quot; | &quot;claude&quot;</span>
+    <span class="n">model</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">price</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span>          <span class="c1"># USD per million tokens, in / out</span>
+    <span class="n">reasoning</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>                 <span class="c1"># Gemini&#39;s reasoning_effort (&quot;none&quot; = off)</span>
+    <span class="n">thinking</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>                  <span class="c1"># Claude: &quot;adaptive&quot; | &quot;disabled&quot;</span>
+    <span class="n">effort</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">max_tokens</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">8000</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-run_de_table-make_reader">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">make_reader</span><span class="p">(</span><span class="n">arm</span><span class="p">:</span> <span class="n">Arm</span><span class="p">,</span> <span class="n">profile</span><span class="p">)</span></pre>
+<div class="fndoc"><p>The pilot's reader classes with the German prompt and the volume's row schema.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/lexikon_1910/run_r5_german_notes.py</code></p>
+<details><summary>source · lines 84–95 (12 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">84</span>
+<span class="normal">85</span>
+<span class="normal">86</span>
+<span class="normal">87</span>
+<span class="normal">88</span>
+<span class="normal">89</span>
+<span class="normal">90</span>
+<span class="normal">91</span>
+<span class="normal">92</span>
+<span class="normal">93</span>
+<span class="normal">94</span>
+<span class="normal">95</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">make_reader</span><span class="p">(</span><span class="n">arm</span><span class="p">:</span> <span class="n">Arm</span><span class="p">,</span> <span class="n">profile</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The pilot&#39;s reader classes with the German prompt and the volume&#39;s row schema.&quot;&quot;&quot;</span>
+    <span class="n">system</span><span class="p">,</span> <span class="n">schema</span> <span class="o">=</span> <span class="n">lxdt</span><span class="o">.</span><span class="n">build_system</span><span class="p">(</span><span class="n">profile</span><span class="p">),</span> <span class="n">lxdt</span><span class="o">.</span><span class="n">row_schema</span><span class="p">(</span><span class="n">profile</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">arm</span><span class="o">.</span><span class="n">route</span> <span class="o">==</span> <span class="s2">&quot;claude&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">pilot</span><span class="o">.</span><span class="n">ClaudeReader</span><span class="p">(</span><span class="n">arm</span><span class="o">.</span><span class="n">model</span><span class="p">,</span> <span class="n">arm</span><span class="o">.</span><span class="n">effort</span><span class="p">,</span> <span class="n">thinking</span><span class="o">=</span><span class="n">arm</span><span class="o">.</span><span class="n">thinking</span><span class="p">,</span>
+                                  <span class="n">max_tokens</span><span class="o">=</span><span class="n">arm</span><span class="o">.</span><span class="n">max_tokens</span><span class="p">,</span> <span class="n">system</span><span class="o">=</span><span class="n">system</span><span class="p">,</span> <span class="n">schema</span><span class="o">=</span><span class="n">schema</span><span class="p">,</span>
+                                  <span class="n">payload_key</span><span class="o">=</span><span class="s2">&quot;rows&quot;</span><span class="p">)</span>
+    <span class="n">url</span><span class="p">,</span> <span class="n">key_env</span> <span class="o">=</span> <span class="n">pilot</span><span class="o">.</span><span class="n">READER_ENDPOINTS</span><span class="p">[</span><span class="s2">&quot;gemini&quot;</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">pilot</span><span class="o">.</span><span class="n">OpenAICompatibleReader</span><span class="p">(</span><span class="n">arm</span><span class="o">.</span><span class="n">model</span><span class="p">,</span> <span class="n">url</span><span class="p">,</span> <span class="n">key_env</span><span class="p">,</span> <span class="n">system</span><span class="o">=</span><span class="n">system</span><span class="p">,</span> <span class="n">schema</span><span class="o">=</span><span class="n">schema</span><span class="p">,</span>
+                                        <span class="n">payload_key</span><span class="o">=</span><span class="s2">&quot;rows&quot;</span><span class="p">,</span> <span class="n">schema_name</span><span class="o">=</span><span class="s2">&quot;block&quot;</span><span class="p">,</span>
+                                        <span class="n">max_tokens</span><span class="o">=</span><span class="n">arm</span><span class="o">.</span><span class="n">max_tokens</span><span class="p">,</span> <span class="n">temperature</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
+                                        <span class="n">reasoning_effort</span><span class="o">=</span><span class="n">arm</span><span class="o">.</span><span class="n">reasoning</span> <span class="ow">or</span> <span class="kc">None</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-run_de_table-cache_key">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">cache_key</span><span class="p">(</span><span class="n">crop</span><span class="p">,</span> <span class="n">instruction</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">reader</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<div class="fndoc"><p>The Czech table cache's key (<code>run_lexikon_1910_pilot</code>, D-115): the crop's bytes, the
+instruction, the model, the prompt and every reading setting.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/lexikon_1910/run_lexikon_1910_pilot.py</code> <code>utils/lexikon_1910/run_r5_german_notes.py</code></p>
+<details><summary>source · lines 98–108 (11 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">cache_key</span><span class="p">(</span><span class="n">crop</span><span class="p">,</span> <span class="n">instruction</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">reader</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The Czech table cache&#39;s key (``run_lexikon_1910_pilot``, D-115): the crop&#39;s bytes, the</span>
+<span class="sd">    instruction, the model, the prompt and every reading setting.&quot;&quot;&quot;</span>
+    <span class="n">h</span> <span class="o">=</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">sha256</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">piece</span> <span class="ow">in</span> <span class="p">(</span><span class="n">pilot</span><span class="o">.</span><span class="n">encode_png</span><span class="p">(</span><span class="n">crop</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\0</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">instruction</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;model&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)),</span>
+                  <span class="nb">str</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;system&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)),</span> <span class="nb">str</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;temperature&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)),</span>
+                  <span class="nb">str</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;reasoning_effort&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">),</span>
+                  <span class="nb">str</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;thinking&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)),</span> <span class="nb">str</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;effort&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))):</span>
+        <span class="n">h</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">piece</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">&quot;utf-8&quot;</span><span class="p">))</span>
+        <span class="n">h</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="nb">bytes</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">h</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-run_de_table-cut">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">cut</span><span class="p">(</span><span class="n">pages</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span> <span class="n">profile</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">]</span></pre>
+<div class="fndoc"><p><code>[(block, crop), …]</code> in reading order, and the blocks by page for the report.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_contrast_arm.py</code> <code>tests/test_glyph_e3.py</code> <code>utils/lexikon_1910/build_glyph_bank.py</code> <code>utils/lexikon_1910/make_gold_worksheet.py</code> <code>utils/lexikon_1910/run_glyph_e3.py</code> <code>utils/lexikon_1910/run_verify_test_b.py</code> <code>utils/parsing/amateur_theatre.py</code> <code>utils/parsing/ruian.py</code></p>
+<details><summary>source · lines 111–120 (10 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">cut</span><span class="p">(</span><span class="n">pages</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span> <span class="n">profile</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``[(block, crop), …]`` in reading order, and the blocks by page for the report.&quot;&quot;&quot;</span>
+    <span class="n">jobs</span><span class="p">,</span> <span class="n">by_page</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">scan</span> <span class="ow">in</span> <span class="n">pages</span><span class="p">:</span>
+        <span class="n">stem</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">scan</span><span class="si">:</span><span class="s2">04d</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="n">image</span> <span class="o">=</span> <span class="n">lxdn</span><span class="o">.</span><span class="n">render_native</span><span class="p">(</span><span class="n">profile</span><span class="o">.</span><span class="n">source_pdf</span><span class="p">,</span> <span class="n">scan</span><span class="p">)</span>
+        <span class="n">geo</span><span class="p">,</span> <span class="n">blocks</span> <span class="o">=</span> <span class="n">lxdt</span><span class="o">.</span><span class="n">page_blocks</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">profile</span><span class="p">,</span> <span class="n">stem</span><span class="p">)</span>
+        <span class="n">by_page</span><span class="p">[</span><span class="n">stem</span><span class="p">]</span> <span class="o">=</span> <span class="n">blocks</span>
+        <span class="n">jobs</span> <span class="o">+=</span> <span class="p">[(</span><span class="n">block</span><span class="p">,</span> <span class="n">lxdt</span><span class="o">.</span><span class="n">crop_block</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">geo</span><span class="p">,</span> <span class="n">block</span><span class="p">))</span> <span class="k">for</span> <span class="n">block</span> <span class="ow">in</span> <span class="n">blocks</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">jobs</span><span class="p">,</span> <span class="n">by_page</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-run_de_table-read_blocks">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">read_blocks</span><span class="p">(</span><span class="n">jobs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">],</span> <span class="n">reader</span><span class="p">,</span> <span class="n">cache</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">queue</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">workers</span><span class="p">:</span> <span class="nb">int</span><span class="o">=</span><span class="n">WORKERS</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">list</span><span class="p">,</span> <span class="n">Counter</span><span class="p">]</span></pre>
+<div class="fndoc"><p><code>[(block, rows or None), …]</code> and the usage. With <code>queue</code> every block not in the
+cache is written there as a batch line (<code>reader_batches.py</code>) and none is sent.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_de_table.py</code></p>
+<details><summary>source · lines 123–173 (51 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">read_blocks</span><span class="p">(</span><span class="n">jobs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">],</span> <span class="n">reader</span><span class="p">,</span> <span class="n">cache</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">queue</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                <span class="n">workers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">WORKERS</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">list</span><span class="p">,</span> <span class="n">Counter</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``[(block, rows or None), …]`` and the usage. With ``queue`` every block not in the</span>
+<span class="sd">    cache is written there as a batch line (``reader_batches.py``) and none is sent.&quot;&quot;&quot;</span>
+    <span class="n">cache</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">lock</span><span class="p">,</span> <span class="n">usage</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Lock</span><span class="p">(),</span> <span class="n">Counter</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">one</span><span class="p">(</span><span class="n">job</span><span class="p">):</span>
+        <span class="n">block</span><span class="p">,</span> <span class="n">crop</span> <span class="o">=</span> <span class="n">job</span>
+        <span class="n">instruction</span> <span class="o">=</span> <span class="n">lxdt</span><span class="o">.</span><span class="n">INSTRUCTIONS</span><span class="p">[</span><span class="n">block</span><span class="o">.</span><span class="n">kind</span><span class="p">]</span>
+        <span class="n">hit</span> <span class="o">=</span> <span class="n">cache</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">cache_key</span><span class="p">(</span><span class="n">crop</span><span class="p">,</span><span class="w"> </span><span class="n">instruction</span><span class="p">,</span><span class="w"> </span><span class="n">reader</span><span class="p">)</span><span class="si">}</span><span class="s2">.json&quot;</span>
+        <span class="k">if</span> <span class="n">hit</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="n">record</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">hit</span><span class="o">.</span><span class="n">read_text</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">))</span>
+            <span class="k">return</span> <span class="n">block</span><span class="p">,</span> <span class="n">record</span><span class="p">[</span><span class="s2">&quot;lines&quot;</span><span class="p">],</span> <span class="p">{</span><span class="s2">&quot;cached&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">}</span>
+        <span class="k">if</span> <span class="n">queue</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">make</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;body&quot;</span><span class="p">)</span>
+            <span class="n">line</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;key&quot;</span><span class="p">:</span> <span class="n">hit</span><span class="o">.</span><span class="n">stem</span><span class="p">,</span> <span class="s2">&quot;reader&quot;</span><span class="p">:</span> <span class="n">reader</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="s2">&quot;cache_dir&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">cache</span><span class="p">),</span>
+                    <span class="s2">&quot;slot&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">block</span><span class="o">.</span><span class="n">page</span><span class="p">,</span> <span class="n">block</span><span class="o">.</span><span class="n">block_id</span><span class="p">],</span> <span class="s2">&quot;kind&quot;</span><span class="p">:</span> <span class="s2">&quot;table&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;model&quot;</span><span class="p">:</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;model&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span> <span class="s2">&quot;payload_key&quot;</span><span class="p">:</span> <span class="s2">&quot;rows&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;request&quot;</span><span class="p">:</span> <span class="n">make</span><span class="p">([(</span><span class="n">crop</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)],</span> <span class="n">instruction</span><span class="p">)}</span>
+            <span class="k">with</span> <span class="n">lock</span><span class="p">,</span> <span class="n">Path</span><span class="p">(</span><span class="n">queue</span><span class="p">)</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;a&quot;</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+                <span class="n">fh</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">line</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">block</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;queued&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">}</span>
+        <span class="k">for</span> <span class="n">attempt</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">RETRIES</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">rows</span><span class="p">,</span> <span class="n">spent</span> <span class="o">=</span> <span class="n">reader</span><span class="p">([(</span><span class="n">crop</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)],</span> <span class="n">instruction</span><span class="p">)</span>
+                <span class="n">tmp</span> <span class="o">=</span> <span class="n">hit</span><span class="o">.</span><span class="n">with_suffix</span><span class="p">(</span><span class="s2">&quot;.json.part&quot;</span><span class="p">)</span>
+                <span class="n">tmp</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">({</span><span class="s2">&quot;lines&quot;</span><span class="p">:</span> <span class="n">rows</span><span class="p">,</span> <span class="s2">&quot;usage&quot;</span><span class="p">:</span> <span class="n">spent</span><span class="p">,</span>
+                                           <span class="s2">&quot;slot&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">block</span><span class="o">.</span><span class="n">page</span><span class="p">,</span> <span class="n">block</span><span class="o">.</span><span class="n">block_id</span><span class="p">],</span> <span class="s2">&quot;kind&quot;</span><span class="p">:</span> <span class="s2">&quot;table&quot;</span><span class="p">,</span>
+                                           <span class="s2">&quot;model&quot;</span><span class="p">:</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;model&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span>
+                                           <span class="s2">&quot;at&quot;</span><span class="p">:</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()}),</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+                <span class="n">tmp</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="n">hit</span><span class="p">)</span>
+                <span class="k">return</span> <span class="n">block</span><span class="p">,</span> <span class="n">rows</span><span class="p">,</span> <span class="n">spent</span>
+            <span class="k">except</span> <span class="n">pilot</span><span class="o">.</span><span class="n">Truncated</span><span class="p">:</span>
+                <span class="n">reader</span><span class="o">.</span><span class="n">max_tokens</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;max_tokens&quot;</span><span class="p">,</span> <span class="mi">8000</span><span class="p">)</span> <span class="o">*</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">32000</span><span class="p">)</span>
+            <span class="k">except</span> <span class="n">pilot</span><span class="o">.</span><span class="n">RateLimited</span><span class="p">:</span>
+                <span class="k">raise</span>
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>                                    <span class="c1"># noqa: BLE001</span>
+                <span class="k">if</span> <span class="n">attempt</span> <span class="o">==</span> <span class="n">RETRIES</span> <span class="o">-</span> <span class="mi">1</span><span class="p">:</span>
+                    <span class="k">return</span> <span class="n">block</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;error&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">exc</span><span class="p">)[:</span><span class="mi">300</span><span class="p">]}</span>
+                <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="p">(</span><span class="n">attempt</span> <span class="o">+</span> <span class="mi">1</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">block</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;error&quot;</span><span class="p">:</span> <span class="s2">&quot;truncated&quot;</span><span class="p">}</span>
+
+    <span class="k">with</span> <span class="n">ThreadPoolExecutor</span><span class="p">(</span><span class="n">max_workers</span><span class="o">=</span><span class="n">workers</span><span class="p">)</span> <span class="k">as</span> <span class="n">pool</span><span class="p">:</span>
+        <span class="n">results</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">pool</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">one</span><span class="p">,</span> <span class="n">jobs</span><span class="p">))</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">block</span><span class="p">,</span> <span class="n">rows</span><span class="p">,</span> <span class="n">spent</span> <span class="ow">in</span> <span class="n">results</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">spent</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">usage</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">+=</span> <span class="n">value</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="p">(</span><span class="nb">int</span><span class="p">,</span> <span class="nb">float</span><span class="p">))</span> <span class="k">else</span> <span class="mi">1</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">block</span><span class="p">,</span> <span class="n">rows</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">out</span><span class="p">,</span> <span class="n">usage</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-run_de_table-assemble">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">assemble</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">read</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">],</span> <span class="n">profile</span><span class="p">,</span> <span class="n">crosswalk</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">out</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span></pre>
+<div class="fndoc"><p>Label every block with its district, check it, write the pass's two files.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_de_table.py</code> <code>utils/lexikon_1910/run_r5_german_notes.py</code></p>
+<details><summary>source · lines 176–191 (16 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">assemble</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">read</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">],</span> <span class="n">profile</span><span class="p">,</span> <span class="n">crosswalk</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">out</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Label every block with its district, check it, write the pass&#39;s two files.&quot;&quot;&quot;</span>
+    <span class="n">labels</span> <span class="o">=</span> <span class="n">lxdt</span><span class="o">.</span><span class="n">court_labels</span><span class="p">([(</span><span class="n">b</span><span class="p">,</span> <span class="n">rows</span> <span class="ow">or</span> <span class="p">[])</span> <span class="k">for</span> <span class="n">b</span><span class="p">,</span> <span class="n">rows</span> <span class="ow">in</span> <span class="n">read</span><span class="p">])</span>
+    <span class="n">page_reads</span><span class="p">,</span> <span class="n">checks</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="p">(</span><span class="n">block</span><span class="p">,</span> <span class="n">rows</span><span class="p">),</span> <span class="p">(</span><span class="n">okres</span><span class="p">,</span> <span class="n">court</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">read</span><span class="p">,</span> <span class="n">labels</span><span class="p">):</span>
+        <span class="n">court_cs</span> <span class="o">=</span> <span class="n">lxdn</span><span class="o">.</span><span class="n">court_name</span><span class="p">(</span><span class="n">court</span><span class="p">,</span> <span class="n">crosswalk</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="k">if</span> <span class="n">court</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+        <span class="n">page_reads</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">block</span><span class="p">,</span> <span class="n">rows</span> <span class="ow">or</span> <span class="p">[],</span> <span class="n">okres</span><span class="p">,</span> <span class="n">court</span><span class="p">,</span> <span class="n">court_cs</span><span class="p">))</span>
+        <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">lxdt</span><span class="o">.</span><span class="n">grade_block</span><span class="p">(</span><span class="n">rows</span> <span class="ow">or</span> <span class="p">[],</span> <span class="n">profile</span><span class="p">,</span> <span class="n">block</span><span class="o">.</span><span class="n">kind</span><span class="p">):</span>
+            <span class="n">checks</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;page&quot;</span><span class="p">:</span> <span class="n">block</span><span class="o">.</span><span class="n">page</span><span class="p">,</span> <span class="s2">&quot;block_id&quot;</span><span class="p">:</span> <span class="n">block</span><span class="o">.</span><span class="n">block_id</span><span class="p">,</span>
+                           <span class="s2">&quot;block_kind&quot;</span><span class="p">:</span> <span class="n">block</span><span class="o">.</span><span class="n">kind</span><span class="p">,</span> <span class="o">**</span><span class="n">c</span><span class="p">})</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="n">lxdt</span><span class="o">.</span><span class="n">table_rows</span><span class="p">(</span><span class="n">page_reads</span><span class="p">,</span> <span class="n">profile</span><span class="p">)</span>
+    <span class="n">_write</span><span class="p">(</span><span class="n">out</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;table_rows_</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">.csv&quot;</span><span class="p">,</span> <span class="n">rows</span><span class="p">)</span>
+    <span class="n">_write</span><span class="p">(</span><span class="n">out</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;table_checks_</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">.csv&quot;</span><span class="p">,</span> <span class="n">checks</span><span class="p">)</span>
+    <span class="n">verdicts</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">(</span><span class="n">c</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">checks</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;blocks&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">read</span><span class="p">),</span> <span class="s2">&quot;unread&quot;</span><span class="p">:</span> <span class="nb">sum</span><span class="p">(</span><span class="n">r</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">for</span> <span class="n">_b</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">read</span><span class="p">),</span> <span class="s2">&quot;rows&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">),</span>
+            <span class="o">**</span><span class="p">{</span><span class="sa">f</span><span class="s2">&quot;check_</span><span class="si">{</span><span class="n">k</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">verdicts</span><span class="o">.</span><span class="n">items</span><span class="p">()}}</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-run_de_table-frozen_pass">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">frozen_pass</span><span class="p">(</span><span class="n">label</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">arm_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">pages</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span> <span class="n">profile_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">out</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">queue</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span></pre>
+<div class="fndoc"><p>One table pass of the frozen route over any pages of one German volume. The runner that
+calls it (<code>run_frozen.py</code>) chooses the pages and keeps certification apart. <code>False</code>
+if a quota stopped it; a rerun goes on from the cache.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/lexikon_1910/run_frozen.py</code> <code>utils/lexikon_1910/run_r5_german_notes.py</code></p>
+<details><summary>source · lines 203–230 (28 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">frozen_pass</span><span class="p">(</span><span class="n">label</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">arm_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">pages</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span> <span class="n">profile_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+                <span class="n">out</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">queue</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;One table pass of the frozen route over any pages of one German volume. The runner that</span>
+<span class="sd">    calls it (``run_frozen.py``) chooses the pages and keeps certification apart. ``False``</span>
+<span class="sd">    if a quota stopped it; a rerun goes on from the cache.&quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">out</span> <span class="ow">or</span> <span class="n">bo</span><span class="o">.</span><span class="n">DE_PASS_DIR</span>
+    <span class="n">profile</span> <span class="o">=</span> <span class="n">lxvol</span><span class="o">.</span><span class="n">load_profile</span><span class="p">(</span><span class="n">profile_name</span><span class="p">)</span>
+    <span class="n">arm</span> <span class="o">=</span> <span class="n">ARMS</span><span class="p">[</span><span class="n">arm_name</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">78</span> <span class="o">+</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">GERMAN TABLE (frozen)  </span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">   (</span><span class="si">{</span><span class="n">arm</span><span class="o">.</span><span class="n">model</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">profile</span><span class="o">.</span><span class="n">title</span><span class="si">}</span><span class="s2">, &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">pages</span><span class="p">)</span><span class="si">}</span><span class="s2"> pages)</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">78</span><span class="p">)</span>
+    <span class="n">started</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+    <span class="n">jobs</span><span class="p">,</span> <span class="n">by_page</span> <span class="o">=</span> <span class="n">cut</span><span class="p">(</span><span class="n">pages</span><span class="p">,</span> <span class="n">profile</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  &quot;</span> <span class="o">+</span> <span class="n">lxdt</span><span class="o">.</span><span class="n">lexikon_1910_de_table_report</span><span class="p">(</span><span class="n">by_page</span><span class="p">,</span> <span class="n">profile</span><span class="p">))</span>
+    <span class="n">reader</span> <span class="o">=</span> <span class="n">make_reader</span><span class="p">(</span><span class="n">arm</span><span class="p">,</span> <span class="n">profile</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">read</span><span class="p">,</span> <span class="n">usage</span> <span class="o">=</span> <span class="n">read_blocks</span><span class="p">(</span><span class="n">jobs</span><span class="p">,</span> <span class="n">reader</span><span class="p">,</span> <span class="n">out</span> <span class="o">/</span> <span class="s2">&quot;table_cache&quot;</span> <span class="o">/</span> <span class="n">label</span><span class="p">,</span> <span class="n">queue</span><span class="o">=</span><span class="n">queue</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">pilot</span><span class="o">.</span><span class="n">RateLimited</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  rate limited: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">; run again to go on from the cache&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">if</span> <span class="n">queue</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">usage</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;queued&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="si">}</span><span class="s2"> blocks queued to </span><span class="si">{</span><span class="n">Path</span><span class="p">(</span><span class="n">queue</span><span class="p">)</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">, &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">usage</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;cached&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="si">}</span><span class="s2"> already in the cache&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="n">counts</span> <span class="o">=</span> <span class="n">assemble</span><span class="p">(</span><span class="n">label</span><span class="p">,</span> <span class="n">read</span><span class="p">,</span> <span class="n">profile</span><span class="p">,</span> <span class="n">lxdn</span><span class="o">.</span><span class="n">load_court_crosswalk</span><span class="p">(),</span> <span class="n">out</span><span class="p">)</span>
+    <span class="n">cost</span> <span class="o">=</span> <span class="p">(</span><span class="n">usage</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">*</span> <span class="n">arm</span><span class="o">.</span><span class="n">price</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="n">usage</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;output&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">*</span> <span class="n">arm</span><span class="o">.</span><span class="n">price</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span> <span class="o">/</span> <span class="mf">1e6</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">counts</span><span class="si">}</span><span class="s2">; </span><span class="si">{</span><span class="n">usage</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;cached&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="si">}</span><span class="s2"> from the cache; $</span><span class="si">{</span><span class="n">cost</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">; &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">started</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">60</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> min&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">counts</span><span class="p">[</span><span class="s2">&quot;unread&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="mi">0</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-run_de_table-estimate">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">estimate</span><span class="p">(</span><span class="n">pages</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span> <span class="n">profile</span><span class="p">,</span> <span class="n">arm</span><span class="p">:</span> <span class="n">Arm</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<div class="fndoc"><p>Blocks and dollars for one pass over <code>pages</code>; renders and cuts, sends nothing.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_r5_german_notes.py</code> <code>utils/lexikon_1910/bakeoff.py</code> <code>utils/lexikon_1910/lexikon_1910_pages.py</code> <code>utils/lexikon_1910/run_e1b_second_reader.py</code> <code>utils/lexikon_1910/run_r5_german_notes.py</code></p>
+<details><summary>source · lines 233–244 (12 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">estimate</span><span class="p">(</span><span class="n">pages</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span> <span class="n">profile</span><span class="p">,</span> <span class="n">arm</span><span class="p">:</span> <span class="n">Arm</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Blocks and dollars for one pass over ``pages``; renders and cuts, sends nothing.&quot;&quot;&quot;</span>
+    <span class="n">jobs</span><span class="p">,</span> <span class="n">by_page</span> <span class="o">=</span> <span class="n">cut</span><span class="p">(</span><span class="n">pages</span><span class="p">,</span> <span class="n">profile</span><span class="p">)</span>
+    <span class="n">tokens</span> <span class="o">=</span> <span class="p">[</span><span class="nb">min</span><span class="p">(</span><span class="n">pilot_image_cap</span><span class="p">(</span><span class="n">arm</span><span class="p">),</span> <span class="n">crop</span><span class="o">.</span><span class="n">width</span> <span class="o">*</span> <span class="n">crop</span><span class="o">.</span><span class="n">height</span> <span class="o">//</span> <span class="mi">750</span><span class="p">)</span> <span class="k">for</span> <span class="n">_b</span><span class="p">,</span> <span class="n">crop</span> <span class="ow">in</span> <span class="n">jobs</span><span class="p">]</span>
+    <span class="n">out_tokens</span> <span class="o">=</span> <span class="n">EST_OUTPUT</span> <span class="o">+</span> <span class="p">(</span><span class="n">pilot</span><span class="o">.</span><span class="n">THINKING_TOKENS</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">arm</span><span class="o">.</span><span class="n">effort</span><span class="p">,</span> <span class="mi">800</span><span class="p">)</span> <span class="k">if</span> <span class="n">arm</span><span class="o">.</span><span class="n">thinking</span> <span class="o">==</span> <span class="s2">&quot;adaptive&quot;</span> <span class="k">else</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="n">dollars</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">((</span><span class="n">t</span> <span class="o">+</span> <span class="mi">1500</span><span class="p">)</span> <span class="o">*</span> <span class="n">arm</span><span class="o">.</span><span class="n">price</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="n">out_tokens</span> <span class="o">*</span> <span class="n">arm</span><span class="o">.</span><span class="n">price</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">tokens</span><span class="p">)</span> <span class="o">/</span> <span class="mf">1e6</span>
+    <span class="n">per_page</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">jobs</span><span class="p">)</span> <span class="o">/</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">pages</span><span class="p">))</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">lxdt</span><span class="o">.</span><span class="n">lexikon_1910_de_table_report</span><span class="p">(</span><span class="n">by_page</span><span class="p">,</span> <span class="n">profile</span><span class="p">)</span>
+            <span class="o">+</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  </span><span class="si">{</span><span class="n">arm</span><span class="o">.</span><span class="n">model</span><span class="si">}</span><span class="s2">: ~$</span><span class="si">{</span><span class="n">dollars</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> for these </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">pages</span><span class="p">)</span><span class="si">}</span><span class="s2"> pages &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">per_page</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> blocks a page; the volume&#39;s </span><span class="si">{</span><span class="n">profile</span><span class="o">.</span><span class="n">table_last</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">profile</span><span class="o">.</span><span class="n">table_first</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="si">}</span><span class="s2"> &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;table pages ~$</span><span class="si">{</span><span class="n">dollars</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="n">pages</span><span class="p">))</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="n">profile</span><span class="o">.</span><span class="n">table_last</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">profile</span><span class="o">.</span><span class="n">table_first</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="si">:</span><span class="s2">,.0f</span><span class="si">}</span><span class="s2">, &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;half that batched)&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-run_de_table-pilot_image_cap">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">pilot_image_cap</span><span class="p">(</span><span class="n">arm</span><span class="p">:</span> <span class="n">Arm</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<div class="fndoc"><p>The image-token ceiling the estimate assumes for one crop.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 247–249 (3 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">pilot_image_cap</span><span class="p">(</span><span class="n">arm</span><span class="p">:</span> <span class="n">Arm</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The image-token ceiling the estimate assumes for one crop.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="mi">4784</span> <span class="k">if</span> <span class="n">arm</span><span class="o">.</span><span class="n">route</span> <span class="o">==</span> <span class="s2">&quot;gemini&quot;</span> <span class="k">else</span> <span class="mi">1600</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-run_de_table-page_spec">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">page_spec</span><span class="p">(</span><span class="n">spec</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">profile</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span></pre>
+<div class="fndoc"><p><code>gold</code> (Böhmen's calibration and purposive pages), <code>calibration</code> (Mähren's or
+Schlesien's drawn pages, D-154), or <code>142,276</code> / <code>21-30</code>. Never a sealed page.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 252–268 (17 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">page_spec</span><span class="p">(</span><span class="n">spec</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">profile</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``gold`` (Böhmen&#39;s calibration and purposive pages), ``calibration`` (Mähren&#39;s or</span>
+<span class="sd">    Schlesien&#39;s drawn pages, D-154), or ``142,276`` / ``21-30``. Never a sealed page.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">spec</span> <span class="o">==</span> <span class="s2">&quot;gold&quot;</span><span class="p">:</span>
+        <span class="n">pages</span> <span class="o">=</span> <span class="n">bo</span><span class="o">.</span><span class="n">de_gold_pages</span><span class="p">()</span>
+    <span class="k">elif</span> <span class="n">spec</span> <span class="o">==</span> <span class="s2">&quot;calibration&quot;</span><span class="p">:</span>
+        <span class="n">path</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;places&quot;</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;gold_sample_pages_</span><span class="si">{</span><span class="n">profile</span><span class="o">.</span><span class="n">slug</span><span class="si">}</span><span class="s2">.csv&quot;</span>
+        <span class="k">with</span> <span class="n">path</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+            <span class="n">pages</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;scan&quot;</span><span class="p">])</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictReader</span><span class="p">(</span><span class="n">fh</span><span class="p">)</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;role&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;calibration&quot;</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">pages</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">part</span> <span class="ow">in</span> <span class="n">spec</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">):</span>
+            <span class="n">first</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">last</span> <span class="o">=</span> <span class="n">part</span><span class="o">.</span><span class="n">partition</span><span class="p">(</span><span class="s2">&quot;-&quot;</span><span class="p">)</span>
+            <span class="n">pages</span> <span class="o">+=</span> <span class="nb">range</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">first</span><span class="p">),</span> <span class="nb">int</span><span class="p">(</span><span class="n">last</span> <span class="ow">or</span> <span class="n">first</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="n">sealed</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">profile</span><span class="o">.</span><span class="n">sealed_pages</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="ow">not</span> <span class="n">sealed</span> <span class="o">&amp;</span> <span class="nb">set</span><span class="p">(</span><span class="n">pages</span><span class="p">),</span> <span class="sa">f</span><span class="s2">&quot;sealed pages asked for: </span><span class="si">{</span><span class="nb">sorted</span><span class="p">(</span><span class="n">sealed</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="nb">set</span><span class="p">(</span><span class="n">pages</span><span class="p">))</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="k">return</span> <span class="n">pages</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-lexikon_1910-run_de_table-main">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 271–286 (16 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--volume&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;boehmen_de&quot;</span><span class="p">,</span>
+                    <span class="n">choices</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;boehmen_de&quot;</span><span class="p">,</span> <span class="s2">&quot;maehren_de&quot;</span><span class="p">,</span> <span class="s2">&quot;schlesien_de&quot;</span><span class="p">))</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--pages&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;gold&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--reader&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;gemini38&quot;</span><span class="p">,</span> <span class="n">choices</span><span class="o">=</span><span class="nb">sorted</span><span class="p">(</span><span class="n">ARMS</span><span class="p">))</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--label&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;pass label; default de_table_&lt;reader&gt;_&lt;volume&gt;&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--dry-run&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;cut and estimate; send nothing&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+    <span class="n">profile</span> <span class="o">=</span> <span class="n">lxvol</span><span class="o">.</span><span class="n">load_profile</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">volume</span><span class="p">)</span>
+    <span class="n">pages</span> <span class="o">=</span> <span class="n">page_spec</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">pages</span><span class="p">,</span> <span class="n">profile</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">dry_run</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">estimate</span><span class="p">(</span><span class="n">pages</span><span class="p">,</span> <span class="n">profile</span><span class="p">,</span> <span class="n">ARMS</span><span class="p">[</span><span class="n">args</span><span class="o">.</span><span class="n">reader</span><span class="p">]))</span>
+        <span class="k">return</span> <span class="mi">0</span>
+    <span class="n">label</span> <span class="o">=</span> <span class="n">args</span><span class="o">.</span><span class="n">label</span> <span class="ow">or</span> <span class="sa">f</span><span class="s2">&quot;de_table_</span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">reader</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">volume</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="k">return</span> <span class="mi">0</span> <span class="k">if</span> <span class="n">frozen_pass</span><span class="p">(</span><span class="n">label</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">reader</span><span class="p">,</span> <span class="n">pages</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">volume</span><span class="p">)</span> <span class="k">else</span> <span class="mi">2</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-lexikon_1910-run_de_table-HERE"><pre class="sig">HERE<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-run_de_table-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">HERE</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-run_de_table-WORKERS"><pre class="sig">WORKERS<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">4</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-run_de_table-RETRIES"><pre class="sig">RETRIES<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">3</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-run_de_table-ARMS"><pre class="sig">ARMS<span class="kind">dict · 2 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;gemini38&#39;</span><span class="p">:</span> <span class="n">Arm</span><span class="p">(</span><span class="s1">&#39;gemini&#39;</span><span class="p">,</span> <span class="s1">&#39;gemini-3.8-flash&#39;</span><span class="p">,</span> <span class="p">(</span><span class="mf">0.75</span><span class="p">,</span> <span class="mf">3.75</span><span class="p">),</span> <span class="n">reasoning</span><span class="o">=</span><span class="s1">&#39;none&#39;</span><span class="p">),</span> <span class="s1">&#39;haiku55&#39;</span><span class="p">:</span> <span class="n">Arm</span><span class="p">(</span><span class="s1">&#39;claude&#39;</span><span class="p">,</span> <span class="s1">&#39;claude-haiku-5-5&#39;</span><span class="p">,</span> <span class="n">pilot</span><span class="o">.</span><span class="n">PRICING</span><span class="p">[</span><span class="s1">&#39;claude-haiku-5-5&#39;</span><span class="p">],</span> <span class="n">thinking</span><span class="o">=</span><span class="s1">&#39;adaptive&#39;</span><span class="p">,</span> <span class="n">effort</span><span class="o">=</span><span class="s1">&#39;high&#39;</span><span class="p">)}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-lexikon_1910-run_de_table-EST_OUTPUT"><pre class="sig">EST_OUTPUT<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">600</span>
+</pre></div>
+</details></div>
+<h2>Used by</h2><p><code>utils/lexikon_1910/run_frozen.py</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/lexikon_1910/run_de_table.py · 290 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;The German volumes&#39; table read by a model, block by block, as the Czech table arm reads (D-160).</span>
+
+<span class="sd">The Czech table pass (``run_lexikon_1910_pilot.py`` channel A, driven by ``run_table_arm.py``</span>
+<span class="sd">and the frozen route) crops each municipality block where the ALTO found it and has a vision</span>
+<span class="sd">model read its columns. The German volumes have no ALTO and an OCR layer whose names are</span>
+<span class="sd">garbage, so the blocks are cut from the image (:mod:`lexikon_1910_de_table`) and the model reads</span>
+<span class="sd">everything, names included. The readers are the Czech table arm&#39;s two, with its settings:</span>
+
+<span class="sd">    gemini38   Gemini 3.8 Flash, thinking off, temperature 0     the reader of record</span>
+<span class="sd">    haiku55    Claude Haiku 5.5, thinking adaptive at high        the second reader</span>
+
+<span class="sd">One crop a block, frame to frame, scaled to the 2,576 px vision ceiling (one tile, as the</span>
+<span class="sd">Czech default); the prompt is the Czech one with the German volume&#39;s title, columns and the</span>
+<span class="sd">rules for its two name forms (:func:`lexikon_1910_de_table.build_system`). A block&#39;s reply is</span>
+<span class="sd">cached under a key of the crop, the instruction, the model, the prompt and every reading</span>
+<span class="sd">setting, so a batch (``reader_batches.py``) fills the cache and the next run reads from it,</span>
+<span class="sd">and a rerun spends nothing.</span>
+
+<span class="sd">Writes ``table_rows_&lt;label&gt;.csv`` (channel ``A``, one row per printed line, keyed by the block,</span>
+<span class="sd">with the block&#39;s kind and its district) and ``table_checks_&lt;label&gt;.csv`` (the volume&#39;s</span>
+<span class="sd">identities on every row, and each municipality&#39;s parts against it) to the German pass folder,</span>
+<span class="sd">where ``bakeoff.find_pass_file`` finds them for the register. ``score_table_passes.py --german``</span>
+<span class="sd">scores a pass against the German gold tables.</span>
+
+<span class="sd">The frozen route calls :func:`frozen_pass`. By hand, on Heavyhorse6 (D-68):</span>
+
+<span class="sd">    python utils/lexikon_1910/run_de_table.py --dry-run --volume boehmen_de --pages 142,276</span>
+<span class="sd">    python utils/lexikon_1910/run_de_table.py --volume boehmen_de --pages gold --reader gemini38</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">csv</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">hashlib</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">threading</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">Counter</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">concurrent.futures</span><span class="w"> </span><span class="kn">import</span> <span class="n">ThreadPoolExecutor</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">dataclass</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="n">HERE</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span>
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">HERE</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">))</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">HERE</span><span class="p">))</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">bakeoff</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">bo</span>                                                <span class="c1"># noqa: E402</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_de_notes</span> <span class="k">as</span> <span class="n">lxdn</span>        <span class="c1"># noqa: E402</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_de_table</span> <span class="k">as</span> <span class="n">lxdt</span>        <span class="c1"># noqa: E402</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_volume</span> <span class="k">as</span> <span class="n">lxvol</span>         <span class="c1"># noqa: E402</span>
+
+<span class="n">pilot</span> <span class="o">=</span> <span class="n">bo</span><span class="o">.</span><span class="n">pilot</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;0.1.0&quot;</span>
+
+<span class="n">WORKERS</span> <span class="o">=</span> <span class="mi">4</span>                 <span class="c1"># hosted endpoints; not part of the cache key</span>
+<span class="n">RETRIES</span> <span class="o">=</span> <span class="mi">3</span>
+
+
+<span class="nd">@dataclass</span><span class="p">(</span><span class="n">frozen</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">Arm</span><span class="p">:</span>
+    <span class="n">route</span><span class="p">:</span> <span class="nb">str</span>                          <span class="c1"># &quot;gemini&quot; | &quot;claude&quot;</span>
+    <span class="n">model</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">price</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span>          <span class="c1"># USD per million tokens, in / out</span>
+    <span class="n">reasoning</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>                 <span class="c1"># Gemini&#39;s reasoning_effort (&quot;none&quot; = off)</span>
+    <span class="n">thinking</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>                  <span class="c1"># Claude: &quot;adaptive&quot; | &quot;disabled&quot;</span>
+    <span class="n">effort</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">max_tokens</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">8000</span>
+
+
+<span class="c1">#: ``run_table_arm.READERS``, as reader objects: the same models and settings.</span>
+<span class="n">ARMS</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;gemini38&quot;</span><span class="p">:</span> <span class="n">Arm</span><span class="p">(</span><span class="s2">&quot;gemini&quot;</span><span class="p">,</span> <span class="s2">&quot;gemini-3.8-flash&quot;</span><span class="p">,</span> <span class="p">(</span><span class="mf">0.75</span><span class="p">,</span> <span class="mf">3.75</span><span class="p">),</span> <span class="n">reasoning</span><span class="o">=</span><span class="s2">&quot;none&quot;</span><span class="p">),</span>
+    <span class="s2">&quot;haiku55&quot;</span><span class="p">:</span> <span class="n">Arm</span><span class="p">(</span><span class="s2">&quot;claude&quot;</span><span class="p">,</span> <span class="s2">&quot;claude-haiku-5-5&quot;</span><span class="p">,</span> <span class="n">pilot</span><span class="o">.</span><span class="n">PRICING</span><span class="p">[</span><span class="s2">&quot;claude-haiku-5-5&quot;</span><span class="p">],</span>
+                   <span class="n">thinking</span><span class="o">=</span><span class="s2">&quot;adaptive&quot;</span><span class="p">,</span> <span class="n">effort</span><span class="o">=</span><span class="s2">&quot;high&quot;</span><span class="p">),</span>
+<span class="p">}</span>
+<span class="c1">#: Output tokens a block, for the estimate only: the Czech table arm&#39;s reply size.</span>
+<span class="n">EST_OUTPUT</span> <span class="o">=</span> <span class="mi">600</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">make_reader</span><span class="p">(</span><span class="n">arm</span><span class="p">:</span> <span class="n">Arm</span><span class="p">,</span> <span class="n">profile</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The pilot&#39;s reader classes with the German prompt and the volume&#39;s row schema.&quot;&quot;&quot;</span>
+    <span class="n">system</span><span class="p">,</span> <span class="n">schema</span> <span class="o">=</span> <span class="n">lxdt</span><span class="o">.</span><span class="n">build_system</span><span class="p">(</span><span class="n">profile</span><span class="p">),</span> <span class="n">lxdt</span><span class="o">.</span><span class="n">row_schema</span><span class="p">(</span><span class="n">profile</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">arm</span><span class="o">.</span><span class="n">route</span> <span class="o">==</span> <span class="s2">&quot;claude&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">pilot</span><span class="o">.</span><span class="n">ClaudeReader</span><span class="p">(</span><span class="n">arm</span><span class="o">.</span><span class="n">model</span><span class="p">,</span> <span class="n">arm</span><span class="o">.</span><span class="n">effort</span><span class="p">,</span> <span class="n">thinking</span><span class="o">=</span><span class="n">arm</span><span class="o">.</span><span class="n">thinking</span><span class="p">,</span>
+                                  <span class="n">max_tokens</span><span class="o">=</span><span class="n">arm</span><span class="o">.</span><span class="n">max_tokens</span><span class="p">,</span> <span class="n">system</span><span class="o">=</span><span class="n">system</span><span class="p">,</span> <span class="n">schema</span><span class="o">=</span><span class="n">schema</span><span class="p">,</span>
+                                  <span class="n">payload_key</span><span class="o">=</span><span class="s2">&quot;rows&quot;</span><span class="p">)</span>
+    <span class="n">url</span><span class="p">,</span> <span class="n">key_env</span> <span class="o">=</span> <span class="n">pilot</span><span class="o">.</span><span class="n">READER_ENDPOINTS</span><span class="p">[</span><span class="s2">&quot;gemini&quot;</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">pilot</span><span class="o">.</span><span class="n">OpenAICompatibleReader</span><span class="p">(</span><span class="n">arm</span><span class="o">.</span><span class="n">model</span><span class="p">,</span> <span class="n">url</span><span class="p">,</span> <span class="n">key_env</span><span class="p">,</span> <span class="n">system</span><span class="o">=</span><span class="n">system</span><span class="p">,</span> <span class="n">schema</span><span class="o">=</span><span class="n">schema</span><span class="p">,</span>
+                                        <span class="n">payload_key</span><span class="o">=</span><span class="s2">&quot;rows&quot;</span><span class="p">,</span> <span class="n">schema_name</span><span class="o">=</span><span class="s2">&quot;block&quot;</span><span class="p">,</span>
+                                        <span class="n">max_tokens</span><span class="o">=</span><span class="n">arm</span><span class="o">.</span><span class="n">max_tokens</span><span class="p">,</span> <span class="n">temperature</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
+                                        <span class="n">reasoning_effort</span><span class="o">=</span><span class="n">arm</span><span class="o">.</span><span class="n">reasoning</span> <span class="ow">or</span> <span class="kc">None</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">cache_key</span><span class="p">(</span><span class="n">crop</span><span class="p">,</span> <span class="n">instruction</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">reader</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The Czech table cache&#39;s key (``run_lexikon_1910_pilot``, D-115): the crop&#39;s bytes, the</span>
+<span class="sd">    instruction, the model, the prompt and every reading setting.&quot;&quot;&quot;</span>
+    <span class="n">h</span> <span class="o">=</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">sha256</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">piece</span> <span class="ow">in</span> <span class="p">(</span><span class="n">pilot</span><span class="o">.</span><span class="n">encode_png</span><span class="p">(</span><span class="n">crop</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\0</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">instruction</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;model&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)),</span>
+                  <span class="nb">str</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;system&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)),</span> <span class="nb">str</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;temperature&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)),</span>
+                  <span class="nb">str</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;reasoning_effort&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">),</span>
+                  <span class="nb">str</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;thinking&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)),</span> <span class="nb">str</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;effort&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))):</span>
+        <span class="n">h</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">piece</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="s2">&quot;utf-8&quot;</span><span class="p">))</span>
+        <span class="n">h</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="nb">bytes</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">h</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">cut</span><span class="p">(</span><span class="n">pages</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span> <span class="n">profile</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``[(block, crop), …]`` in reading order, and the blocks by page for the report.&quot;&quot;&quot;</span>
+    <span class="n">jobs</span><span class="p">,</span> <span class="n">by_page</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">scan</span> <span class="ow">in</span> <span class="n">pages</span><span class="p">:</span>
+        <span class="n">stem</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">scan</span><span class="si">:</span><span class="s2">04d</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="n">image</span> <span class="o">=</span> <span class="n">lxdn</span><span class="o">.</span><span class="n">render_native</span><span class="p">(</span><span class="n">profile</span><span class="o">.</span><span class="n">source_pdf</span><span class="p">,</span> <span class="n">scan</span><span class="p">)</span>
+        <span class="n">geo</span><span class="p">,</span> <span class="n">blocks</span> <span class="o">=</span> <span class="n">lxdt</span><span class="o">.</span><span class="n">page_blocks</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">profile</span><span class="p">,</span> <span class="n">stem</span><span class="p">)</span>
+        <span class="n">by_page</span><span class="p">[</span><span class="n">stem</span><span class="p">]</span> <span class="o">=</span> <span class="n">blocks</span>
+        <span class="n">jobs</span> <span class="o">+=</span> <span class="p">[(</span><span class="n">block</span><span class="p">,</span> <span class="n">lxdt</span><span class="o">.</span><span class="n">crop_block</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">geo</span><span class="p">,</span> <span class="n">block</span><span class="p">))</span> <span class="k">for</span> <span class="n">block</span> <span class="ow">in</span> <span class="n">blocks</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">jobs</span><span class="p">,</span> <span class="n">by_page</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">read_blocks</span><span class="p">(</span><span class="n">jobs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">],</span> <span class="n">reader</span><span class="p">,</span> <span class="n">cache</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">queue</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                <span class="n">workers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">WORKERS</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">list</span><span class="p">,</span> <span class="n">Counter</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``[(block, rows or None), …]`` and the usage. With ``queue`` every block not in the</span>
+<span class="sd">    cache is written there as a batch line (``reader_batches.py``) and none is sent.&quot;&quot;&quot;</span>
+    <span class="n">cache</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">lock</span><span class="p">,</span> <span class="n">usage</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Lock</span><span class="p">(),</span> <span class="n">Counter</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">one</span><span class="p">(</span><span class="n">job</span><span class="p">):</span>
+        <span class="n">block</span><span class="p">,</span> <span class="n">crop</span> <span class="o">=</span> <span class="n">job</span>
+        <span class="n">instruction</span> <span class="o">=</span> <span class="n">lxdt</span><span class="o">.</span><span class="n">INSTRUCTIONS</span><span class="p">[</span><span class="n">block</span><span class="o">.</span><span class="n">kind</span><span class="p">]</span>
+        <span class="n">hit</span> <span class="o">=</span> <span class="n">cache</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">cache_key</span><span class="p">(</span><span class="n">crop</span><span class="p">,</span><span class="w"> </span><span class="n">instruction</span><span class="p">,</span><span class="w"> </span><span class="n">reader</span><span class="p">)</span><span class="si">}</span><span class="s2">.json&quot;</span>
+        <span class="k">if</span> <span class="n">hit</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+            <span class="n">record</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">hit</span><span class="o">.</span><span class="n">read_text</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">))</span>
+            <span class="k">return</span> <span class="n">block</span><span class="p">,</span> <span class="n">record</span><span class="p">[</span><span class="s2">&quot;lines&quot;</span><span class="p">],</span> <span class="p">{</span><span class="s2">&quot;cached&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">}</span>
+        <span class="k">if</span> <span class="n">queue</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">make</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">or</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;body&quot;</span><span class="p">)</span>
+            <span class="n">line</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;key&quot;</span><span class="p">:</span> <span class="n">hit</span><span class="o">.</span><span class="n">stem</span><span class="p">,</span> <span class="s2">&quot;reader&quot;</span><span class="p">:</span> <span class="n">reader</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="s2">&quot;cache_dir&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">cache</span><span class="p">),</span>
+                    <span class="s2">&quot;slot&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">block</span><span class="o">.</span><span class="n">page</span><span class="p">,</span> <span class="n">block</span><span class="o">.</span><span class="n">block_id</span><span class="p">],</span> <span class="s2">&quot;kind&quot;</span><span class="p">:</span> <span class="s2">&quot;table&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;model&quot;</span><span class="p">:</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;model&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span> <span class="s2">&quot;payload_key&quot;</span><span class="p">:</span> <span class="s2">&quot;rows&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;request&quot;</span><span class="p">:</span> <span class="n">make</span><span class="p">([(</span><span class="n">crop</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)],</span> <span class="n">instruction</span><span class="p">)}</span>
+            <span class="k">with</span> <span class="n">lock</span><span class="p">,</span> <span class="n">Path</span><span class="p">(</span><span class="n">queue</span><span class="p">)</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;a&quot;</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+                <span class="n">fh</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">line</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">block</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;queued&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">}</span>
+        <span class="k">for</span> <span class="n">attempt</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">RETRIES</span><span class="p">):</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">rows</span><span class="p">,</span> <span class="n">spent</span> <span class="o">=</span> <span class="n">reader</span><span class="p">([(</span><span class="n">crop</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)],</span> <span class="n">instruction</span><span class="p">)</span>
+                <span class="n">tmp</span> <span class="o">=</span> <span class="n">hit</span><span class="o">.</span><span class="n">with_suffix</span><span class="p">(</span><span class="s2">&quot;.json.part&quot;</span><span class="p">)</span>
+                <span class="n">tmp</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">({</span><span class="s2">&quot;lines&quot;</span><span class="p">:</span> <span class="n">rows</span><span class="p">,</span> <span class="s2">&quot;usage&quot;</span><span class="p">:</span> <span class="n">spent</span><span class="p">,</span>
+                                           <span class="s2">&quot;slot&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">block</span><span class="o">.</span><span class="n">page</span><span class="p">,</span> <span class="n">block</span><span class="o">.</span><span class="n">block_id</span><span class="p">],</span> <span class="s2">&quot;kind&quot;</span><span class="p">:</span> <span class="s2">&quot;table&quot;</span><span class="p">,</span>
+                                           <span class="s2">&quot;model&quot;</span><span class="p">:</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;model&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span>
+                                           <span class="s2">&quot;at&quot;</span><span class="p">:</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()}),</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+                <span class="n">tmp</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="n">hit</span><span class="p">)</span>
+                <span class="k">return</span> <span class="n">block</span><span class="p">,</span> <span class="n">rows</span><span class="p">,</span> <span class="n">spent</span>
+            <span class="k">except</span> <span class="n">pilot</span><span class="o">.</span><span class="n">Truncated</span><span class="p">:</span>
+                <span class="n">reader</span><span class="o">.</span><span class="n">max_tokens</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;max_tokens&quot;</span><span class="p">,</span> <span class="mi">8000</span><span class="p">)</span> <span class="o">*</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">32000</span><span class="p">)</span>
+            <span class="k">except</span> <span class="n">pilot</span><span class="o">.</span><span class="n">RateLimited</span><span class="p">:</span>
+                <span class="k">raise</span>
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>                                    <span class="c1"># noqa: BLE001</span>
+                <span class="k">if</span> <span class="n">attempt</span> <span class="o">==</span> <span class="n">RETRIES</span> <span class="o">-</span> <span class="mi">1</span><span class="p">:</span>
+                    <span class="k">return</span> <span class="n">block</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;error&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">exc</span><span class="p">)[:</span><span class="mi">300</span><span class="p">]}</span>
+                <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="p">(</span><span class="n">attempt</span> <span class="o">+</span> <span class="mi">1</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">block</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;error&quot;</span><span class="p">:</span> <span class="s2">&quot;truncated&quot;</span><span class="p">}</span>
+
+    <span class="k">with</span> <span class="n">ThreadPoolExecutor</span><span class="p">(</span><span class="n">max_workers</span><span class="o">=</span><span class="n">workers</span><span class="p">)</span> <span class="k">as</span> <span class="n">pool</span><span class="p">:</span>
+        <span class="n">results</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">pool</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">one</span><span class="p">,</span> <span class="n">jobs</span><span class="p">))</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">block</span><span class="p">,</span> <span class="n">rows</span><span class="p">,</span> <span class="n">spent</span> <span class="ow">in</span> <span class="n">results</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">spent</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">usage</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">+=</span> <span class="n">value</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="p">(</span><span class="nb">int</span><span class="p">,</span> <span class="nb">float</span><span class="p">))</span> <span class="k">else</span> <span class="mi">1</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">block</span><span class="p">,</span> <span class="n">rows</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">out</span><span class="p">,</span> <span class="n">usage</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">assemble</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">read</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">],</span> <span class="n">profile</span><span class="p">,</span> <span class="n">crosswalk</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">out</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Label every block with its district, check it, write the pass&#39;s two files.&quot;&quot;&quot;</span>
+    <span class="n">labels</span> <span class="o">=</span> <span class="n">lxdt</span><span class="o">.</span><span class="n">court_labels</span><span class="p">([(</span><span class="n">b</span><span class="p">,</span> <span class="n">rows</span> <span class="ow">or</span> <span class="p">[])</span> <span class="k">for</span> <span class="n">b</span><span class="p">,</span> <span class="n">rows</span> <span class="ow">in</span> <span class="n">read</span><span class="p">])</span>
+    <span class="n">page_reads</span><span class="p">,</span> <span class="n">checks</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="p">(</span><span class="n">block</span><span class="p">,</span> <span class="n">rows</span><span class="p">),</span> <span class="p">(</span><span class="n">okres</span><span class="p">,</span> <span class="n">court</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">read</span><span class="p">,</span> <span class="n">labels</span><span class="p">):</span>
+        <span class="n">court_cs</span> <span class="o">=</span> <span class="n">lxdn</span><span class="o">.</span><span class="n">court_name</span><span class="p">(</span><span class="n">court</span><span class="p">,</span> <span class="n">crosswalk</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="k">if</span> <span class="n">court</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+        <span class="n">page_reads</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">block</span><span class="p">,</span> <span class="n">rows</span> <span class="ow">or</span> <span class="p">[],</span> <span class="n">okres</span><span class="p">,</span> <span class="n">court</span><span class="p">,</span> <span class="n">court_cs</span><span class="p">))</span>
+        <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">lxdt</span><span class="o">.</span><span class="n">grade_block</span><span class="p">(</span><span class="n">rows</span> <span class="ow">or</span> <span class="p">[],</span> <span class="n">profile</span><span class="p">,</span> <span class="n">block</span><span class="o">.</span><span class="n">kind</span><span class="p">):</span>
+            <span class="n">checks</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;page&quot;</span><span class="p">:</span> <span class="n">block</span><span class="o">.</span><span class="n">page</span><span class="p">,</span> <span class="s2">&quot;block_id&quot;</span><span class="p">:</span> <span class="n">block</span><span class="o">.</span><span class="n">block_id</span><span class="p">,</span>
+                           <span class="s2">&quot;block_kind&quot;</span><span class="p">:</span> <span class="n">block</span><span class="o">.</span><span class="n">kind</span><span class="p">,</span> <span class="o">**</span><span class="n">c</span><span class="p">})</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="n">lxdt</span><span class="o">.</span><span class="n">table_rows</span><span class="p">(</span><span class="n">page_reads</span><span class="p">,</span> <span class="n">profile</span><span class="p">)</span>
+    <span class="n">_write</span><span class="p">(</span><span class="n">out</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;table_rows_</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">.csv&quot;</span><span class="p">,</span> <span class="n">rows</span><span class="p">)</span>
+    <span class="n">_write</span><span class="p">(</span><span class="n">out</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;table_checks_</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">.csv&quot;</span><span class="p">,</span> <span class="n">checks</span><span class="p">)</span>
+    <span class="n">verdicts</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">(</span><span class="n">c</span><span class="p">[</span><span class="s2">&quot;verdict&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">checks</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;blocks&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">read</span><span class="p">),</span> <span class="s2">&quot;unread&quot;</span><span class="p">:</span> <span class="nb">sum</span><span class="p">(</span><span class="n">r</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">for</span> <span class="n">_b</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">read</span><span class="p">),</span> <span class="s2">&quot;rows&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">rows</span><span class="p">),</span>
+            <span class="o">**</span><span class="p">{</span><span class="sa">f</span><span class="s2">&quot;check_</span><span class="si">{</span><span class="n">k</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">verdicts</span><span class="o">.</span><span class="n">items</span><span class="p">()}}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_write</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">path</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">fields</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">dict</span><span class="o">.</span><span class="n">fromkeys</span><span class="p">(</span><span class="n">k</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rows</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">r</span><span class="p">))</span> <span class="ow">or</span> <span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">]</span>
+    <span class="k">with</span> <span class="n">path</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;w&quot;</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+        <span class="n">writer</span> <span class="o">=</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictWriter</span><span class="p">(</span><span class="n">fh</span><span class="p">,</span> <span class="n">fieldnames</span><span class="o">=</span><span class="n">fields</span><span class="p">)</span>
+        <span class="n">writer</span><span class="o">.</span><span class="n">writeheader</span><span class="p">()</span>
+        <span class="n">writer</span><span class="o">.</span><span class="n">writerows</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">frozen_pass</span><span class="p">(</span><span class="n">label</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">arm_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">pages</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span> <span class="n">profile_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+                <span class="n">out</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">queue</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;One table pass of the frozen route over any pages of one German volume. The runner that</span>
+<span class="sd">    calls it (``run_frozen.py``) chooses the pages and keeps certification apart. ``False``</span>
+<span class="sd">    if a quota stopped it; a rerun goes on from the cache.&quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">out</span> <span class="ow">or</span> <span class="n">bo</span><span class="o">.</span><span class="n">DE_PASS_DIR</span>
+    <span class="n">profile</span> <span class="o">=</span> <span class="n">lxvol</span><span class="o">.</span><span class="n">load_profile</span><span class="p">(</span><span class="n">profile_name</span><span class="p">)</span>
+    <span class="n">arm</span> <span class="o">=</span> <span class="n">ARMS</span><span class="p">[</span><span class="n">arm_name</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">78</span> <span class="o">+</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">GERMAN TABLE (frozen)  </span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">   (</span><span class="si">{</span><span class="n">arm</span><span class="o">.</span><span class="n">model</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">profile</span><span class="o">.</span><span class="n">title</span><span class="si">}</span><span class="s2">, &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">pages</span><span class="p">)</span><span class="si">}</span><span class="s2"> pages)</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">78</span><span class="p">)</span>
+    <span class="n">started</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+    <span class="n">jobs</span><span class="p">,</span> <span class="n">by_page</span> <span class="o">=</span> <span class="n">cut</span><span class="p">(</span><span class="n">pages</span><span class="p">,</span> <span class="n">profile</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  &quot;</span> <span class="o">+</span> <span class="n">lxdt</span><span class="o">.</span><span class="n">lexikon_1910_de_table_report</span><span class="p">(</span><span class="n">by_page</span><span class="p">,</span> <span class="n">profile</span><span class="p">))</span>
+    <span class="n">reader</span> <span class="o">=</span> <span class="n">make_reader</span><span class="p">(</span><span class="n">arm</span><span class="p">,</span> <span class="n">profile</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">read</span><span class="p">,</span> <span class="n">usage</span> <span class="o">=</span> <span class="n">read_blocks</span><span class="p">(</span><span class="n">jobs</span><span class="p">,</span> <span class="n">reader</span><span class="p">,</span> <span class="n">out</span> <span class="o">/</span> <span class="s2">&quot;table_cache&quot;</span> <span class="o">/</span> <span class="n">label</span><span class="p">,</span> <span class="n">queue</span><span class="o">=</span><span class="n">queue</span><span class="p">)</span>
+    <span class="k">except</span> <span class="n">pilot</span><span class="o">.</span><span class="n">RateLimited</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  rate limited: </span><span class="si">{</span><span class="n">exc</span><span class="si">}</span><span class="s2">; run again to go on from the cache&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">if</span> <span class="n">queue</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">usage</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;queued&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="si">}</span><span class="s2"> blocks queued to </span><span class="si">{</span><span class="n">Path</span><span class="p">(</span><span class="n">queue</span><span class="p">)</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">, &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">usage</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;cached&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="si">}</span><span class="s2"> already in the cache&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="n">counts</span> <span class="o">=</span> <span class="n">assemble</span><span class="p">(</span><span class="n">label</span><span class="p">,</span> <span class="n">read</span><span class="p">,</span> <span class="n">profile</span><span class="p">,</span> <span class="n">lxdn</span><span class="o">.</span><span class="n">load_court_crosswalk</span><span class="p">(),</span> <span class="n">out</span><span class="p">)</span>
+    <span class="n">cost</span> <span class="o">=</span> <span class="p">(</span><span class="n">usage</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">*</span> <span class="n">arm</span><span class="o">.</span><span class="n">price</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="n">usage</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;output&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">*</span> <span class="n">arm</span><span class="o">.</span><span class="n">price</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span> <span class="o">/</span> <span class="mf">1e6</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">counts</span><span class="si">}</span><span class="s2">; </span><span class="si">{</span><span class="n">usage</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;cached&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="si">}</span><span class="s2"> from the cache; $</span><span class="si">{</span><span class="n">cost</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">; &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="p">(</span><span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">started</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">60</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> min&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">counts</span><span class="p">[</span><span class="s2">&quot;unread&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="mi">0</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">estimate</span><span class="p">(</span><span class="n">pages</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">],</span> <span class="n">profile</span><span class="p">,</span> <span class="n">arm</span><span class="p">:</span> <span class="n">Arm</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Blocks and dollars for one pass over ``pages``; renders and cuts, sends nothing.&quot;&quot;&quot;</span>
+    <span class="n">jobs</span><span class="p">,</span> <span class="n">by_page</span> <span class="o">=</span> <span class="n">cut</span><span class="p">(</span><span class="n">pages</span><span class="p">,</span> <span class="n">profile</span><span class="p">)</span>
+    <span class="n">tokens</span> <span class="o">=</span> <span class="p">[</span><span class="nb">min</span><span class="p">(</span><span class="n">pilot_image_cap</span><span class="p">(</span><span class="n">arm</span><span class="p">),</span> <span class="n">crop</span><span class="o">.</span><span class="n">width</span> <span class="o">*</span> <span class="n">crop</span><span class="o">.</span><span class="n">height</span> <span class="o">//</span> <span class="mi">750</span><span class="p">)</span> <span class="k">for</span> <span class="n">_b</span><span class="p">,</span> <span class="n">crop</span> <span class="ow">in</span> <span class="n">jobs</span><span class="p">]</span>
+    <span class="n">out_tokens</span> <span class="o">=</span> <span class="n">EST_OUTPUT</span> <span class="o">+</span> <span class="p">(</span><span class="n">pilot</span><span class="o">.</span><span class="n">THINKING_TOKENS</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">arm</span><span class="o">.</span><span class="n">effort</span><span class="p">,</span> <span class="mi">800</span><span class="p">)</span> <span class="k">if</span> <span class="n">arm</span><span class="o">.</span><span class="n">thinking</span> <span class="o">==</span> <span class="s2">&quot;adaptive&quot;</span> <span class="k">else</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="n">dollars</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">((</span><span class="n">t</span> <span class="o">+</span> <span class="mi">1500</span><span class="p">)</span> <span class="o">*</span> <span class="n">arm</span><span class="o">.</span><span class="n">price</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="n">out_tokens</span> <span class="o">*</span> <span class="n">arm</span><span class="o">.</span><span class="n">price</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">tokens</span><span class="p">)</span> <span class="o">/</span> <span class="mf">1e6</span>
+    <span class="n">per_page</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">jobs</span><span class="p">)</span> <span class="o">/</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">pages</span><span class="p">))</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">lxdt</span><span class="o">.</span><span class="n">lexikon_1910_de_table_report</span><span class="p">(</span><span class="n">by_page</span><span class="p">,</span> <span class="n">profile</span><span class="p">)</span>
+            <span class="o">+</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">  </span><span class="si">{</span><span class="n">arm</span><span class="o">.</span><span class="n">model</span><span class="si">}</span><span class="s2">: ~$</span><span class="si">{</span><span class="n">dollars</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> for these </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">pages</span><span class="p">)</span><span class="si">}</span><span class="s2"> pages &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">per_page</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> blocks a page; the volume&#39;s </span><span class="si">{</span><span class="n">profile</span><span class="o">.</span><span class="n">table_last</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">profile</span><span class="o">.</span><span class="n">table_first</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="si">}</span><span class="s2"> &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;table pages ~$</span><span class="si">{</span><span class="n">dollars</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="n">pages</span><span class="p">))</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="n">profile</span><span class="o">.</span><span class="n">table_last</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">profile</span><span class="o">.</span><span class="n">table_first</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="si">:</span><span class="s2">,.0f</span><span class="si">}</span><span class="s2">, &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;half that batched)&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">pilot_image_cap</span><span class="p">(</span><span class="n">arm</span><span class="p">:</span> <span class="n">Arm</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The image-token ceiling the estimate assumes for one crop.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="mi">4784</span> <span class="k">if</span> <span class="n">arm</span><span class="o">.</span><span class="n">route</span> <span class="o">==</span> <span class="s2">&quot;gemini&quot;</span> <span class="k">else</span> <span class="mi">1600</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">page_spec</span><span class="p">(</span><span class="n">spec</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">profile</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``gold`` (Böhmen&#39;s calibration and purposive pages), ``calibration`` (Mähren&#39;s or</span>
+<span class="sd">    Schlesien&#39;s drawn pages, D-154), or ``142,276`` / ``21-30``. Never a sealed page.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">spec</span> <span class="o">==</span> <span class="s2">&quot;gold&quot;</span><span class="p">:</span>
+        <span class="n">pages</span> <span class="o">=</span> <span class="n">bo</span><span class="o">.</span><span class="n">de_gold_pages</span><span class="p">()</span>
+    <span class="k">elif</span> <span class="n">spec</span> <span class="o">==</span> <span class="s2">&quot;calibration&quot;</span><span class="p">:</span>
+        <span class="n">path</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;places&quot;</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;gold_sample_pages_</span><span class="si">{</span><span class="n">profile</span><span class="o">.</span><span class="n">slug</span><span class="si">}</span><span class="s2">.csv&quot;</span>
+        <span class="k">with</span> <span class="n">path</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+            <span class="n">pages</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;scan&quot;</span><span class="p">])</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictReader</span><span class="p">(</span><span class="n">fh</span><span class="p">)</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;role&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;calibration&quot;</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">pages</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">part</span> <span class="ow">in</span> <span class="n">spec</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;,&quot;</span><span class="p">):</span>
+            <span class="n">first</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">last</span> <span class="o">=</span> <span class="n">part</span><span class="o">.</span><span class="n">partition</span><span class="p">(</span><span class="s2">&quot;-&quot;</span><span class="p">)</span>
+            <span class="n">pages</span> <span class="o">+=</span> <span class="nb">range</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">first</span><span class="p">),</span> <span class="nb">int</span><span class="p">(</span><span class="n">last</span> <span class="ow">or</span> <span class="n">first</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="n">sealed</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">profile</span><span class="o">.</span><span class="n">sealed_pages</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="ow">not</span> <span class="n">sealed</span> <span class="o">&amp;</span> <span class="nb">set</span><span class="p">(</span><span class="n">pages</span><span class="p">),</span> <span class="sa">f</span><span class="s2">&quot;sealed pages asked for: </span><span class="si">{</span><span class="nb">sorted</span><span class="p">(</span><span class="n">sealed</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="nb">set</span><span class="p">(</span><span class="n">pages</span><span class="p">))</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="k">return</span> <span class="n">pages</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--volume&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;boehmen_de&quot;</span><span class="p">,</span>
+                    <span class="n">choices</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;boehmen_de&quot;</span><span class="p">,</span> <span class="s2">&quot;maehren_de&quot;</span><span class="p">,</span> <span class="s2">&quot;schlesien_de&quot;</span><span class="p">))</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--pages&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;gold&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--reader&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;gemini38&quot;</span><span class="p">,</span> <span class="n">choices</span><span class="o">=</span><span class="nb">sorted</span><span class="p">(</span><span class="n">ARMS</span><span class="p">))</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--label&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;pass label; default de_table_&lt;reader&gt;_&lt;volume&gt;&quot;</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--dry-run&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;cut and estimate; send nothing&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+    <span class="n">profile</span> <span class="o">=</span> <span class="n">lxvol</span><span class="o">.</span><span class="n">load_profile</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">volume</span><span class="p">)</span>
+    <span class="n">pages</span> <span class="o">=</span> <span class="n">page_spec</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">pages</span><span class="p">,</span> <span class="n">profile</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">dry_run</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">estimate</span><span class="p">(</span><span class="n">pages</span><span class="p">,</span> <span class="n">profile</span><span class="p">,</span> <span class="n">ARMS</span><span class="p">[</span><span class="n">args</span><span class="o">.</span><span class="n">reader</span><span class="p">]))</span>
+        <span class="k">return</span> <span class="mi">0</span>
+    <span class="n">label</span> <span class="o">=</span> <span class="n">args</span><span class="o">.</span><span class="n">label</span> <span class="ow">or</span> <span class="sa">f</span><span class="s2">&quot;de_table_</span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">reader</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">volume</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="k">return</span> <span class="mi">0</span> <span class="k">if</span> <span class="n">frozen_pass</span><span class="p">(</span><span class="n">label</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">reader</span><span class="p">,</span> <span class="n">pages</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">volume</span><span class="p">)</span> <span class="k">else</span> <span class="mi">2</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>
