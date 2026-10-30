@@ -1,0 +1,879 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Five intensities side by side, per 1,000, at three levels: political okres, court
+district, settlement.  Provisional (D-163): every definition here is the simplest one
+that can be drawn, and each will move when its measure is ruled on.</p><p class="tldr-facts"><b>Reference tools</b> · v0.1.0 · 237 lines · 10 public functions · 12 constants · used by nothing else · <code>utils/reference_tools/places/run_intensities.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-reference_tools-places-run_intensities-load_legion">load_legion</a><a class="chip" href="#fn-utils-reference_tools-places-run_intensities-theatre_mean">theatre_mean</a><a class="chip" href="#fn-utils-reference_tools-places-run_intensities-add_rates">add_rates</a><a class="chip" href="#fn-utils-reference_tools-places-run_intensities-own_matice">own_matice</a><a class="chip" href="#fn-utils-reference_tools-places-run_intensities-okres_table">okres_table</a><a class="chip" href="#fn-utils-reference_tools-places-run_intensities-court_okres">court_okres</a><a class="chip" href="#fn-utils-reference_tools-places-run_intensities-court_table">court_table</a><a class="chip" href="#fn-utils-reference_tools-places-run_intensities-legion_settlements">legion_settlements</a><a class="chip" href="#fn-utils-reference_tools-places-run_intensities-settlement_table">settlement_table</a><a class="chip" href="#fn-utils-reference_tools-places-run_intensities-main">main</a><a class="chip const" href="#c-utils-reference_tools-places-run_intensities-ROOT">ROOT</a><a class="chip const" href="#c-utils-reference_tools-places-run_intensities-GEO">GEO</a><a class="chip const" href="#c-utils-reference_tools-places-run_intensities-LEGION">LEGION</a><a class="chip const" href="#c-utils-reference_tools-places-run_intensities-MATICE">MATICE</a><a class="chip const" href="#c-utils-reference_tools-places-run_intensities-THEATRE">THEATRE</a><a class="chip const" href="#c-utils-reference_tools-places-run_intensities-OUT">OUT</a><a class="chip const" href="#c-utils-reference_tools-places-run_intensities-THEATRE_WINDOW">THEATRE_WINDOW</a><a class="chip const" href="#c-utils-reference_tools-places-run_intensities-MIN_CZECH_SPEAKERS">MIN_CZECH_SPEAKERS</a><a class="chip const" href="#c-utils-reference_tools-places-run_intensities-MIN_LEGIONNAIRES">MIN_LEGIONNAIRES</a><a class="chip const" href="#c-utils-reference_tools-places-run_intensities-LEGION_COLS">LEGION_COLS</a><a class="chip const" href="#c-utils-reference_tools-places-run_intensities-MATICE_KEEP">MATICE_KEEP</a><a class="chip const" href="#c-utils-reference_tools-places-run_intensities-OUT_COLS">OUT_COLS</a></div>
+<h2>How it works</h2><p><code>matice</code>
+    The unit's own land's society, per 1,000 inhabitants, shrunk (Marshall 1991):
+    Matice česká founders in Bohemia, Matice moravská members of 1890 in Moravia and
+    Silesia (D-161).  <code>matice_own_z</code> standardises it within each society's territory,
+    since a 52-zl. founder and a Moravian member are not the same act.
+<code>theatre</code>
+    Czech amateur-theatre companies active in a year (certain), averaged over
+    <code>THEATRE_WINDOW</code>, per 1,000 inhabitants.
+<code>legion</code>
+    Legionnaires born in the unit, per 1,000 inhabitants and per 1,000 Czech speakers
+    (Umgangssprache) of 1910; the latter is left out where fewer than
+    <code>MIN_CZECH_SPEAKERS</code> speak Czech.
+<code>desertion</code>
+    Legionnaires leaving by desertion (exit code D) per 1,000 legionnaires born in the
+    unit, shrunk; left out under <code>MIN_LEGIONNAIRES</code>.</p>
+<p>Denominators are the 1910 census: the pooled okres (148 units, D-18) and the court census
+(330 units, the nine statutory-city courts pooled with their twin).  Only 57 % of the
+Czech-lands births name a court, so a court's legionnaires are scaled up by its okres's
+ratio of all births to court-located births — i.e. a birth known only to its okres is
+assumed to fall among the okres's courts as the located ones do.  The desertion rate is
+a ratio of located births and needs no scaling.</p>
+<p>There is no settlement population in the repo yet (the 1910 register's full run will
+carry it), so the settlement table holds counts, plus the desertion rate, whose
+denominator is the legionnaires themselves.</p>
+<p>Writes <code>data/interim/intensity/intensity_{okres,court,settlement}.csv</code>.</p>
+<p>Usage::</p>
+<pre><code>python utils/reference_tools/places/run_intensities.py
+</code></pre>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-reference_tools-places-run_intensities-load_legion">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">load_legion</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Legionnaires born in the Czech lands (a census okres), with <code>deserted</code> as 0/1.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 72–77 (6 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">72</span>
+<span class="normal">73</span>
+<span class="normal">74</span>
+<span class="normal">75</span>
+<span class="normal">76</span>
+<span class="normal">77</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">load_legion</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Legionnaires born in the Czech lands (a census okres), with ``deserted`` as 0/1.&quot;&quot;&quot;</span>
+    <span class="n">leg</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">LEGION</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="n">LEGION_COLS</span><span class="p">)</span>
+    <span class="n">leg</span> <span class="o">=</span> <span class="n">leg</span><span class="p">[</span><span class="n">leg</span><span class="p">[</span><span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">leg</span><span class="p">[</span><span class="s2">&quot;deserted&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">leg</span><span class="p">[</span><span class="s2">&quot;exit_D&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="kc">False</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">leg</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-run_intensities-theatre_mean">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">theatre_mean</span><span class="p">(</span><span class="n">level</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">key</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span></pre>
+<div class="fndoc"><p>Companies active per year (certain), averaged over <code>THEATRE_WINDOW</code>, by <code>key</code>.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 80–86 (7 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">80</span>
+<span class="normal">81</span>
+<span class="normal">82</span>
+<span class="normal">83</span>
+<span class="normal">84</span>
+<span class="normal">85</span>
+<span class="normal">86</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">theatre_mean</span><span class="p">(</span><span class="n">level</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">key</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Companies active per year (certain), averaged over ``THEATRE_WINDOW``, by ``key``.&quot;&quot;&quot;</span>
+    <span class="n">t</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">THEATRE</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">level</span><span class="si">}</span><span class="s2">_year_panel.parquet&quot;</span><span class="p">,</span>
+                        <span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="n">key</span><span class="p">,</span> <span class="s2">&quot;year&quot;</span><span class="p">,</span> <span class="s2">&quot;ensembles_active_certain&quot;</span><span class="p">])</span>
+    <span class="n">lo</span><span class="p">,</span> <span class="n">hi</span> <span class="o">=</span> <span class="n">THEATRE_WINDOW</span>
+    <span class="n">t</span> <span class="o">=</span> <span class="n">t</span><span class="p">[</span><span class="n">t</span><span class="p">[</span><span class="s2">&quot;year&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">between</span><span class="p">(</span><span class="n">lo</span><span class="p">,</span> <span class="n">hi</span><span class="p">)]</span>
+    <span class="k">return</span> <span class="n">t</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="n">key</span><span class="p">)[</span><span class="s2">&quot;ensembles_active_certain&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="o">/</span> <span class="p">(</span><span class="n">hi</span> <span class="o">-</span> <span class="n">lo</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-run_intensities-add_rates">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">add_rates</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Rates per 1,000 from the counts and the census columns <code>pop_total</code>/<code>lang_czech</code>.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 89–97 (9 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">89</span>
+<span class="normal">90</span>
+<span class="normal">91</span>
+<span class="normal">92</span>
+<span class="normal">93</span>
+<span class="normal">94</span>
+<span class="normal">95</span>
+<span class="normal">96</span>
+<span class="normal">97</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">add_rates</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Rates per 1,000 from the counts and the census columns ``pop_total``/``lang_czech``.&quot;&quot;&quot;</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theatre_per_1000&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">1000</span> <span class="o">*</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theatre_companies&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;pop_total&quot;</span><span class="p">]</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legion_per_1000&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">1000</span> <span class="o">*</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;pop_total&quot;</span><span class="p">]</span>
+    <span class="n">czech_ok</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;lang_czech&quot;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">MIN_CZECH_SPEAKERS</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legion_per_1000_czech&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="mi">1000</span> <span class="o">*</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;lang_czech&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">czech_ok</span><span class="p">)</span>
+    <span class="n">shrunk</span> <span class="o">=</span> <span class="mi">1000</span> <span class="o">*</span> <span class="n">mt</span><span class="o">.</span><span class="n">eb_rate</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;deserters_located&quot;</span><span class="p">],</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires_located&quot;</span><span class="p">])</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;desertion_per_1000_leg&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">shrunk</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires_located&quot;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">MIN_LEGIONNAIRES</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">df</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-run_intensities-own_matice">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">own_matice</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p><code>matice_per_1000</code>: the land's own society's shrunk rate (D-161).</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 100–106 (7 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">own_matice</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``matice_per_1000``: the land&#39;s own society&#39;s shrunk rate (D-161).&quot;&quot;&quot;</span>
+    <span class="n">bohemia</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;land&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;Böhmen&quot;</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;matice_members&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">bohemia</span><span class="p">,</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;mc_founders&quot;</span><span class="p">],</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;mm_members_1890&quot;</span><span class="p">])</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;matice_per_1000&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">bohemia</span><span class="p">,</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;mc_founders_per_1000_eb&quot;</span><span class="p">],</span>
+                                     <span class="n">df</span><span class="p">[</span><span class="s2">&quot;mm_members_1890_per_1000_eb&quot;</span><span class="p">])</span> <span class="o">*</span> <span class="mi">1000</span>
+    <span class="k">return</span> <span class="n">df</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-run_intensities-okres_table">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">okres_table</span><span class="p">(</span><span class="n">leg</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>One row per pooled census okres (key <code>census_okres_id</code>).</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 118–131 (14 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">okres_table</span><span class="p">(</span><span class="n">leg</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;One row per pooled census okres (key ``census_okres_id``).&quot;&quot;&quot;</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">MATICE</span> <span class="o">/</span> <span class="s2">&quot;matice_okres.csv&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">)</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">m</span><span class="p">[[</span><span class="s2">&quot;okres_cs&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="n">MATICE_KEEP</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">xw</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">GEO</span> <span class="o">/</span> <span class="s2">&quot;okres_census_crosswalk.csv&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;okres_id&quot;</span><span class="p">)[</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">]</span>
+    <span class="n">t</span> <span class="o">=</span> <span class="n">theatre_mean</span><span class="p">(</span><span class="s2">&quot;okres&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_id&quot;</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theatre_companies&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">t</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="n">t</span><span class="o">.</span><span class="n">index</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">xw</span><span class="p">))</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">by</span> <span class="o">=</span> <span class="n">leg</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">by</span><span class="o">.</span><span class="n">size</span><span class="p">()</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;deserters&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">by</span><span class="p">[</span><span class="s2">&quot;deserted&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires_located&quot;</span><span class="p">],</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;deserters_located&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires&quot;</span><span class="p">],</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;deserters&quot;</span><span class="p">]</span>
+    <span class="n">unmatched</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">leg</span><span class="p">[</span><span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">))</span> <span class="o">-</span> <span class="nb">set</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="ow">not</span> <span class="n">unmatched</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;legion births in no census okres: </span><span class="si">{</span><span class="nb">sorted</span><span class="p">(</span><span class="n">unmatched</span><span class="p">)[:</span><span class="mi">5</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="k">return</span> <span class="n">add_rates</span><span class="p">(</span><span class="n">own_matice</span><span class="p">(</span><span class="n">df</span><span class="p">))[[</span><span class="s2">&quot;okres_cs&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="n">OUT_COLS</span><span class="p">]</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-run_intensities-court_okres">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">court_okres</span><span class="p">(</span><span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span></pre>
+<div class="fndoc"><p>Court id → census okres id, from the district backbone's <code>okres_code</code>.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 134–139 (6 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">court_okres</span><span class="p">(</span><span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Court id → census okres id, from the district backbone&#39;s ``okres_code``.&quot;&quot;&quot;</span>
+    <span class="n">code</span> <span class="o">=</span> <span class="n">districts</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;-&quot;</span><span class="p">,</span> <span class="n">expand</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+    <span class="n">xw</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">GEO</span> <span class="o">/</span> <span class="s2">&quot;okres_census_crosswalk.csv&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;okres_id&quot;</span><span class="p">)[</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">]</span>
+    <span class="n">okres</span> <span class="o">=</span> <span class="p">(</span><span class="n">code</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="mi">1000</span> <span class="o">+</span> <span class="n">code</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">xw</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">(</span><span class="n">okres</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span> <span class="n">index</span><span class="o">=</span><span class="n">districts</span><span class="p">[</span><span class="s2">&quot;court_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">))</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-run_intensities-court_table">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">court_table</span><span class="p">(</span><span class="n">leg</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>One row per census court (key <code>census_court_id</code>); legionnaires scaled to the okres
+total by the share of the okres's births that name a court.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 142–168 (27 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">court_table</span><span class="p">(</span><span class="n">leg</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;One row per census court (key ``census_court_id``); legionnaires scaled to the okres</span>
+<span class="sd">    total by the share of the okres&#39;s births that name a court.&quot;&quot;&quot;</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">MATICE</span> <span class="o">/</span> <span class="s2">&quot;matice_court.csv&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;census_court_id&quot;</span><span class="p">)</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">m</span><span class="p">[[</span><span class="s2">&quot;gerichtsbezirk_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_cs&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="n">MATICE_KEEP</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">districts</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">GEO</span> <span class="o">/</span> <span class="s2">&quot;districts_1910.parquet&quot;</span><span class="p">)</span>
+    <span class="n">pool</span> <span class="o">=</span> <span class="n">mt</span><span class="o">.</span><span class="n">census_court_pool</span><span class="p">(</span><span class="n">districts</span><span class="p">,</span> <span class="nb">set</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">))</span>
+    <span class="n">t</span> <span class="o">=</span> <span class="n">theatre_mean</span><span class="p">(</span><span class="s2">&quot;court&quot;</span><span class="p">,</span> <span class="s2">&quot;court_id&quot;</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theatre_companies&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">t</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="n">t</span><span class="o">.</span><span class="n">index</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">pool</span><span class="p">))</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+
+    <span class="n">leg</span> <span class="o">=</span> <span class="n">leg</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">census_court_id</span><span class="o">=</span><span class="n">leg</span><span class="p">[</span><span class="s2">&quot;birth_court_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span>
+        <span class="k">lambda</span> <span class="n">c</span><span class="p">:</span> <span class="n">pool</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">c</span><span class="p">))</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">c</span><span class="p">)</span> <span class="k">else</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">))</span>
+    <span class="n">located</span> <span class="o">=</span> <span class="n">leg</span><span class="p">[</span><span class="n">leg</span><span class="p">[</span><span class="s2">&quot;census_court_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()]</span>
+    <span class="n">by</span> <span class="o">=</span> <span class="n">located</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;census_court_id&quot;</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires_located&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">by</span><span class="o">.</span><span class="n">size</span><span class="p">()</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;deserters_located&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">by</span><span class="p">[</span><span class="s2">&quot;deserted&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+    <span class="n">okres_of</span> <span class="o">=</span> <span class="n">court_okres</span><span class="p">(</span><span class="n">districts</span><span class="p">)</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="n">level</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">first</span><span class="p">()</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">okres_of</span><span class="p">)</span>
+    <span class="n">all_births</span> <span class="o">=</span> <span class="n">leg</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">size</span><span class="p">()</span>
+    <span class="n">located_births</span> <span class="o">=</span> <span class="n">located</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">size</span><span class="p">()</span>
+    <span class="n">scale</span> <span class="o">=</span> <span class="p">(</span><span class="n">all_births</span> <span class="o">/</span> <span class="n">located_births</span><span class="p">)</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">()</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legion_scale&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">scale</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires_located&quot;</span><span class="p">]</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">nan_to_num</span><span class="p">(</span><span class="n">scale</span><span class="p">,</span> <span class="n">nan</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;court: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">located</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">leg</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> births name a court &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">located</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="n">leg</span><span class="p">)</span><span class="si">:</span><span class="s2">.1%</span><span class="si">}</span><span class="s2">); </span><span class="si">{</span><span class="n">leg</span><span class="p">[</span><span class="s1">&#39;census_court_id&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">isna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> scaled in&quot;</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">add_rates</span><span class="p">(</span><span class="n">own_matice</span><span class="p">(</span><span class="n">df</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">out</span><span class="p">[[</span><span class="s2">&quot;gerichtsbezirk_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;census_okres_id&quot;</span><span class="p">,</span> <span class="s2">&quot;legion_scale&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="n">OUT_COLS</span><span class="p">]</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-run_intensities-legion_settlements">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">legion_settlements</span><span class="p">(</span><span class="n">leg</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">s</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span></pre>
+<div class="fndoc"><p>Each located legionnaire's <code>settlement_id</code>: the settlement at the birth's
+coordinates, the one of the same name where several share them.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 171–185 (15 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">legion_settlements</span><span class="p">(</span><span class="n">leg</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">s</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Each located legionnaire&#39;s ``settlement_id``: the settlement at the birth&#39;s</span>
+<span class="sd">    coordinates, the one of the same name where several share them.&quot;&quot;&quot;</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">pt</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">s</span><span class="p">[</span><span class="s2">&quot;lat&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="mi">5</span><span class="p">),</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;lon&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="mi">5</span><span class="p">))))</span>
+    <span class="n">by_pt</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;pt&quot;</span><span class="p">)[</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span>
+    <span class="n">by_pt_name</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">s</span><span class="p">[</span><span class="s2">&quot;pt&quot;</span><span class="p">],</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;cs_name&quot;</span><span class="p">]),</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">]))</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">one</span><span class="p">(</span><span class="n">lat</span><span class="p">,</span> <span class="n">lon</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
+        <span class="n">ids</span> <span class="o">=</span> <span class="n">by_pt</span><span class="o">.</span><span class="n">get</span><span class="p">((</span><span class="nb">round</span><span class="p">(</span><span class="n">lat</span><span class="p">,</span> <span class="mi">5</span><span class="p">),</span> <span class="nb">round</span><span class="p">(</span><span class="n">lon</span><span class="p">,</span> <span class="mi">5</span><span class="p">)))</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">ids</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="k">return</span> <span class="n">ids</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">ids</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="n">by_pt_name</span><span class="o">.</span><span class="n">get</span><span class="p">(((</span><span class="nb">round</span><span class="p">(</span><span class="n">lat</span><span class="p">,</span> <span class="mi">5</span><span class="p">),</span> <span class="nb">round</span><span class="p">(</span><span class="n">lon</span><span class="p">,</span> <span class="mi">5</span><span class="p">)),</span> <span class="n">name</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">([</span><span class="n">one</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">n</span><span class="p">)</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="k">else</span> <span class="kc">None</span> <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">n</span> <span class="ow">in</span>
+                      <span class="nb">zip</span><span class="p">(</span><span class="n">leg</span><span class="p">[</span><span class="s2">&quot;birth_lat&quot;</span><span class="p">],</span> <span class="n">leg</span><span class="p">[</span><span class="s2">&quot;birth_lon&quot;</span><span class="p">],</span> <span class="n">leg</span><span class="p">[</span><span class="s2">&quot;birth_municipality_cs&quot;</span><span class="p">])],</span>
+                     <span class="n">index</span><span class="o">=</span><span class="n">leg</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-run_intensities-settlement_table">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">settlement_table</span><span class="p">(</span><span class="n">leg</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>One row per 1910 settlement with anything to draw (key <code>settlement_id</code>): counts,
+and the shrunk desertion rate where <code>MIN_LEGIONNAIRES</code> are born there.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 188–216 (29 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">settlement_table</span><span class="p">(</span><span class="n">leg</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;One row per 1910 settlement with anything to draw (key ``settlement_id``): counts,</span>
+<span class="sd">    and the shrunk desertion rate where ``MIN_LEGIONNAIRES`` are born there.&quot;&quot;&quot;</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">GEO</span> <span class="o">/</span> <span class="s2">&quot;settlements_1910.parquet&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">s</span><span class="p">[[</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">,</span> <span class="s2">&quot;cs_name&quot;</span><span class="p">,</span> <span class="s2">&quot;land&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_id&quot;</span><span class="p">,</span> <span class="s2">&quot;court_id&quot;</span><span class="p">,</span> <span class="s2">&quot;lat&quot;</span><span class="p">,</span> <span class="s2">&quot;lon&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="s2">&quot;settlement_row&quot;</span>          <span class="c1"># the theatre panel&#39;s key (row position)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theatre_companies&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">theatre_mean</span><span class="p">(</span><span class="s2">&quot;settlement&quot;</span><span class="p">,</span> <span class="s2">&quot;settlement_row&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">)</span>
+
+    <span class="n">e</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">MATICE</span> <span class="o">/</span> <span class="s2">&quot;matice_entries.csv&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">},</span>
+                    <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">na_values</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;&quot;</span><span class="p">])</span>
+    <span class="n">e</span><span class="p">[</span><span class="s2">&quot;is_corporate&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">e</span><span class="p">[</span><span class="s2">&quot;is_corporate&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">str</span><span class="p">)</span> <span class="o">==</span> <span class="s2">&quot;True&quot;</span>
+    <span class="n">e</span><span class="p">[</span><span class="s2">&quot;member_no&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_numeric</span><span class="p">(</span><span class="n">e</span><span class="p">[</span><span class="s2">&quot;member_no&quot;</span><span class="p">],</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;coerce&quot;</span><span class="p">)</span>
+    <span class="n">e</span><span class="p">[</span><span class="s2">&quot;place&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">e</span><span class="p">[</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">e</span><span class="p">[</span><span class="s2">&quot;place_status&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;prague&quot;</span><span class="p">,</span> <span class="s2">&quot;praha:1&quot;</span><span class="p">)</span>
+    <span class="n">groups</span> <span class="o">=</span> <span class="n">mt</span><span class="o">.</span><span class="n">measure_groups</span><span class="p">(</span><span class="n">e</span><span class="p">[</span><span class="n">e</span><span class="p">[</span><span class="s2">&quot;place&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()])</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;mc_founders&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">groups</span><span class="p">[</span><span class="s2">&quot;mc_founders&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;place&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">size</span><span class="p">()</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;mm_members_1890&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">groups</span><span class="p">[</span><span class="s2">&quot;mm_members_1890&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;place&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">size</span><span class="p">()</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;matice_members&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;land&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;Böhmen&quot;</span><span class="p">,</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;mc_founders&quot;</span><span class="p">],</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;mm_members_1890&quot;</span><span class="p">])</span>
+
+    <span class="n">sid</span> <span class="o">=</span> <span class="n">legion_settlements</span><span class="p">(</span><span class="n">leg</span><span class="p">,</span> <span class="n">s</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;settlement: </span><span class="si">{</span><span class="n">sid</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">leg</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> births placed at a settlement &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">sid</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="si">:</span><span class="s2">.1%</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+    <span class="n">by</span> <span class="o">=</span> <span class="n">leg</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">settlement_id</span><span class="o">=</span><span class="n">sid</span><span class="p">)</span><span class="o">.</span><span class="n">dropna</span><span class="p">(</span><span class="n">subset</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">by</span><span class="o">.</span><span class="n">size</span><span class="p">()</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;deserters&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">by</span><span class="p">[</span><span class="s2">&quot;deserted&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+    <span class="n">shrunk</span> <span class="o">=</span> <span class="mi">1000</span> <span class="o">*</span> <span class="n">mt</span><span class="o">.</span><span class="n">eb_rate</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;deserters&quot;</span><span class="p">],</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires&quot;</span><span class="p">])</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;desertion_per_1000_leg&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">shrunk</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires&quot;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">MIN_LEGIONNAIRES</span><span class="p">)</span>
+    <span class="n">keep</span> <span class="o">=</span> <span class="p">(</span><span class="n">df</span><span class="p">[[</span><span class="s2">&quot;matice_members&quot;</span><span class="p">,</span> <span class="s2">&quot;theatre_companies&quot;</span><span class="p">,</span> <span class="s2">&quot;legionnaires&quot;</span><span class="p">]]</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">df</span><span class="p">[</span><span class="n">keep</span> <span class="o">&amp;</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;lat&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()]</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-run_intensities-main">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 219–233 (15 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">OUT</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">leg</span> <span class="o">=</span> <span class="n">load_legion</span><span class="p">()</span>
+    <span class="n">tables</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;okres&quot;</span><span class="p">:</span> <span class="n">okres_table</span><span class="p">(</span><span class="n">leg</span><span class="p">),</span> <span class="s2">&quot;court&quot;</span><span class="p">:</span> <span class="n">court_table</span><span class="p">(</span><span class="n">leg</span><span class="p">),</span>
+              <span class="s2">&quot;settlement&quot;</span><span class="p">:</span> <span class="n">settlement_table</span><span class="p">(</span><span class="n">leg</span><span class="p">)}</span>
+    <span class="k">for</span> <span class="n">level</span><span class="p">,</span> <span class="n">df</span> <span class="ow">in</span> <span class="n">tables</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">assert</span> <span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="o">.</span><span class="n">is_unique</span> <span class="ow">and</span> <span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">all</span><span class="p">(),</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">level</span><span class="si">}</span><span class="s2">: key&quot;</span>
+        <span class="n">df</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">OUT</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;intensity_</span><span class="si">{</span><span class="n">level</span><span class="si">}</span><span class="s2">.csv&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;wrote intensity_</span><span class="si">{</span><span class="n">level</span><span class="si">}</span><span class="s2">.csv: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> rows&quot;</span><span class="p">)</span>
+    <span class="n">rates</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;matice_per_1000&quot;</span><span class="p">,</span> <span class="s2">&quot;theatre_per_1000&quot;</span><span class="p">,</span> <span class="s2">&quot;legion_per_1000&quot;</span><span class="p">,</span>
+             <span class="s2">&quot;legion_per_1000_czech&quot;</span><span class="p">,</span> <span class="s2">&quot;desertion_per_1000_leg&quot;</span><span class="p">]</span>
+    <span class="k">for</span> <span class="n">level</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;okres&quot;</span><span class="p">,</span> <span class="s2">&quot;court&quot;</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="si">{</span><span class="n">level</span><span class="si">}</span><span class="s2">: Spearman across units</span><span class="se">\n</span><span class="s2">&quot;</span>
+              <span class="o">+</span> <span class="n">tables</span><span class="p">[</span><span class="n">level</span><span class="p">][</span><span class="n">rates</span><span class="p">]</span><span class="o">.</span><span class="n">corr</span><span class="p">(</span><span class="n">method</span><span class="o">=</span><span class="s2">&quot;spearman&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+    <span class="k">return</span> <span class="mi">0</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-reference_tools-places-run_intensities-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-run_intensities-GEO"><pre class="sig">GEO<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;data&#39;</span> <span class="o">/</span> <span class="s1">&#39;final&#39;</span> <span class="o">/</span> <span class="s1">&#39;geo&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-run_intensities-LEGION"><pre class="sig">LEGION<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;data&#39;</span> <span class="o">/</span> <span class="s1">&#39;final&#39;</span> <span class="o">/</span> <span class="s1">&#39;persons&#39;</span> <span class="o">/</span> <span class="s1">&#39;legionnaires_clean.parquet&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-run_intensities-MATICE"><pre class="sig">MATICE<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;data&#39;</span> <span class="o">/</span> <span class="s1">&#39;interim&#39;</span> <span class="o">/</span> <span class="s1">&#39;matice&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-run_intensities-THEATRE"><pre class="sig">THEATRE<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;data&#39;</span> <span class="o">/</span> <span class="s1">&#39;interim&#39;</span> <span class="o">/</span> <span class="s1">&#39;theatre&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-run_intensities-OUT"><pre class="sig">OUT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;data&#39;</span> <span class="o">/</span> <span class="s1">&#39;interim&#39;</span> <span class="o">/</span> <span class="s1">&#39;intensity&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-run_intensities-THEATRE_WINDOW"><pre class="sig">THEATRE_WINDOW<span class="kind">tuple · 2 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">(</span><span class="mi">1880</span><span class="p">,</span> <span class="mi">1913</span><span class="p">)</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-run_intensities-MIN_CZECH_SPEAKERS"><pre class="sig">MIN_CZECH_SPEAKERS<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">1000</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-run_intensities-MIN_LEGIONNAIRES"><pre class="sig">MIN_LEGIONNAIRES<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">20</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-run_intensities-LEGION_COLS"><pre class="sig">LEGION_COLS<span class="kind">list · 7 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">[</span><span class="s1">&#39;legion_id&#39;</span><span class="p">,</span> <span class="s1">&#39;birth_census_okres_id&#39;</span><span class="p">,</span> <span class="s1">&#39;birth_court_id&#39;</span><span class="p">,</span> <span class="s1">&#39;birth_lat&#39;</span><span class="p">,</span> <span class="s1">&#39;birth_lon&#39;</span><span class="p">,</span> <span class="s1">&#39;birth_municipality_cs&#39;</span><span class="p">,</span> <span class="s1">&#39;exit_D&#39;</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-run_intensities-MATICE_KEEP"><pre class="sig">MATICE_KEEP<span class="kind">list · 9 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">[</span><span class="s1">&#39;land&#39;</span><span class="p">,</span> <span class="s1">&#39;pop_total&#39;</span><span class="p">,</span> <span class="s1">&#39;lang_czech&#39;</span><span class="p">,</span> <span class="s1">&#39;lang_czech_share&#39;</span><span class="p">,</span> <span class="s1">&#39;mc_founders&#39;</span><span class="p">,</span> <span class="s1">&#39;mm_members_1890&#39;</span><span class="p">,</span> <span class="s1">&#39;mc_founders_per_1000_eb&#39;</span><span class="p">,</span> <span class="s1">&#39;mm_members_1890_per_1000_eb&#39;</span><span class="p">,</span> <span class="s1">&#39;matice_own_z&#39;</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-run_intensities-OUT_COLS"><pre class="sig">OUT_COLS<span class="kind">list · 15 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">[</span><span class="s1">&#39;land&#39;</span><span class="p">,</span> <span class="s1">&#39;pop_total&#39;</span><span class="p">,</span> <span class="s1">&#39;lang_czech&#39;</span><span class="p">,</span> <span class="s1">&#39;lang_czech_share&#39;</span><span class="p">,</span> <span class="s1">&#39;matice_members&#39;</span><span class="p">,</span> <span class="s1">&#39;matice_per_1000&#39;</span><span class="p">,</span> <span class="s1">&#39;matice_own_z&#39;</span><span class="p">,</span> <span class="s1">&#39;theatre_companies&#39;</span><span class="p">,</span> <span class="s1">&#39;theatre_per_1000&#39;</span><span class="p">,</span> <span class="s1">&#39;legionnaires&#39;</span><span class="p">,</span> <span class="s1">&#39;legionnaires_located&#39;</span><span class="p">,</span> <span class="s1">&#39;deserters_located&#39;</span><span class="p">,</span> <span class="s1">&#39;legion_per_1000&#39;</span><span class="p">,</span> <span class="s1">&#39;legion_per_1000_czech&#39;</span><span class="p">,</span> <span class="s1">&#39;desertion_per_1000_leg&#39;</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/reference_tools/places/run_intensities.py · 237 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span></pre></div></td><td class="code"><div><pre><span></span><span class="ch">#!/usr/bin/env python3</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Five intensities side by side, per 1,000, at three levels: political okres, court</span>
+<span class="sd">district, settlement.  Provisional (D-163): every definition here is the simplest one</span>
+<span class="sd">that can be drawn, and each will move when its measure is ruled on.</span>
+
+<span class="sd">``matice``</span>
+<span class="sd">    The unit&#39;s own land&#39;s society, per 1,000 inhabitants, shrunk (Marshall 1991):</span>
+<span class="sd">    Matice česká founders in Bohemia, Matice moravská members of 1890 in Moravia and</span>
+<span class="sd">    Silesia (D-161).  ``matice_own_z`` standardises it within each society&#39;s territory,</span>
+<span class="sd">    since a 52-zl. founder and a Moravian member are not the same act.</span>
+<span class="sd">``theatre``</span>
+<span class="sd">    Czech amateur-theatre companies active in a year (certain), averaged over</span>
+<span class="sd">    ``THEATRE_WINDOW``, per 1,000 inhabitants.</span>
+<span class="sd">``legion``</span>
+<span class="sd">    Legionnaires born in the unit, per 1,000 inhabitants and per 1,000 Czech speakers</span>
+<span class="sd">    (Umgangssprache) of 1910; the latter is left out where fewer than</span>
+<span class="sd">    ``MIN_CZECH_SPEAKERS`` speak Czech.</span>
+<span class="sd">``desertion``</span>
+<span class="sd">    Legionnaires leaving by desertion (exit code D) per 1,000 legionnaires born in the</span>
+<span class="sd">    unit, shrunk; left out under ``MIN_LEGIONNAIRES``.</span>
+
+<span class="sd">Denominators are the 1910 census: the pooled okres (148 units, D-18) and the court census</span>
+<span class="sd">(330 units, the nine statutory-city courts pooled with their twin).  Only 57 % of the</span>
+<span class="sd">Czech-lands births name a court, so a court&#39;s legionnaires are scaled up by its okres&#39;s</span>
+<span class="sd">ratio of all births to court-located births — i.e. a birth known only to its okres is</span>
+<span class="sd">assumed to fall among the okres&#39;s courts as the located ones do.  The desertion rate is</span>
+<span class="sd">a ratio of located births and needs no scaling.</span>
+
+<span class="sd">There is no settlement population in the repo yet (the 1910 register&#39;s full run will</span>
+<span class="sd">carry it), so the settlement table holds counts, plus the desertion rate, whose</span>
+<span class="sd">denominator is the legionnaires themselves.</span>
+
+<span class="sd">Writes ``data/interim/intensity/intensity_{okres,court,settlement}.csv``.</span>
+
+<span class="sd">Usage::</span>
+
+<span class="sd">    python utils/reference_tools/places/run_intensities.py</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">))</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing</span><span class="w"> </span><span class="kn">import</span> <span class="n">matice</span> <span class="k">as</span> <span class="n">mt</span>                                  <span class="c1"># noqa: E402</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;0.1.0&quot;</span>
+
+<span class="n">GEO</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;data&quot;</span> <span class="o">/</span> <span class="s2">&quot;final&quot;</span> <span class="o">/</span> <span class="s2">&quot;geo&quot;</span>
+<span class="n">LEGION</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;data&quot;</span> <span class="o">/</span> <span class="s2">&quot;final&quot;</span> <span class="o">/</span> <span class="s2">&quot;persons&quot;</span> <span class="o">/</span> <span class="s2">&quot;legionnaires_clean.parquet&quot;</span>
+<span class="n">MATICE</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;data&quot;</span> <span class="o">/</span> <span class="s2">&quot;interim&quot;</span> <span class="o">/</span> <span class="s2">&quot;matice&quot;</span>
+<span class="n">THEATRE</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;data&quot;</span> <span class="o">/</span> <span class="s2">&quot;interim&quot;</span> <span class="o">/</span> <span class="s2">&quot;theatre&quot;</span>
+<span class="n">OUT</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;data&quot;</span> <span class="o">/</span> <span class="s2">&quot;interim&quot;</span> <span class="o">/</span> <span class="s2">&quot;intensity&quot;</span>
+
+<span class="c1">#: The theatre years averaged: from the society boom of the 1880s to the eve of the war.</span>
+<span class="n">THEATRE_WINDOW</span> <span class="o">=</span> <span class="p">(</span><span class="mi">1880</span><span class="p">,</span> <span class="mi">1913</span><span class="p">)</span>
+<span class="c1">#: Below this many Czech speakers a rate per Czech speaker is noise (Aš has 5).</span>
+<span class="n">MIN_CZECH_SPEAKERS</span> <span class="o">=</span> <span class="mi">1000</span>
+<span class="c1">#: Below this many legionnaires a desertion rate is not drawn.</span>
+<span class="n">MIN_LEGIONNAIRES</span> <span class="o">=</span> <span class="mi">20</span>
+<span class="n">LEGION_COLS</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;legion_id&quot;</span><span class="p">,</span> <span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">,</span> <span class="s2">&quot;birth_court_id&quot;</span><span class="p">,</span> <span class="s2">&quot;birth_lat&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;birth_lon&quot;</span><span class="p">,</span> <span class="s2">&quot;birth_municipality_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;exit_D&quot;</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">load_legion</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Legionnaires born in the Czech lands (a census okres), with ``deserted`` as 0/1.&quot;&quot;&quot;</span>
+    <span class="n">leg</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">LEGION</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="n">LEGION_COLS</span><span class="p">)</span>
+    <span class="n">leg</span> <span class="o">=</span> <span class="n">leg</span><span class="p">[</span><span class="n">leg</span><span class="p">[</span><span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">leg</span><span class="p">[</span><span class="s2">&quot;deserted&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">leg</span><span class="p">[</span><span class="s2">&quot;exit_D&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="kc">False</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">leg</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">theatre_mean</span><span class="p">(</span><span class="n">level</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">key</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Companies active per year (certain), averaged over ``THEATRE_WINDOW``, by ``key``.&quot;&quot;&quot;</span>
+    <span class="n">t</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">THEATRE</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">level</span><span class="si">}</span><span class="s2">_year_panel.parquet&quot;</span><span class="p">,</span>
+                        <span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="n">key</span><span class="p">,</span> <span class="s2">&quot;year&quot;</span><span class="p">,</span> <span class="s2">&quot;ensembles_active_certain&quot;</span><span class="p">])</span>
+    <span class="n">lo</span><span class="p">,</span> <span class="n">hi</span> <span class="o">=</span> <span class="n">THEATRE_WINDOW</span>
+    <span class="n">t</span> <span class="o">=</span> <span class="n">t</span><span class="p">[</span><span class="n">t</span><span class="p">[</span><span class="s2">&quot;year&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">between</span><span class="p">(</span><span class="n">lo</span><span class="p">,</span> <span class="n">hi</span><span class="p">)]</span>
+    <span class="k">return</span> <span class="n">t</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="n">key</span><span class="p">)[</span><span class="s2">&quot;ensembles_active_certain&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="o">/</span> <span class="p">(</span><span class="n">hi</span> <span class="o">-</span> <span class="n">lo</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">add_rates</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Rates per 1,000 from the counts and the census columns ``pop_total``/``lang_czech``.&quot;&quot;&quot;</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theatre_per_1000&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">1000</span> <span class="o">*</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theatre_companies&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;pop_total&quot;</span><span class="p">]</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legion_per_1000&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="mi">1000</span> <span class="o">*</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;pop_total&quot;</span><span class="p">]</span>
+    <span class="n">czech_ok</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;lang_czech&quot;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">MIN_CZECH_SPEAKERS</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legion_per_1000_czech&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="mi">1000</span> <span class="o">*</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires&quot;</span><span class="p">]</span> <span class="o">/</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;lang_czech&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">czech_ok</span><span class="p">)</span>
+    <span class="n">shrunk</span> <span class="o">=</span> <span class="mi">1000</span> <span class="o">*</span> <span class="n">mt</span><span class="o">.</span><span class="n">eb_rate</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;deserters_located&quot;</span><span class="p">],</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires_located&quot;</span><span class="p">])</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;desertion_per_1000_leg&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">shrunk</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires_located&quot;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">MIN_LEGIONNAIRES</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">df</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">own_matice</span><span class="p">(</span><span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``matice_per_1000``: the land&#39;s own society&#39;s shrunk rate (D-161).&quot;&quot;&quot;</span>
+    <span class="n">bohemia</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;land&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;Böhmen&quot;</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;matice_members&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">bohemia</span><span class="p">,</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;mc_founders&quot;</span><span class="p">],</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;mm_members_1890&quot;</span><span class="p">])</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;matice_per_1000&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">bohemia</span><span class="p">,</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;mc_founders_per_1000_eb&quot;</span><span class="p">],</span>
+                                     <span class="n">df</span><span class="p">[</span><span class="s2">&quot;mm_members_1890_per_1000_eb&quot;</span><span class="p">])</span> <span class="o">*</span> <span class="mi">1000</span>
+    <span class="k">return</span> <span class="n">df</span>
+
+
+<span class="n">MATICE_KEEP</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;land&quot;</span><span class="p">,</span> <span class="s2">&quot;pop_total&quot;</span><span class="p">,</span> <span class="s2">&quot;lang_czech&quot;</span><span class="p">,</span> <span class="s2">&quot;lang_czech_share&quot;</span><span class="p">,</span> <span class="s2">&quot;mc_founders&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;mm_members_1890&quot;</span><span class="p">,</span> <span class="s2">&quot;mc_founders_per_1000_eb&quot;</span><span class="p">,</span> <span class="s2">&quot;mm_members_1890_per_1000_eb&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;matice_own_z&quot;</span><span class="p">]</span>
+<span class="n">OUT_COLS</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;land&quot;</span><span class="p">,</span> <span class="s2">&quot;pop_total&quot;</span><span class="p">,</span> <span class="s2">&quot;lang_czech&quot;</span><span class="p">,</span> <span class="s2">&quot;lang_czech_share&quot;</span><span class="p">,</span> <span class="s2">&quot;matice_members&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;matice_per_1000&quot;</span><span class="p">,</span> <span class="s2">&quot;matice_own_z&quot;</span><span class="p">,</span> <span class="s2">&quot;theatre_companies&quot;</span><span class="p">,</span> <span class="s2">&quot;theatre_per_1000&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;legionnaires&quot;</span><span class="p">,</span> <span class="s2">&quot;legionnaires_located&quot;</span><span class="p">,</span> <span class="s2">&quot;deserters_located&quot;</span><span class="p">,</span> <span class="s2">&quot;legion_per_1000&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;legion_per_1000_czech&quot;</span><span class="p">,</span> <span class="s2">&quot;desertion_per_1000_leg&quot;</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">okres_table</span><span class="p">(</span><span class="n">leg</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;One row per pooled census okres (key ``census_okres_id``).&quot;&quot;&quot;</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">MATICE</span> <span class="o">/</span> <span class="s2">&quot;matice_okres.csv&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">)</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">m</span><span class="p">[[</span><span class="s2">&quot;okres_cs&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="n">MATICE_KEEP</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">xw</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">GEO</span> <span class="o">/</span> <span class="s2">&quot;okres_census_crosswalk.csv&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;okres_id&quot;</span><span class="p">)[</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">]</span>
+    <span class="n">t</span> <span class="o">=</span> <span class="n">theatre_mean</span><span class="p">(</span><span class="s2">&quot;okres&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_id&quot;</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theatre_companies&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">t</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="n">t</span><span class="o">.</span><span class="n">index</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">xw</span><span class="p">))</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">by</span> <span class="o">=</span> <span class="n">leg</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">by</span><span class="o">.</span><span class="n">size</span><span class="p">()</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;deserters&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">by</span><span class="p">[</span><span class="s2">&quot;deserted&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires_located&quot;</span><span class="p">],</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;deserters_located&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires&quot;</span><span class="p">],</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;deserters&quot;</span><span class="p">]</span>
+    <span class="n">unmatched</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">leg</span><span class="p">[</span><span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">))</span> <span class="o">-</span> <span class="nb">set</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="ow">not</span> <span class="n">unmatched</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;legion births in no census okres: </span><span class="si">{</span><span class="nb">sorted</span><span class="p">(</span><span class="n">unmatched</span><span class="p">)[:</span><span class="mi">5</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="k">return</span> <span class="n">add_rates</span><span class="p">(</span><span class="n">own_matice</span><span class="p">(</span><span class="n">df</span><span class="p">))[[</span><span class="s2">&quot;okres_cs&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="n">OUT_COLS</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">court_okres</span><span class="p">(</span><span class="n">districts</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Court id → census okres id, from the district backbone&#39;s ``okres_code``.&quot;&quot;&quot;</span>
+    <span class="n">code</span> <span class="o">=</span> <span class="n">districts</span><span class="p">[</span><span class="s2">&quot;okres_code&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;-&quot;</span><span class="p">,</span> <span class="n">expand</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+    <span class="n">xw</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">GEO</span> <span class="o">/</span> <span class="s2">&quot;okres_census_crosswalk.csv&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;okres_id&quot;</span><span class="p">)[</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">]</span>
+    <span class="n">okres</span> <span class="o">=</span> <span class="p">(</span><span class="n">code</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="mi">1000</span> <span class="o">+</span> <span class="n">code</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">xw</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">(</span><span class="n">okres</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span> <span class="n">index</span><span class="o">=</span><span class="n">districts</span><span class="p">[</span><span class="s2">&quot;court_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">court_table</span><span class="p">(</span><span class="n">leg</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;One row per census court (key ``census_court_id``); legionnaires scaled to the okres</span>
+<span class="sd">    total by the share of the okres&#39;s births that name a court.&quot;&quot;&quot;</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">MATICE</span> <span class="o">/</span> <span class="s2">&quot;matice_court.csv&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;census_court_id&quot;</span><span class="p">)</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">m</span><span class="p">[[</span><span class="s2">&quot;gerichtsbezirk_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_cs&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="n">MATICE_KEEP</span><span class="p">]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">districts</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">GEO</span> <span class="o">/</span> <span class="s2">&quot;districts_1910.parquet&quot;</span><span class="p">)</span>
+    <span class="n">pool</span> <span class="o">=</span> <span class="n">mt</span><span class="o">.</span><span class="n">census_court_pool</span><span class="p">(</span><span class="n">districts</span><span class="p">,</span> <span class="nb">set</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">))</span>
+    <span class="n">t</span> <span class="o">=</span> <span class="n">theatre_mean</span><span class="p">(</span><span class="s2">&quot;court&quot;</span><span class="p">,</span> <span class="s2">&quot;court_id&quot;</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theatre_companies&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">t</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="n">t</span><span class="o">.</span><span class="n">index</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">pool</span><span class="p">))</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+
+    <span class="n">leg</span> <span class="o">=</span> <span class="n">leg</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">census_court_id</span><span class="o">=</span><span class="n">leg</span><span class="p">[</span><span class="s2">&quot;birth_court_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span>
+        <span class="k">lambda</span> <span class="n">c</span><span class="p">:</span> <span class="n">pool</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">c</span><span class="p">))</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">c</span><span class="p">)</span> <span class="k">else</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">))</span>
+    <span class="n">located</span> <span class="o">=</span> <span class="n">leg</span><span class="p">[</span><span class="n">leg</span><span class="p">[</span><span class="s2">&quot;census_court_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()]</span>
+    <span class="n">by</span> <span class="o">=</span> <span class="n">located</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;census_court_id&quot;</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires_located&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">by</span><span class="o">.</span><span class="n">size</span><span class="p">()</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;deserters_located&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">by</span><span class="p">[</span><span class="s2">&quot;deserted&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+    <span class="n">okres_of</span> <span class="o">=</span> <span class="n">court_okres</span><span class="p">(</span><span class="n">districts</span><span class="p">)</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="n">level</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">first</span><span class="p">()</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">okres_of</span><span class="p">)</span>
+    <span class="n">all_births</span> <span class="o">=</span> <span class="n">leg</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">size</span><span class="p">()</span>
+    <span class="n">located_births</span> <span class="o">=</span> <span class="n">located</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;birth_census_okres_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">size</span><span class="p">()</span>
+    <span class="n">scale</span> <span class="o">=</span> <span class="p">(</span><span class="n">all_births</span> <span class="o">/</span> <span class="n">located_births</span><span class="p">)</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;census_okres_id&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">()</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legion_scale&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">scale</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires_located&quot;</span><span class="p">]</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">nan_to_num</span><span class="p">(</span><span class="n">scale</span><span class="p">,</span> <span class="n">nan</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;court: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">located</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">leg</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> births name a court &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">located</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="n">leg</span><span class="p">)</span><span class="si">:</span><span class="s2">.1%</span><span class="si">}</span><span class="s2">); </span><span class="si">{</span><span class="n">leg</span><span class="p">[</span><span class="s1">&#39;census_court_id&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">isna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> scaled in&quot;</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">add_rates</span><span class="p">(</span><span class="n">own_matice</span><span class="p">(</span><span class="n">df</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">out</span><span class="p">[[</span><span class="s2">&quot;gerichtsbezirk_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;census_okres_id&quot;</span><span class="p">,</span> <span class="s2">&quot;legion_scale&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="n">OUT_COLS</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">legion_settlements</span><span class="p">(</span><span class="n">leg</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">s</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Each located legionnaire&#39;s ``settlement_id``: the settlement at the birth&#39;s</span>
+<span class="sd">    coordinates, the one of the same name where several share them.&quot;&quot;&quot;</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">pt</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">s</span><span class="p">[</span><span class="s2">&quot;lat&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="mi">5</span><span class="p">),</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;lon&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="mi">5</span><span class="p">))))</span>
+    <span class="n">by_pt</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;pt&quot;</span><span class="p">)[</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span>
+    <span class="n">by_pt_name</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="nb">zip</span><span class="p">(</span><span class="n">s</span><span class="p">[</span><span class="s2">&quot;pt&quot;</span><span class="p">],</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;cs_name&quot;</span><span class="p">]),</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">]))</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">one</span><span class="p">(</span><span class="n">lat</span><span class="p">,</span> <span class="n">lon</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
+        <span class="n">ids</span> <span class="o">=</span> <span class="n">by_pt</span><span class="o">.</span><span class="n">get</span><span class="p">((</span><span class="nb">round</span><span class="p">(</span><span class="n">lat</span><span class="p">,</span> <span class="mi">5</span><span class="p">),</span> <span class="nb">round</span><span class="p">(</span><span class="n">lon</span><span class="p">,</span> <span class="mi">5</span><span class="p">)))</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">ids</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="k">return</span> <span class="n">ids</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">ids</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="n">by_pt_name</span><span class="o">.</span><span class="n">get</span><span class="p">(((</span><span class="nb">round</span><span class="p">(</span><span class="n">lat</span><span class="p">,</span> <span class="mi">5</span><span class="p">),</span> <span class="nb">round</span><span class="p">(</span><span class="n">lon</span><span class="p">,</span> <span class="mi">5</span><span class="p">)),</span> <span class="n">name</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">([</span><span class="n">one</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">n</span><span class="p">)</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="k">else</span> <span class="kc">None</span> <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">n</span> <span class="ow">in</span>
+                      <span class="nb">zip</span><span class="p">(</span><span class="n">leg</span><span class="p">[</span><span class="s2">&quot;birth_lat&quot;</span><span class="p">],</span> <span class="n">leg</span><span class="p">[</span><span class="s2">&quot;birth_lon&quot;</span><span class="p">],</span> <span class="n">leg</span><span class="p">[</span><span class="s2">&quot;birth_municipality_cs&quot;</span><span class="p">])],</span>
+                     <span class="n">index</span><span class="o">=</span><span class="n">leg</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">settlement_table</span><span class="p">(</span><span class="n">leg</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;One row per 1910 settlement with anything to draw (key ``settlement_id``): counts,</span>
+<span class="sd">    and the shrunk desertion rate where ``MIN_LEGIONNAIRES`` are born there.&quot;&quot;&quot;</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">GEO</span> <span class="o">/</span> <span class="s2">&quot;settlements_1910.parquet&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">s</span><span class="p">[[</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">,</span> <span class="s2">&quot;cs_name&quot;</span><span class="p">,</span> <span class="s2">&quot;land&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_id&quot;</span><span class="p">,</span> <span class="s2">&quot;court_id&quot;</span><span class="p">,</span> <span class="s2">&quot;lat&quot;</span><span class="p">,</span> <span class="s2">&quot;lon&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="s2">&quot;settlement_row&quot;</span>          <span class="c1"># the theatre panel&#39;s key (row position)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;theatre_companies&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">theatre_mean</span><span class="p">(</span><span class="s2">&quot;settlement&quot;</span><span class="p">,</span> <span class="s2">&quot;settlement_row&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">)</span>
+
+    <span class="n">e</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">MATICE</span> <span class="o">/</span> <span class="s2">&quot;matice_entries.csv&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">},</span>
+                    <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">na_values</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;&quot;</span><span class="p">])</span>
+    <span class="n">e</span><span class="p">[</span><span class="s2">&quot;is_corporate&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">e</span><span class="p">[</span><span class="s2">&quot;is_corporate&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">str</span><span class="p">)</span> <span class="o">==</span> <span class="s2">&quot;True&quot;</span>
+    <span class="n">e</span><span class="p">[</span><span class="s2">&quot;member_no&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_numeric</span><span class="p">(</span><span class="n">e</span><span class="p">[</span><span class="s2">&quot;member_no&quot;</span><span class="p">],</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;coerce&quot;</span><span class="p">)</span>
+    <span class="n">e</span><span class="p">[</span><span class="s2">&quot;place&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">e</span><span class="p">[</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">e</span><span class="p">[</span><span class="s2">&quot;place_status&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;prague&quot;</span><span class="p">,</span> <span class="s2">&quot;praha:1&quot;</span><span class="p">)</span>
+    <span class="n">groups</span> <span class="o">=</span> <span class="n">mt</span><span class="o">.</span><span class="n">measure_groups</span><span class="p">(</span><span class="n">e</span><span class="p">[</span><span class="n">e</span><span class="p">[</span><span class="s2">&quot;place&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()])</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;mc_founders&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">groups</span><span class="p">[</span><span class="s2">&quot;mc_founders&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;place&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">size</span><span class="p">()</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;mm_members_1890&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">groups</span><span class="p">[</span><span class="s2">&quot;mm_members_1890&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;place&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">size</span><span class="p">()</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;matice_members&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;land&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;Böhmen&quot;</span><span class="p">,</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;mc_founders&quot;</span><span class="p">],</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;mm_members_1890&quot;</span><span class="p">])</span>
+
+    <span class="n">sid</span> <span class="o">=</span> <span class="n">legion_settlements</span><span class="p">(</span><span class="n">leg</span><span class="p">,</span> <span class="n">s</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;settlement: </span><span class="si">{</span><span class="n">sid</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">leg</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> births placed at a settlement &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">sid</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="si">:</span><span class="s2">.1%</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+    <span class="n">by</span> <span class="o">=</span> <span class="n">leg</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">settlement_id</span><span class="o">=</span><span class="n">sid</span><span class="p">)</span><span class="o">.</span><span class="n">dropna</span><span class="p">(</span><span class="n">subset</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">by</span><span class="o">.</span><span class="n">size</span><span class="p">()</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;deserters&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">by</span><span class="p">[</span><span class="s2">&quot;deserted&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+    <span class="n">shrunk</span> <span class="o">=</span> <span class="mi">1000</span> <span class="o">*</span> <span class="n">mt</span><span class="o">.</span><span class="n">eb_rate</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;deserters&quot;</span><span class="p">],</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires&quot;</span><span class="p">])</span>
+    <span class="n">df</span><span class="p">[</span><span class="s2">&quot;desertion_per_1000_leg&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">shrunk</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;legionnaires&quot;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="n">MIN_LEGIONNAIRES</span><span class="p">)</span>
+    <span class="n">keep</span> <span class="o">=</span> <span class="p">(</span><span class="n">df</span><span class="p">[[</span><span class="s2">&quot;matice_members&quot;</span><span class="p">,</span> <span class="s2">&quot;theatre_companies&quot;</span><span class="p">,</span> <span class="s2">&quot;legionnaires&quot;</span><span class="p">]]</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">df</span><span class="p">[</span><span class="n">keep</span> <span class="o">&amp;</span> <span class="n">df</span><span class="p">[</span><span class="s2">&quot;lat&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">OUT</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">leg</span> <span class="o">=</span> <span class="n">load_legion</span><span class="p">()</span>
+    <span class="n">tables</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;okres&quot;</span><span class="p">:</span> <span class="n">okres_table</span><span class="p">(</span><span class="n">leg</span><span class="p">),</span> <span class="s2">&quot;court&quot;</span><span class="p">:</span> <span class="n">court_table</span><span class="p">(</span><span class="n">leg</span><span class="p">),</span>
+              <span class="s2">&quot;settlement&quot;</span><span class="p">:</span> <span class="n">settlement_table</span><span class="p">(</span><span class="n">leg</span><span class="p">)}</span>
+    <span class="k">for</span> <span class="n">level</span><span class="p">,</span> <span class="n">df</span> <span class="ow">in</span> <span class="n">tables</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">assert</span> <span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="o">.</span><span class="n">is_unique</span> <span class="ow">and</span> <span class="n">df</span><span class="o">.</span><span class="n">index</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span><span class="o">.</span><span class="n">all</span><span class="p">(),</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">level</span><span class="si">}</span><span class="s2">: key&quot;</span>
+        <span class="n">df</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">OUT</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;intensity_</span><span class="si">{</span><span class="n">level</span><span class="si">}</span><span class="s2">.csv&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;wrote intensity_</span><span class="si">{</span><span class="n">level</span><span class="si">}</span><span class="s2">.csv: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> rows&quot;</span><span class="p">)</span>
+    <span class="n">rates</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;matice_per_1000&quot;</span><span class="p">,</span> <span class="s2">&quot;theatre_per_1000&quot;</span><span class="p">,</span> <span class="s2">&quot;legion_per_1000&quot;</span><span class="p">,</span>
+             <span class="s2">&quot;legion_per_1000_czech&quot;</span><span class="p">,</span> <span class="s2">&quot;desertion_per_1000_leg&quot;</span><span class="p">]</span>
+    <span class="k">for</span> <span class="n">level</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;okres&quot;</span><span class="p">,</span> <span class="s2">&quot;court&quot;</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="si">{</span><span class="n">level</span><span class="si">}</span><span class="s2">: Spearman across units</span><span class="se">\n</span><span class="s2">&quot;</span>
+              <span class="o">+</span> <span class="n">tables</span><span class="p">[</span><span class="n">level</span><span class="p">][</span><span class="n">rates</span><span class="p">]</span><span class="o">.</span><span class="n">corr</span><span class="p">(</span><span class="n">method</span><span class="o">=</span><span class="s2">&quot;spearman&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+    <span class="k">return</span> <span class="mi">0</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>
