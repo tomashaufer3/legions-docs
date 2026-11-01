@@ -1,0 +1,485 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Does a glyph classifier trained on the author's clicks place German claims on the right glyph?</p><p class="tldr-facts"><b>Reference tools</b> · v0.1.0 · 138 lines · 3 public functions · 1 constant · used by nothing else · <code>utils/reference_tools/places/german_supervised_placement.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-reference_tools-places-german_supervised_placement-label_candidates">label_candidates</a><a class="chip" href="#fn-utils-reference_tools-places-german_supervised_placement-place_all">place_all</a><a class="chip" href="#fn-utils-reference_tools-places-german_supervised_placement-main">main</a><a class="chip const" href="#c-utils-reference_tools-places-german_supervised_placement-ROOT">ROOT</a></div>
+<h2>How it works</h2><p>Placement is what fails on German (the Czech-trained locator puts the box on the right glyph for 27 %
+of claims; <code>german_click_recall</code>). Two suspects are tried here, each against the clicks:</p>
+<ul>
+<li><strong>the entry mask.</strong> <code>locate_glyphs.entry_mask</code> forbids every candidate that has no entry (<code>muni</code>)
+  for every claim, and the entry finder tags only 23 % of the German clusters (70 % of the Czech):
+  where tagging is partial, most candidates can hold no claim at all. <code>--mask off</code> places without it;</li>
+<li><strong>the glyphness model.</strong> The Czech locator learns "what a glyph looks like" with no hand label; here
+  <code>locate_glyphs.fit_glyph_model</code> is fitted on the clicks instead (a candidate that holds a click is
+  a positive, every other candidate a negative), each page placed by a model trained on the other two.</li>
+</ul>
+<p>Measure, as in <code>german_click_recall</code>: of the gold claims, the share whose placed box holds a click
+of the claimed token (<code>on_claimed_token</code> over all claims). Optionally <code>--czech</code> also runs the
+Czech-trained locator on the same candidates for the baseline. Three pages are three folds: a
+direction, not a rate; these are the gold pages the route was tuned on.</p>
+<pre><code>python utils/reference_tools/places/german_supervised_placement.py [--ink 140] [--czech]
+</code></pre>
+<p>Read-only; outside <code>utils/lexikon_1910</code> so as not to change the route's code digests.</p>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-reference_tools-places-german_supervised_placement-label_candidates">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">label_candidates</span><span class="p">(</span><span class="n">cands</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">clicks</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">pad</span><span class="p">:</span> <span class="nb">float</span><span class="o">=</span><span class="mf">0.1</span><span class="p">,</span> <span class="n">narrow</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span></pre>
+<div class="fndoc"><p>1 where a candidate holds a click (and, with <code>narrow</code>, is no wider than that many line heights).</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 42–51 (10 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">42</span>
+<span class="normal">43</span>
+<span class="normal">44</span>
+<span class="normal">45</span>
+<span class="normal">46</span>
+<span class="normal">47</span>
+<span class="normal">48</span>
+<span class="normal">49</span>
+<span class="normal">50</span>
+<span class="normal">51</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">label_candidates</span><span class="p">(</span><span class="n">cands</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">clicks</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">pad</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.1</span><span class="p">,</span> <span class="n">narrow</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;1 where a candidate holds a click (and, with ``narrow``, is no wider than that many line heights).&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">locate_glyphs</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">lg</span>
+
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cands</span><span class="p">:</span>
+        <span class="n">held</span> <span class="o">=</span> <span class="nb">any</span><span class="p">(</span><span class="n">lg</span><span class="o">.</span><span class="n">inside</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">box</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">pad</span> <span class="o">*</span> <span class="n">c</span><span class="o">.</span><span class="n">lh</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="o">*</span><span class="n">_</span> <span class="ow">in</span> <span class="n">clicks</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">image</span><span class="p">,</span> <span class="p">[]))</span>
+        <span class="n">wide</span> <span class="o">=</span> <span class="n">narrow</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">box</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">-</span> <span class="n">c</span><span class="o">.</span><span class="n">box</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span> <span class="o">&gt;</span> <span class="n">narrow</span> <span class="o">*</span> <span class="n">c</span><span class="o">.</span><span class="n">lh</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">held</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">c</span><span class="o">.</span><span class="n">bracket</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">wide</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-german_supervised_placement-place_all">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">place_all</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">models</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">mask</span><span class="p">:</span> <span class="nb">bool</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span></pre>
+<div class="fndoc"><p><code>{section.key: (section, cands, placed)}</code> placing every claim by <code>models[page]</code> (glyph
+scores) with the entry mask on or off.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 54–66 (13 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">54</span>
+<span class="normal">55</span>
+<span class="normal">56</span>
+<span class="normal">57</span>
+<span class="normal">58</span>
+<span class="normal">59</span>
+<span class="normal">60</span>
+<span class="normal">61</span>
+<span class="normal">62</span>
+<span class="normal">63</span>
+<span class="normal">64</span>
+<span class="normal">65</span>
+<span class="normal">66</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">place_all</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">models</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">mask</span><span class="p">:</span> <span class="nb">bool</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``{section.key: (section, cands, placed)}`` placing every claim by ``models[page]`` (glyph</span>
+<span class="sd">    scores) with the entry mask on or off.&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">locate_glyphs</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">lg</span>
+
+    <span class="n">out</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">section</span><span class="p">,</span> <span class="n">cands</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">mask</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cands</span><span class="p">:</span>
+                <span class="n">c</span><span class="o">.</span><span class="n">muni</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">scores</span> <span class="o">=</span> <span class="n">models</span><span class="p">[</span><span class="n">section</span><span class="o">.</span><span class="n">scan</span><span class="p">]</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="n">cands</span><span class="p">)</span> <span class="k">if</span> <span class="n">cands</span> <span class="k">else</span> <span class="p">[]</span>
+        <span class="n">out</span><span class="p">[</span><span class="n">section</span><span class="o">.</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">section</span><span class="p">,</span> <span class="n">cands</span><span class="p">,</span> <span class="n">lg</span><span class="o">.</span><span class="n">place</span><span class="p">(</span><span class="n">cands</span><span class="p">,</span> <span class="n">section</span><span class="o">.</span><span class="n">claims</span><span class="p">,</span> <span class="n">scores</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-german_supervised_placement-main">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 69–127 (59 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--ink&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">140</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;ink threshold for the candidate step (route: 128)&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--rounds&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--czech&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;also run the Czech-trained locator as the baseline&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--pad&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">0.25</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+
+    <span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+    <span class="kn">import</span><span class="w"> </span><span class="nn">german_click_recall</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">rec</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">german_locator_trial</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">trial</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">locate_glyphs</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">lg</span>
+
+    <span class="n">orig</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">ink_mask</span>
+    <span class="n">lg</span><span class="o">.</span><span class="n">ink_mask</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">image</span><span class="p">,</span> <span class="n">threshold</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">ink</span><span class="p">:</span> <span class="n">orig</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">threshold</span><span class="p">)</span>
+    <span class="n">clicks</span> <span class="o">=</span> <span class="n">rec</span><span class="o">.</span><span class="n">load_clicks</span><span class="p">()</span>
+    <span class="n">pages</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">({</span><span class="n">p</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">clicks</span><span class="o">.</span><span class="n">values</span><span class="p">()</span> <span class="k">for</span> <span class="n">_x</span><span class="p">,</span> <span class="n">_y</span><span class="p">,</span> <span class="n">_t</span><span class="p">,</span> <span class="n">p</span><span class="p">,</span> <span class="n">_s</span> <span class="ow">in</span> <span class="n">v</span><span class="p">})</span>
+    <span class="n">sections</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">trial</span><span class="o">.</span><span class="n">german_sections</span><span class="p">()</span>
+    <span class="n">sections</span> <span class="o">=</span> <span class="p">[</span><span class="n">s</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">sections</span> <span class="k">if</span> <span class="n">s</span><span class="o">.</span><span class="n">kind</span> <span class="o">==</span> <span class="s2">&quot;offices&quot;</span> <span class="ow">and</span> <span class="n">s</span><span class="o">.</span><span class="n">scan</span> <span class="ow">in</span> <span class="n">pages</span><span class="p">]</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="p">[(</span><span class="n">s</span><span class="p">,</span> <span class="n">lg</span><span class="o">.</span><span class="n">section_candidates</span><span class="p">(</span><span class="n">s</span><span class="p">))</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">sections</span><span class="p">]</span>
+    <span class="n">columns</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">section</span><span class="p">,</span> <span class="n">_c</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+        <span class="n">columns</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">lg</span><span class="o">.</span><span class="n">section_text_columns</span><span class="p">(</span><span class="n">section</span><span class="p">))</span>
+    <span class="n">n_claims</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">claims</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">data</span><span class="p">)</span>
+    <span class="n">tagged</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">muni</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">for</span> <span class="n">_s</span><span class="p">,</span> <span class="n">cs</span> <span class="ow">in</span> <span class="n">data</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cs</span><span class="p">)</span> <span class="o">/</span> <span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">cs</span><span class="p">)</span> <span class="k">for</span> <span class="n">_s</span><span class="p">,</span> <span class="n">cs</span> <span class="ow">in</span> <span class="n">data</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;ink &lt; </span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">ink</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">data</span><span class="p">)</span><span class="si">}</span><span class="s2"> sections, </span><span class="si">{</span><span class="n">n_claims</span><span class="si">}</span><span class="s2"> claims, </span><span class="si">{</span><span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">c</span><span class="p">)</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">_s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">data</span><span class="p">)</span><span class="si">}</span><span class="s2"> candidates &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">tagged</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> tagged with an entry)&quot;</span><span class="p">)</span>
+    <span class="n">r</span> <span class="o">=</span> <span class="n">rec</span><span class="o">.</span><span class="n">candidate_recall</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">clicks</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;candidate recall at 0.1 line heights: </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;in_any&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;clicks&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;in_any&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;clicks&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">show</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">placed</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">stats</span> <span class="o">=</span> <span class="n">rec</span><span class="o">.</span><span class="n">placement_accuracy</span><span class="p">(</span><span class="n">placed</span><span class="p">,</span> <span class="n">clicks</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">pad</span><span class="p">,</span> <span class="n">columns</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">name</span><span class="si">:</span><span class="s2">46s</span><span class="si">}</span><span class="s2"> placed </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;placed&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">3d</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">n_claims</span><span class="si">}</span><span class="s2">  right glyph </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;on_claimed_token&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">3d</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">n_claims</span><span class="si">}</span><span class="s2"> &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;= </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;on_claimed_token&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">n_claims</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">   any click </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;on_any_click&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">3d</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;placed&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">czech</span><span class="p">:</span>
+        <span class="n">czech</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">load_sections</span><span class="p">()</span>
+        <span class="n">locator</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">train_locator</span><span class="p">(</span><span class="n">czech</span><span class="p">,</span> <span class="p">{</span><span class="n">s</span><span class="o">.</span><span class="n">scan</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">czech</span> <span class="k">if</span> <span class="n">s</span><span class="o">.</span><span class="n">role</span> <span class="o">==</span> <span class="s2">&quot;calibration&quot;</span><span class="p">},</span> <span class="n">args</span><span class="o">.</span><span class="n">rounds</span><span class="p">)</span>
+        <span class="n">models</span> <span class="o">=</span> <span class="p">{</span><span class="n">s</span><span class="o">.</span><span class="n">scan</span><span class="p">:</span> <span class="n">locator</span><span class="o">.</span><span class="n">glyph</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">data</span><span class="p">}</span>
+        <span class="k">for</span> <span class="n">mask</span> <span class="ow">in</span> <span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
+            <span class="n">show</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Czech-trained glyphness, mask </span><span class="si">{</span><span class="s1">&#39;on &#39;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">mask</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;off&#39;</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">place_all</span><span class="p">(</span><span class="n">_fresh</span><span class="p">(</span><span class="n">data</span><span class="p">),</span> <span class="n">models</span><span class="p">,</span> <span class="n">mask</span><span class="p">))</span>
+
+    <span class="k">for</span> <span class="n">narrow</span> <span class="ow">in</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="mf">1.3</span><span class="p">):</span>
+        <span class="n">trained</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">held</span> <span class="ow">in</span> <span class="n">pages</span><span class="p">:</span>
+            <span class="n">xs</span><span class="p">,</span> <span class="n">ys</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">section</span><span class="p">,</span> <span class="n">cands</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">section</span><span class="o">.</span><span class="n">scan</span> <span class="o">==</span> <span class="n">held</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">cands</span><span class="p">:</span>
+                    <span class="k">continue</span>
+                <span class="n">xs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">lg</span><span class="o">.</span><span class="n">feature_matrix</span><span class="p">(</span><span class="n">cands</span><span class="p">))</span>
+                <span class="n">ys</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">label_candidates</span><span class="p">(</span><span class="n">cands</span><span class="p">,</span> <span class="n">clicks</span><span class="p">,</span> <span class="n">narrow</span><span class="o">=</span><span class="n">narrow</span><span class="p">)))</span>
+            <span class="n">trained</span><span class="p">[</span><span class="n">held</span><span class="p">]</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">fit_glyph_model</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span><span class="n">xs</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span><span class="n">ys</span><span class="p">),</span> <span class="p">[</span><span class="n">p</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">pages</span> <span class="k">if</span> <span class="n">p</span> <span class="o">!=</span> <span class="n">held</span><span class="p">])</span>
+        <span class="n">label</span> <span class="o">=</span> <span class="s2">&quot;any candidate holding a click&quot;</span> <span class="k">if</span> <span class="n">narrow</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">&quot;narrow (&lt;= </span><span class="si">{</span><span class="n">narrow</span><span class="si">}</span><span class="s2"> lh) candidates only&quot;</span>
+        <span class="k">for</span> <span class="n">mask</span> <span class="ow">in</span> <span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
+            <span class="n">show</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;supervised on clicks (</span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">), mask </span><span class="si">{</span><span class="s1">&#39;on &#39;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">mask</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;off&#39;</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+                 <span class="n">place_all</span><span class="p">(</span><span class="n">_fresh</span><span class="p">(</span><span class="n">data</span><span class="p">),</span> <span class="n">trained</span><span class="p">,</span> <span class="n">mask</span><span class="p">))</span>
+    <span class="n">lg</span><span class="o">.</span><span class="n">ink_mask</span> <span class="o">=</span> <span class="n">orig</span>
+    <span class="k">return</span> <span class="mi">0</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-reference_tools-places-german_supervised_placement-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/reference_tools/places/german_supervised_placement.py · 138 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;Does a glyph classifier trained on the author&#39;s clicks place German claims on the right glyph?</span>
+
+<span class="sd">Placement is what fails on German (the Czech-trained locator puts the box on the right glyph for 27 %</span>
+<span class="sd">of claims; ``german_click_recall``). Two suspects are tried here, each against the clicks:</span>
+
+<span class="sd">* **the entry mask.** ``locate_glyphs.entry_mask`` forbids every candidate that has no entry (``muni``)</span>
+<span class="sd">  for every claim, and the entry finder tags only 23 % of the German clusters (70 % of the Czech):</span>
+<span class="sd">  where tagging is partial, most candidates can hold no claim at all. ``--mask off`` places without it;</span>
+<span class="sd">* **the glyphness model.** The Czech locator learns &quot;what a glyph looks like&quot; with no hand label; here</span>
+<span class="sd">  ``locate_glyphs.fit_glyph_model`` is fitted on the clicks instead (a candidate that holds a click is</span>
+<span class="sd">  a positive, every other candidate a negative), each page placed by a model trained on the other two.</span>
+
+<span class="sd">Measure, as in ``german_click_recall``: of the gold claims, the share whose placed box holds a click</span>
+<span class="sd">of the claimed token (``on_claimed_token`` over all claims). Optionally ``--czech`` also runs the</span>
+<span class="sd">Czech-trained locator on the same candidates for the baseline. Three pages are three folds: a</span>
+<span class="sd">direction, not a rate; these are the gold pages the route was tuned on.</span>
+
+<span class="sd">    python utils/reference_tools/places/german_supervised_placement.py [--ink 140] [--czech]</span>
+
+<span class="sd">Read-only; outside ``utils/lexikon_1910`` so as not to change the route&#39;s code digests.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;0.1.0&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">Counter</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">))</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;utils&quot;</span> <span class="o">/</span> <span class="s2">&quot;lexikon_1910&quot;</span><span class="p">))</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span><span class="p">))</span>
+
+<span class="k">for</span> <span class="n">stream</span> <span class="ow">in</span> <span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">stdout</span><span class="p">,</span> <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">):</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">stream</span><span class="p">,</span> <span class="s2">&quot;reconfigure&quot;</span><span class="p">):</span>
+        <span class="n">stream</span><span class="o">.</span><span class="n">reconfigure</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;replace&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">label_candidates</span><span class="p">(</span><span class="n">cands</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">clicks</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">pad</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.1</span><span class="p">,</span> <span class="n">narrow</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;1 where a candidate holds a click (and, with ``narrow``, is no wider than that many line heights).&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">locate_glyphs</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">lg</span>
+
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cands</span><span class="p">:</span>
+        <span class="n">held</span> <span class="o">=</span> <span class="nb">any</span><span class="p">(</span><span class="n">lg</span><span class="o">.</span><span class="n">inside</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">box</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">pad</span> <span class="o">*</span> <span class="n">c</span><span class="o">.</span><span class="n">lh</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="o">*</span><span class="n">_</span> <span class="ow">in</span> <span class="n">clicks</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">image</span><span class="p">,</span> <span class="p">[]))</span>
+        <span class="n">wide</span> <span class="o">=</span> <span class="n">narrow</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">box</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">-</span> <span class="n">c</span><span class="o">.</span><span class="n">box</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span> <span class="o">&gt;</span> <span class="n">narrow</span> <span class="o">*</span> <span class="n">c</span><span class="o">.</span><span class="n">lh</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">held</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">c</span><span class="o">.</span><span class="n">bracket</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">wide</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">place_all</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">models</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">mask</span><span class="p">:</span> <span class="nb">bool</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``{section.key: (section, cands, placed)}`` placing every claim by ``models[page]`` (glyph</span>
+<span class="sd">    scores) with the entry mask on or off.&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">locate_glyphs</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">lg</span>
+
+    <span class="n">out</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">section</span><span class="p">,</span> <span class="n">cands</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">mask</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cands</span><span class="p">:</span>
+                <span class="n">c</span><span class="o">.</span><span class="n">muni</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="n">scores</span> <span class="o">=</span> <span class="n">models</span><span class="p">[</span><span class="n">section</span><span class="o">.</span><span class="n">scan</span><span class="p">]</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="n">cands</span><span class="p">)</span> <span class="k">if</span> <span class="n">cands</span> <span class="k">else</span> <span class="p">[]</span>
+        <span class="n">out</span><span class="p">[</span><span class="n">section</span><span class="o">.</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">section</span><span class="p">,</span> <span class="n">cands</span><span class="p">,</span> <span class="n">lg</span><span class="o">.</span><span class="n">place</span><span class="p">(</span><span class="n">cands</span><span class="p">,</span> <span class="n">section</span><span class="o">.</span><span class="n">claims</span><span class="p">,</span> <span class="n">scores</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--ink&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">140</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;ink threshold for the candidate step (route: 128)&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--rounds&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--czech&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;also run the Czech-trained locator as the baseline&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--pad&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">0.25</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+
+    <span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+    <span class="kn">import</span><span class="w"> </span><span class="nn">german_click_recall</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">rec</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">german_locator_trial</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">trial</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">locate_glyphs</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">lg</span>
+
+    <span class="n">orig</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">ink_mask</span>
+    <span class="n">lg</span><span class="o">.</span><span class="n">ink_mask</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">image</span><span class="p">,</span> <span class="n">threshold</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">ink</span><span class="p">:</span> <span class="n">orig</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">threshold</span><span class="p">)</span>
+    <span class="n">clicks</span> <span class="o">=</span> <span class="n">rec</span><span class="o">.</span><span class="n">load_clicks</span><span class="p">()</span>
+    <span class="n">pages</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">({</span><span class="n">p</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">clicks</span><span class="o">.</span><span class="n">values</span><span class="p">()</span> <span class="k">for</span> <span class="n">_x</span><span class="p">,</span> <span class="n">_y</span><span class="p">,</span> <span class="n">_t</span><span class="p">,</span> <span class="n">p</span><span class="p">,</span> <span class="n">_s</span> <span class="ow">in</span> <span class="n">v</span><span class="p">})</span>
+    <span class="n">sections</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">trial</span><span class="o">.</span><span class="n">german_sections</span><span class="p">()</span>
+    <span class="n">sections</span> <span class="o">=</span> <span class="p">[</span><span class="n">s</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">sections</span> <span class="k">if</span> <span class="n">s</span><span class="o">.</span><span class="n">kind</span> <span class="o">==</span> <span class="s2">&quot;offices&quot;</span> <span class="ow">and</span> <span class="n">s</span><span class="o">.</span><span class="n">scan</span> <span class="ow">in</span> <span class="n">pages</span><span class="p">]</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="p">[(</span><span class="n">s</span><span class="p">,</span> <span class="n">lg</span><span class="o">.</span><span class="n">section_candidates</span><span class="p">(</span><span class="n">s</span><span class="p">))</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">sections</span><span class="p">]</span>
+    <span class="n">columns</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">section</span><span class="p">,</span> <span class="n">_c</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+        <span class="n">columns</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">lg</span><span class="o">.</span><span class="n">section_text_columns</span><span class="p">(</span><span class="n">section</span><span class="p">))</span>
+    <span class="n">n_claims</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">claims</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">data</span><span class="p">)</span>
+    <span class="n">tagged</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">muni</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">for</span> <span class="n">_s</span><span class="p">,</span> <span class="n">cs</span> <span class="ow">in</span> <span class="n">data</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cs</span><span class="p">)</span> <span class="o">/</span> <span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">cs</span><span class="p">)</span> <span class="k">for</span> <span class="n">_s</span><span class="p">,</span> <span class="n">cs</span> <span class="ow">in</span> <span class="n">data</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;ink &lt; </span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">ink</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">data</span><span class="p">)</span><span class="si">}</span><span class="s2"> sections, </span><span class="si">{</span><span class="n">n_claims</span><span class="si">}</span><span class="s2"> claims, </span><span class="si">{</span><span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">c</span><span class="p">)</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">_s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">data</span><span class="p">)</span><span class="si">}</span><span class="s2"> candidates &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">tagged</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> tagged with an entry)&quot;</span><span class="p">)</span>
+    <span class="n">r</span> <span class="o">=</span> <span class="n">rec</span><span class="o">.</span><span class="n">candidate_recall</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">clicks</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;candidate recall at 0.1 line heights: </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;in_any&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;clicks&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;in_any&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;clicks&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">)</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">show</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">placed</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">stats</span> <span class="o">=</span> <span class="n">rec</span><span class="o">.</span><span class="n">placement_accuracy</span><span class="p">(</span><span class="n">placed</span><span class="p">,</span> <span class="n">clicks</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">pad</span><span class="p">,</span> <span class="n">columns</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">name</span><span class="si">:</span><span class="s2">46s</span><span class="si">}</span><span class="s2"> placed </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;placed&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">3d</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">n_claims</span><span class="si">}</span><span class="s2">  right glyph </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;on_claimed_token&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">3d</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">n_claims</span><span class="si">}</span><span class="s2"> &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;= </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;on_claimed_token&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">n_claims</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">   any click </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;on_any_click&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">3d</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;placed&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">czech</span><span class="p">:</span>
+        <span class="n">czech</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">load_sections</span><span class="p">()</span>
+        <span class="n">locator</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">train_locator</span><span class="p">(</span><span class="n">czech</span><span class="p">,</span> <span class="p">{</span><span class="n">s</span><span class="o">.</span><span class="n">scan</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">czech</span> <span class="k">if</span> <span class="n">s</span><span class="o">.</span><span class="n">role</span> <span class="o">==</span> <span class="s2">&quot;calibration&quot;</span><span class="p">},</span> <span class="n">args</span><span class="o">.</span><span class="n">rounds</span><span class="p">)</span>
+        <span class="n">models</span> <span class="o">=</span> <span class="p">{</span><span class="n">s</span><span class="o">.</span><span class="n">scan</span><span class="p">:</span> <span class="n">locator</span><span class="o">.</span><span class="n">glyph</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">data</span><span class="p">}</span>
+        <span class="k">for</span> <span class="n">mask</span> <span class="ow">in</span> <span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
+            <span class="n">show</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Czech-trained glyphness, mask </span><span class="si">{</span><span class="s1">&#39;on &#39;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">mask</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;off&#39;</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">place_all</span><span class="p">(</span><span class="n">_fresh</span><span class="p">(</span><span class="n">data</span><span class="p">),</span> <span class="n">models</span><span class="p">,</span> <span class="n">mask</span><span class="p">))</span>
+
+    <span class="k">for</span> <span class="n">narrow</span> <span class="ow">in</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="mf">1.3</span><span class="p">):</span>
+        <span class="n">trained</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">held</span> <span class="ow">in</span> <span class="n">pages</span><span class="p">:</span>
+            <span class="n">xs</span><span class="p">,</span> <span class="n">ys</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">section</span><span class="p">,</span> <span class="n">cands</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">section</span><span class="o">.</span><span class="n">scan</span> <span class="o">==</span> <span class="n">held</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">cands</span><span class="p">:</span>
+                    <span class="k">continue</span>
+                <span class="n">xs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">lg</span><span class="o">.</span><span class="n">feature_matrix</span><span class="p">(</span><span class="n">cands</span><span class="p">))</span>
+                <span class="n">ys</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">label_candidates</span><span class="p">(</span><span class="n">cands</span><span class="p">,</span> <span class="n">clicks</span><span class="p">,</span> <span class="n">narrow</span><span class="o">=</span><span class="n">narrow</span><span class="p">)))</span>
+            <span class="n">trained</span><span class="p">[</span><span class="n">held</span><span class="p">]</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">fit_glyph_model</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span><span class="n">xs</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span><span class="n">ys</span><span class="p">),</span> <span class="p">[</span><span class="n">p</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">pages</span> <span class="k">if</span> <span class="n">p</span> <span class="o">!=</span> <span class="n">held</span><span class="p">])</span>
+        <span class="n">label</span> <span class="o">=</span> <span class="s2">&quot;any candidate holding a click&quot;</span> <span class="k">if</span> <span class="n">narrow</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">&quot;narrow (&lt;= </span><span class="si">{</span><span class="n">narrow</span><span class="si">}</span><span class="s2"> lh) candidates only&quot;</span>
+        <span class="k">for</span> <span class="n">mask</span> <span class="ow">in</span> <span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
+            <span class="n">show</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;supervised on clicks (</span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">), mask </span><span class="si">{</span><span class="s1">&#39;on &#39;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">mask</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;off&#39;</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+                 <span class="n">place_all</span><span class="p">(</span><span class="n">_fresh</span><span class="p">(</span><span class="n">data</span><span class="p">),</span> <span class="n">trained</span><span class="p">,</span> <span class="n">mask</span><span class="p">))</span>
+    <span class="n">lg</span><span class="o">.</span><span class="n">ink_mask</span> <span class="o">=</span> <span class="n">orig</span>
+    <span class="k">return</span> <span class="mi">0</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_fresh</span><span class="p">(</span><span class="n">data</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The same sections and candidates with their entry tags as the entry finder gave them.&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">copy</span>
+
+    <span class="k">return</span> <span class="p">[(</span><span class="n">s</span><span class="p">,</span> <span class="n">copy</span><span class="o">.</span><span class="n">deepcopy</span><span class="p">(</span><span class="n">c</span><span class="p">))</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">data</span><span class="p">]</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>

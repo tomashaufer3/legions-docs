@@ -1,0 +1,615 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>How well does the locator's box land on the glyph the author clicked? (German gold, offices.)</p><p class="tldr-facts"><b>Reference tools</b> · v0.1.0 · 166 lines · 6 public functions · 2 constants · used by <code>utils/reference_tools/places/german_candidate_diagnosis.py</code>, <code>utils/reference_tools/places/german_supervised_placement.py</code>, <code>utils/reference_tools/places/run_german_detect_by_naming.py</code> +2 · <code>utils/reference_tools/places/german_click_recall.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-reference_tools-places-german_click_recall-load_clicks">load_clicks</a><a class="chip" href="#fn-utils-reference_tools-places-german_click_recall-inside">inside</a><a class="chip" href="#fn-utils-reference_tools-places-german_click_recall-candidate_recall">candidate_recall</a><a class="chip" href="#fn-utils-reference_tools-places-german_click_recall-placement_accuracy">placement_accuracy</a><a class="chip" href="#fn-utils-reference_tools-places-german_click_recall-report">report</a><a class="chip" href="#fn-utils-reference_tools-places-german_click_recall-main">main</a><a class="chip const" href="#c-utils-reference_tools-places-german_click_recall-ROOT">ROOT</a><a class="chip const" href="#c-utils-reference_tools-places-german_click_recall-CLICKS">CLICKS</a></div>
+<h2>How it works</h2><p>Ground truth: the author's named clicks (<code>german_click_page</code>, collection <code>german_clicks</code>, saved as
+JSON under <code>output/german_click_page/clicks/german_clicks</code>), in section-image coordinates. Three
+measures, each against a click and not against "a box was placed":</p>
+<ol>
+<li><strong>candidate recall</strong> — the share of clicks that fall inside some candidate cluster the locator
+   considers (<code>locate_glyphs.section_candidates</code>). Below 1 the candidate step itself loses glyphs
+   (merged with a letter, split, or never found), whatever is trained on top of it.</li>
+<li><strong>placement accuracy</strong> — of the gold claims the locator places, the share whose box holds a click
+   of <em>any</em> token (the box is on a pictogram) and the share whose box holds a click of the
+   <em>claimed</em> token (the box is on the right pictogram), for the Czech-trained locator and for a
+   German-trained one placing each page by the others (<code>german_locator_trial</code>).</li>
+<li><strong>where the false boxes go</strong> — the placed boxes holding no click, by what they are (key digits
+   left of the text column, others).</li>
+</ol>
+<p>Offices sections of gold pages 0142, 0276, 0480 only. Reads the section images and clicks; writes
+nothing. Outside <code>utils/lexikon_1910</code> so as not to change the route's code digests.</p>
+<pre><code>python utils/reference_tools/places/german_click_recall.py [--rounds 4] [--pad 0.25]
+</code></pre>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-reference_tools-places-german_click_recall-load_clicks">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">load_clicks</span><span class="p">(</span><span class="n">directory</span><span class="p">:</span> <span class="n">Path</span><span class="o">=</span><span class="n">CLICKS</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span></pre>
+<div class="fndoc"><p><code>{section image: [(x, y, token, page, strip id)]}</code> in section-image coordinates.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/reference_tools/places/german_supervised_placement.py</code> <code>utils/reference_tools/places/run_german_detect_by_naming.py</code> <code>utils/reference_tools/places/run_german_reader_boxes.py</code></p>
+<details><summary>source · lines 44–51 (8 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">44</span>
+<span class="normal">45</span>
+<span class="normal">46</span>
+<span class="normal">47</span>
+<span class="normal">48</span>
+<span class="normal">49</span>
+<span class="normal">50</span>
+<span class="normal">51</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">load_clicks</span><span class="p">(</span><span class="n">directory</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">CLICKS</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``{section image: [(x, y, token, page, strip id)]}`` in section-image coordinates.&quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">directory</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">&quot;*.json&quot;</span><span class="p">)):</span>
+        <span class="n">doc</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">path</span><span class="o">.</span><span class="n">read_text</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">))</span>
+        <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">doc</span><span class="p">[</span><span class="s2">&quot;clicks&quot;</span><span class="p">]:</span>
+            <span class="n">out</span><span class="p">[</span><span class="n">doc</span><span class="p">[</span><span class="s2">&quot;image&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">c</span><span class="p">[</span><span class="s2">&quot;sx&quot;</span><span class="p">],</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;sy&quot;</span><span class="p">],</span> <span class="n">c</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;token&quot;</span><span class="p">),</span> <span class="n">doc</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">],</span> <span class="n">doc</span><span class="p">[</span><span class="s2">&quot;strip&quot;</span><span class="p">]))</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-german_click_recall-inside">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">inside</span><span class="p">(</span><span class="n">box</span><span class="p">,</span> <span class="n">x</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">y</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">pad</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span></pre>
+<p class="calls"><b>Called by</b> <code>16_theatre_model_pass.ipynb</code> <code>utils/lexikon_1910/locate_glyphs.py</code> <code>utils/reference_tools/places/german_candidate_diagnosis.py</code> <code>utils/reference_tools/places/german_supervised_placement.py</code> <code>utils/reference_tools/places/run_german_detect_by_naming.py</code> <code>utils/reference_tools/places/run_german_oracle.py</code></p>
+<details><summary>source · lines 54–56 (3 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">54</span>
+<span class="normal">55</span>
+<span class="normal">56</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">inside</span><span class="p">(</span><span class="n">box</span><span class="p">,</span> <span class="n">x</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">y</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">pad</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+    <span class="n">x0</span><span class="p">,</span> <span class="n">y0</span><span class="p">,</span> <span class="n">x1</span><span class="p">,</span> <span class="n">y1</span> <span class="o">=</span> <span class="n">box</span>
+    <span class="k">return</span> <span class="n">x0</span> <span class="o">-</span> <span class="n">pad</span> <span class="o">&lt;=</span> <span class="n">x</span> <span class="o">&lt;=</span> <span class="n">x1</span> <span class="o">+</span> <span class="n">pad</span> <span class="ow">and</span> <span class="n">y0</span> <span class="o">-</span> <span class="n">pad</span> <span class="o">&lt;=</span> <span class="n">y</span> <span class="o">&lt;=</span> <span class="n">y1</span> <span class="o">+</span> <span class="n">pad</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-german_click_recall-candidate_recall">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">candidate_recall</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">clicks</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">pad_lines</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span></pre>
+<div class="fndoc"><p>Clicks inside at least one / exactly one candidate cluster, over every click.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/reference_tools/places/german_supervised_placement.py</code></p>
+<details><summary>source · lines 59–72 (14 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">59</span>
+<span class="normal">60</span>
+<span class="normal">61</span>
+<span class="normal">62</span>
+<span class="normal">63</span>
+<span class="normal">64</span>
+<span class="normal">65</span>
+<span class="normal">66</span>
+<span class="normal">67</span>
+<span class="normal">68</span>
+<span class="normal">69</span>
+<span class="normal">70</span>
+<span class="normal">71</span>
+<span class="normal">72</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">candidate_recall</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">clicks</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">pad_lines</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Clicks inside at least one / exactly one candidate cluster, over every click.&quot;&quot;&quot;</span>
+    <span class="n">stats</span><span class="p">,</span> <span class="n">missed</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">(),</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">section</span><span class="p">,</span> <span class="n">cands</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">section</span><span class="o">.</span><span class="n">images</span><span class="p">:</span>
+            <span class="n">mine</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cands</span> <span class="k">if</span> <span class="n">c</span><span class="o">.</span><span class="n">image</span> <span class="o">==</span> <span class="n">name</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">token</span><span class="p">,</span> <span class="n">page</span><span class="p">,</span> <span class="n">strip</span> <span class="ow">in</span> <span class="n">clicks</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="p">[]):</span>
+                <span class="n">hits</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">mine</span> <span class="k">if</span> <span class="n">inside</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">box</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">pad_lines</span> <span class="o">*</span> <span class="n">c</span><span class="o">.</span><span class="n">lh</span><span class="p">)]</span>
+                <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;clicks&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;in_any&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="nb">bool</span><span class="p">(</span><span class="n">hits</span><span class="p">)</span>
+                <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;in_one&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="nb">len</span><span class="p">(</span><span class="n">hits</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">hits</span><span class="p">:</span>
+                    <span class="n">missed</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">page</span><span class="p">,</span> <span class="n">strip</span><span class="p">,</span> <span class="n">token</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span>
+    <span class="k">return</span> <span class="p">{</span><span class="o">**</span><span class="n">stats</span><span class="p">,</span> <span class="s2">&quot;missed&quot;</span><span class="p">:</span> <span class="n">missed</span><span class="p">}</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-german_click_recall-placement_accuracy">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">placement_accuracy</span><span class="p">(</span><span class="n">placed</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">clicks</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">pad_lines</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">text_columns</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span></pre>
+<div class="fndoc"><p>Of the placed claims: box on any click, on a click of the claimed token; what the others are.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/reference_tools/places/german_supervised_placement.py</code></p>
+<details><summary>source · lines 75–96 (22 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">75</span>
+<span class="normal">76</span>
+<span class="normal">77</span>
+<span class="normal">78</span>
+<span class="normal">79</span>
+<span class="normal">80</span>
+<span class="normal">81</span>
+<span class="normal">82</span>
+<span class="normal">83</span>
+<span class="normal">84</span>
+<span class="normal">85</span>
+<span class="normal">86</span>
+<span class="normal">87</span>
+<span class="normal">88</span>
+<span class="normal">89</span>
+<span class="normal">90</span>
+<span class="normal">91</span>
+<span class="normal">92</span>
+<span class="normal">93</span>
+<span class="normal">94</span>
+<span class="normal">95</span>
+<span class="normal">96</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">placement_accuracy</span><span class="p">(</span><span class="n">placed</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">clicks</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">pad_lines</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">text_columns</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Of the placed claims: box on any click, on a click of the claimed token; what the others are.&quot;&quot;&quot;</span>
+    <span class="n">stats</span><span class="p">,</span> <span class="n">other</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">(),</span> <span class="n">Counter</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">section</span><span class="p">,</span> <span class="n">cands</span><span class="p">,</span> <span class="n">where</span> <span class="ow">in</span> <span class="n">placed</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+        <span class="k">for</span> <span class="n">claim</span> <span class="ow">in</span> <span class="n">section</span><span class="o">.</span><span class="n">claims</span><span class="p">:</span>
+            <span class="n">i</span> <span class="o">=</span> <span class="n">where</span><span class="p">[</span><span class="n">claim</span><span class="o">.</span><span class="n">order</span><span class="p">]</span>
+            <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;claims&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">if</span> <span class="n">i</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;unplaced&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="k">continue</span>
+            <span class="n">c</span> <span class="o">=</span> <span class="n">cands</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+            <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;placed&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="n">near</span> <span class="o">=</span> <span class="p">[</span><span class="n">tok</span> <span class="k">for</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">tok</span><span class="p">,</span> <span class="n">_p</span><span class="p">,</span> <span class="n">_s</span> <span class="ow">in</span> <span class="n">clicks</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">image</span><span class="p">,</span> <span class="p">[])</span>
+                    <span class="k">if</span> <span class="n">inside</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">box</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">pad_lines</span> <span class="o">*</span> <span class="n">c</span><span class="o">.</span><span class="n">lh</span><span class="p">)]</span>
+            <span class="n">on_any</span> <span class="o">=</span> <span class="nb">bool</span><span class="p">(</span><span class="n">near</span><span class="p">)</span>
+            <span class="n">on_token</span> <span class="o">=</span> <span class="n">claim</span><span class="o">.</span><span class="n">token</span> <span class="ow">in</span> <span class="n">near</span>
+            <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;on_any_click&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="n">on_any</span>
+            <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;on_claimed_token&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="n">on_token</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">on_any</span><span class="p">:</span>
+                <span class="n">left</span> <span class="o">=</span> <span class="n">c</span><span class="o">.</span><span class="n">box</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">text_columns</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">image</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span> <span class="o">-</span> <span class="mf">0.3</span> <span class="o">*</span> <span class="n">c</span><span class="o">.</span><span class="n">lh</span>
+                <span class="n">other</span><span class="p">[</span><span class="s2">&quot;key_column&quot;</span> <span class="k">if</span> <span class="n">left</span> <span class="k">else</span> <span class="s2">&quot;elsewhere&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+    <span class="k">return</span> <span class="p">{</span><span class="o">**</span><span class="n">stats</span><span class="p">,</span> <span class="s2">&quot;false_boxes&quot;</span><span class="p">:</span> <span class="nb">dict</span><span class="p">(</span><span class="n">other</span><span class="p">)}</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-german_click_recall-report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">stats</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span></pre>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code> <code>03_visualisation.ipynb</code> <code>tests/test_religion_categories.py</code> <code>tests/test_sealed_scorer.py</code> <code>utils/docs/build_docs.py</code> <code>utils/lexikon_1910/build_de_page_map.py</code> <code>utils/lexikon_1910/build_mark_ledger.py</code> <code>utils/lexikon_1910/build_symbol_atlas_de.py</code> <code>utils/lexikon_1910/read_transcription_md.py</code> <code>utils/lexikon_1910/run_frozen.py</code> <code>utils/lexikon_1910/run_glyph_e3.py</code> <code>utils/lexikon_1910/score_certification.py</code> <code>utils/lexikon_1910/score_table_passes.py</code> <code>utils/linkage.py</code> <code>utils/parsing/clean.py</code> <code>utils/parsing/dates.py</code> <code>utils/parsing/exit_codes.py</code> <code>utils/parsing/habsburg.py</code> <code>utils/reference_tools/places/run_matice_pilot.py</code> <code>utils/reference_tools/places/score_sealed_abbreviations.py</code> <code>utils/validation/data_checks.py</code></p>
+<details><summary>source · lines 99–105 (7 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">stats</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">p</span><span class="p">,</span> <span class="n">n</span> <span class="o">=</span> <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;placed&quot;</span><span class="p">],</span> <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;claims&quot;</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: placed </span><span class="si">{</span><span class="n">p</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s2"> claims (</span><span class="si">{</span><span class="n">p</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">n</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">); of the placed, box on a clicked glyph &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;on_any_click&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;on_any_click&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">p</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">), on the claimed token&#39;s glyph &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;on_claimed_token&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;on_claimed_token&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">p</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">); &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;boxes on no click: </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;false_boxes&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    placement accuracy over ALL claims (right glyph / claims): </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;on_claimed_token&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">n</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-german_click_recall-main">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 108–162 (55 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--rounds&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--pad&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">0.25</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;slack around a box, in line heights&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+
+    <span class="kn">import</span><span class="w"> </span><span class="nn">locate_glyphs</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">lg</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">german_locator_trial</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">trial</span>
+
+    <span class="n">clicks</span> <span class="o">=</span> <span class="n">load_clicks</span><span class="p">()</span>
+    <span class="n">pages</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">({</span><span class="n">p</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">clicks</span><span class="o">.</span><span class="n">values</span><span class="p">()</span> <span class="k">for</span> <span class="n">_x</span><span class="p">,</span> <span class="n">_y</span><span class="p">,</span> <span class="n">_t</span><span class="p">,</span> <span class="n">p</span><span class="p">,</span> <span class="n">_s</span> <span class="ow">in</span> <span class="n">v</span><span class="p">})</span>
+    <span class="n">sections</span><span class="p">,</span> <span class="n">_unmatched</span> <span class="o">=</span> <span class="n">trial</span><span class="o">.</span><span class="n">german_sections</span><span class="p">()</span>
+    <span class="n">sections</span> <span class="o">=</span> <span class="p">[</span><span class="n">s</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">sections</span> <span class="k">if</span> <span class="n">s</span><span class="o">.</span><span class="n">kind</span> <span class="o">==</span> <span class="s2">&quot;offices&quot;</span> <span class="ow">and</span> <span class="n">s</span><span class="o">.</span><span class="n">scan</span> <span class="ow">in</span> <span class="n">pages</span><span class="p">]</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="p">[(</span><span class="n">s</span><span class="p">,</span> <span class="n">lg</span><span class="o">.</span><span class="n">section_candidates</span><span class="p">(</span><span class="n">s</span><span class="p">))</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">sections</span><span class="p">]</span>
+    <span class="n">columns</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">section</span><span class="p">,</span> <span class="n">_c</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+        <span class="n">columns</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">lg</span><span class="o">.</span><span class="n">section_text_columns</span><span class="p">(</span><span class="n">section</span><span class="p">))</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">)</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">v</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">clicks</span><span class="o">.</span><span class="n">values</span><span class="p">())</span><span class="si">}</span><span class="s2"> clicks on pages </span><span class="si">{</span><span class="n">pages</span><span class="si">}</span><span class="s2">; </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">sections</span><span class="p">)</span><span class="si">}</span><span class="s2"> offices sections, &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">claims</span><span class="p">)</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">sections</span><span class="p">)</span><span class="si">}</span><span class="s2"> gold claims, </span><span class="si">{</span><span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">c</span><span class="p">)</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">_s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">data</span><span class="p">)</span><span class="si">}</span><span class="s2"> candidate clusters&quot;</span><span class="p">)</span>
+
+    <span class="n">r</span> <span class="o">=</span> <span class="n">candidate_recall</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">clicks</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">pad</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">candidate recall: </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;in_any&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;clicks&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> clicks inside some candidate &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;in_any&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;clicks&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">); inside exactly one </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;in_one&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  clicks in no candidate (page, strip, token, x, y):&quot;</span><span class="p">,</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;missed&quot;</span><span class="p">][:</span><span class="mi">12</span><span class="p">],</span> <span class="s2">&quot;...&quot;</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;missed&quot;</span><span class="p">])</span> <span class="o">&gt;</span> <span class="mi">12</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Czech-trained locator:&quot;</span><span class="p">)</span>
+    <span class="n">czech</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">load_sections</span><span class="p">()</span>
+    <span class="n">locator</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">train_locator</span><span class="p">(</span><span class="n">czech</span><span class="p">,</span> <span class="p">{</span><span class="n">s</span><span class="o">.</span><span class="n">scan</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">czech</span> <span class="k">if</span> <span class="n">s</span><span class="o">.</span><span class="n">role</span> <span class="o">==</span> <span class="s2">&quot;calibration&quot;</span><span class="p">},</span> <span class="n">args</span><span class="o">.</span><span class="n">rounds</span><span class="p">)</span>
+    <span class="n">placed</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">section</span><span class="p">,</span> <span class="n">cands</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+        <span class="n">scores</span> <span class="o">=</span> <span class="n">locator</span><span class="o">.</span><span class="n">glyph</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="n">cands</span><span class="p">)</span> <span class="k">if</span> <span class="n">cands</span> <span class="k">else</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">c</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">cands</span><span class="p">,</span> <span class="n">scores</span><span class="p">):</span>
+            <span class="n">c</span><span class="o">.</span><span class="n">glyphness</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+        <span class="n">placed</span><span class="p">[</span><span class="n">section</span><span class="o">.</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">section</span><span class="p">,</span> <span class="n">cands</span><span class="p">,</span> <span class="n">locator</span><span class="o">.</span><span class="n">place</span><span class="p">(</span><span class="n">cands</span><span class="p">,</span> <span class="n">section</span><span class="o">.</span><span class="n">claims</span><span class="p">))</span>
+    <span class="n">report</span><span class="p">(</span><span class="s2">&quot;Czech-trained&quot;</span><span class="p">,</span> <span class="n">placement_accuracy</span><span class="p">(</span><span class="n">placed</span><span class="p">,</span> <span class="n">clicks</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">pad</span><span class="p">,</span> <span class="n">columns</span><span class="p">))</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">German-trained locator, each page placed by locators trained on the other German gold pages:&quot;</span><span class="p">)</span>
+    <span class="n">all_sections</span><span class="p">,</span> <span class="n">_u</span> <span class="o">=</span> <span class="n">trial</span><span class="o">.</span><span class="n">german_sections</span><span class="p">()</span>
+    <span class="n">all_data</span> <span class="o">=</span> <span class="p">[(</span><span class="n">s</span><span class="p">,</span> <span class="n">lg</span><span class="o">.</span><span class="n">section_candidates</span><span class="p">(</span><span class="n">s</span><span class="p">))</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">all_sections</span><span class="p">]</span>
+    <span class="n">calibration</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">({</span><span class="n">s</span><span class="o">.</span><span class="n">scan</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">all_data</span> <span class="k">if</span> <span class="n">s</span><span class="o">.</span><span class="n">role</span> <span class="o">==</span> <span class="s2">&quot;calibration&quot;</span><span class="p">})</span>
+    <span class="n">seeds</span> <span class="o">=</span> <span class="n">trial</span><span class="o">.</span><span class="n">safe_plate_templates</span><span class="p">(</span><span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;places&quot;</span> <span class="o">/</span> <span class="s2">&quot;symbols&quot;</span> <span class="o">/</span> <span class="s2">&quot;de&quot;</span><span class="p">)</span>
+    <span class="n">trained</span><span class="p">,</span> <span class="n">placed</span> <span class="o">=</span> <span class="p">{},</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">section</span><span class="p">,</span> <span class="n">cands</span> <span class="ow">in</span> <span class="n">all_data</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">section</span><span class="o">.</span><span class="n">kind</span> <span class="o">!=</span> <span class="s2">&quot;offices&quot;</span> <span class="ow">or</span> <span class="n">section</span><span class="o">.</span><span class="n">scan</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">pages</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">key</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">calibration</span><span class="p">)</span> <span class="o">-</span> <span class="p">{</span><span class="n">section</span><span class="o">.</span><span class="n">scan</span><span class="p">}))</span>
+        <span class="k">if</span> <span class="n">key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">trained</span><span class="p">:</span>
+            <span class="n">trained</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">train_locator</span><span class="p">(</span><span class="n">all_data</span><span class="p">,</span> <span class="nb">set</span><span class="p">(</span><span class="n">key</span><span class="p">),</span> <span class="n">args</span><span class="o">.</span><span class="n">rounds</span><span class="p">,</span> <span class="n">seeds</span><span class="p">)</span>
+        <span class="n">loc</span> <span class="o">=</span> <span class="n">trained</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+        <span class="n">scores</span> <span class="o">=</span> <span class="n">loc</span><span class="o">.</span><span class="n">glyph</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="n">cands</span><span class="p">)</span> <span class="k">if</span> <span class="n">cands</span> <span class="k">else</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">c</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">cands</span><span class="p">,</span> <span class="n">scores</span><span class="p">):</span>
+            <span class="n">c</span><span class="o">.</span><span class="n">glyphness</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+        <span class="n">placed</span><span class="p">[</span><span class="n">section</span><span class="o">.</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">section</span><span class="p">,</span> <span class="n">cands</span><span class="p">,</span> <span class="n">loc</span><span class="o">.</span><span class="n">place</span><span class="p">(</span><span class="n">cands</span><span class="p">,</span> <span class="n">section</span><span class="o">.</span><span class="n">claims</span><span class="p">))</span>
+    <span class="n">report</span><span class="p">(</span><span class="s2">&quot;German-trained&quot;</span><span class="p">,</span> <span class="n">placement_accuracy</span><span class="p">(</span><span class="n">placed</span><span class="p">,</span> <span class="n">clicks</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">pad</span><span class="p">,</span> <span class="n">columns</span><span class="p">))</span>
+    <span class="k">return</span> <span class="mi">0</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-reference_tools-places-german_click_recall-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-german_click_recall-CLICKS"><pre class="sig">CLICKS<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;output&#39;</span> <span class="o">/</span> <span class="s1">&#39;german_click_page&#39;</span> <span class="o">/</span> <span class="s1">&#39;clicks&#39;</span> <span class="o">/</span> <span class="s1">&#39;german_clicks&#39;</span>
+</pre></div>
+</details></div>
+<h2>Used by</h2><p><code>utils/reference_tools/places/german_candidate_diagnosis.py</code> <code>utils/reference_tools/places/german_supervised_placement.py</code> <code>utils/reference_tools/places/run_german_detect_by_naming.py</code> <code>utils/reference_tools/places/run_german_oracle.py</code> <code>utils/reference_tools/places/run_german_reader_boxes.py</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/reference_tools/places/german_click_recall.py · 166 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;How well does the locator&#39;s box land on the glyph the author clicked? (German gold, offices.)</span>
+
+<span class="sd">Ground truth: the author&#39;s named clicks (``german_click_page``, collection ``german_clicks``, saved as</span>
+<span class="sd">JSON under ``output/german_click_page/clicks/german_clicks``), in section-image coordinates. Three</span>
+<span class="sd">measures, each against a click and not against &quot;a box was placed&quot;:</span>
+
+<span class="sd">1. **candidate recall** — the share of clicks that fall inside some candidate cluster the locator</span>
+<span class="sd">   considers (``locate_glyphs.section_candidates``). Below 1 the candidate step itself loses glyphs</span>
+<span class="sd">   (merged with a letter, split, or never found), whatever is trained on top of it.</span>
+<span class="sd">2. **placement accuracy** — of the gold claims the locator places, the share whose box holds a click</span>
+<span class="sd">   of *any* token (the box is on a pictogram) and the share whose box holds a click of the</span>
+<span class="sd">   *claimed* token (the box is on the right pictogram), for the Czech-trained locator and for a</span>
+<span class="sd">   German-trained one placing each page by the others (``german_locator_trial``).</span>
+<span class="sd">3. **where the false boxes go** — the placed boxes holding no click, by what they are (key digits</span>
+<span class="sd">   left of the text column, others).</span>
+
+<span class="sd">Offices sections of gold pages 0142, 0276, 0480 only. Reads the section images and clicks; writes</span>
+<span class="sd">nothing. Outside ``utils/lexikon_1910`` so as not to change the route&#39;s code digests.</span>
+
+<span class="sd">    python utils/reference_tools/places/german_click_recall.py [--rounds 4] [--pad 0.25]</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;0.1.0&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">Counter</span><span class="p">,</span> <span class="n">defaultdict</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">))</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;utils&quot;</span> <span class="o">/</span> <span class="s2">&quot;lexikon_1910&quot;</span><span class="p">))</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span><span class="p">))</span>
+
+<span class="k">for</span> <span class="n">stream</span> <span class="ow">in</span> <span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">stdout</span><span class="p">,</span> <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">):</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">stream</span><span class="p">,</span> <span class="s2">&quot;reconfigure&quot;</span><span class="p">):</span>
+        <span class="n">stream</span><span class="o">.</span><span class="n">reconfigure</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;replace&quot;</span><span class="p">)</span>
+
+<span class="n">CLICKS</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;output&quot;</span> <span class="o">/</span> <span class="s2">&quot;german_click_page&quot;</span> <span class="o">/</span> <span class="s2">&quot;clicks&quot;</span> <span class="o">/</span> <span class="s2">&quot;german_clicks&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">load_clicks</span><span class="p">(</span><span class="n">directory</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">CLICKS</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``{section image: [(x, y, token, page, strip id)]}`` in section-image coordinates.&quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">directory</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">&quot;*.json&quot;</span><span class="p">)):</span>
+        <span class="n">doc</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">path</span><span class="o">.</span><span class="n">read_text</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">))</span>
+        <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">doc</span><span class="p">[</span><span class="s2">&quot;clicks&quot;</span><span class="p">]:</span>
+            <span class="n">out</span><span class="p">[</span><span class="n">doc</span><span class="p">[</span><span class="s2">&quot;image&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">c</span><span class="p">[</span><span class="s2">&quot;sx&quot;</span><span class="p">],</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;sy&quot;</span><span class="p">],</span> <span class="n">c</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;token&quot;</span><span class="p">),</span> <span class="n">doc</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">],</span> <span class="n">doc</span><span class="p">[</span><span class="s2">&quot;strip&quot;</span><span class="p">]))</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">inside</span><span class="p">(</span><span class="n">box</span><span class="p">,</span> <span class="n">x</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">y</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">pad</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+    <span class="n">x0</span><span class="p">,</span> <span class="n">y0</span><span class="p">,</span> <span class="n">x1</span><span class="p">,</span> <span class="n">y1</span> <span class="o">=</span> <span class="n">box</span>
+    <span class="k">return</span> <span class="n">x0</span> <span class="o">-</span> <span class="n">pad</span> <span class="o">&lt;=</span> <span class="n">x</span> <span class="o">&lt;=</span> <span class="n">x1</span> <span class="o">+</span> <span class="n">pad</span> <span class="ow">and</span> <span class="n">y0</span> <span class="o">-</span> <span class="n">pad</span> <span class="o">&lt;=</span> <span class="n">y</span> <span class="o">&lt;=</span> <span class="n">y1</span> <span class="o">+</span> <span class="n">pad</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">candidate_recall</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">clicks</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">pad_lines</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Clicks inside at least one / exactly one candidate cluster, over every click.&quot;&quot;&quot;</span>
+    <span class="n">stats</span><span class="p">,</span> <span class="n">missed</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">(),</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">section</span><span class="p">,</span> <span class="n">cands</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">section</span><span class="o">.</span><span class="n">images</span><span class="p">:</span>
+            <span class="n">mine</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cands</span> <span class="k">if</span> <span class="n">c</span><span class="o">.</span><span class="n">image</span> <span class="o">==</span> <span class="n">name</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">token</span><span class="p">,</span> <span class="n">page</span><span class="p">,</span> <span class="n">strip</span> <span class="ow">in</span> <span class="n">clicks</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="p">[]):</span>
+                <span class="n">hits</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">mine</span> <span class="k">if</span> <span class="n">inside</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">box</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">pad_lines</span> <span class="o">*</span> <span class="n">c</span><span class="o">.</span><span class="n">lh</span><span class="p">)]</span>
+                <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;clicks&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;in_any&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="nb">bool</span><span class="p">(</span><span class="n">hits</span><span class="p">)</span>
+                <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;in_one&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="nb">len</span><span class="p">(</span><span class="n">hits</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">hits</span><span class="p">:</span>
+                    <span class="n">missed</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">page</span><span class="p">,</span> <span class="n">strip</span><span class="p">,</span> <span class="n">token</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span>
+    <span class="k">return</span> <span class="p">{</span><span class="o">**</span><span class="n">stats</span><span class="p">,</span> <span class="s2">&quot;missed&quot;</span><span class="p">:</span> <span class="n">missed</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">placement_accuracy</span><span class="p">(</span><span class="n">placed</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">clicks</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">pad_lines</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">text_columns</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Of the placed claims: box on any click, on a click of the claimed token; what the others are.&quot;&quot;&quot;</span>
+    <span class="n">stats</span><span class="p">,</span> <span class="n">other</span> <span class="o">=</span> <span class="n">Counter</span><span class="p">(),</span> <span class="n">Counter</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">section</span><span class="p">,</span> <span class="n">cands</span><span class="p">,</span> <span class="n">where</span> <span class="ow">in</span> <span class="n">placed</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+        <span class="k">for</span> <span class="n">claim</span> <span class="ow">in</span> <span class="n">section</span><span class="o">.</span><span class="n">claims</span><span class="p">:</span>
+            <span class="n">i</span> <span class="o">=</span> <span class="n">where</span><span class="p">[</span><span class="n">claim</span><span class="o">.</span><span class="n">order</span><span class="p">]</span>
+            <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;claims&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">if</span> <span class="n">i</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;unplaced&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="k">continue</span>
+            <span class="n">c</span> <span class="o">=</span> <span class="n">cands</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+            <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;placed&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="n">near</span> <span class="o">=</span> <span class="p">[</span><span class="n">tok</span> <span class="k">for</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">tok</span><span class="p">,</span> <span class="n">_p</span><span class="p">,</span> <span class="n">_s</span> <span class="ow">in</span> <span class="n">clicks</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">image</span><span class="p">,</span> <span class="p">[])</span>
+                    <span class="k">if</span> <span class="n">inside</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">box</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">pad_lines</span> <span class="o">*</span> <span class="n">c</span><span class="o">.</span><span class="n">lh</span><span class="p">)]</span>
+            <span class="n">on_any</span> <span class="o">=</span> <span class="nb">bool</span><span class="p">(</span><span class="n">near</span><span class="p">)</span>
+            <span class="n">on_token</span> <span class="o">=</span> <span class="n">claim</span><span class="o">.</span><span class="n">token</span> <span class="ow">in</span> <span class="n">near</span>
+            <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;on_any_click&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="n">on_any</span>
+            <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;on_claimed_token&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="n">on_token</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">on_any</span><span class="p">:</span>
+                <span class="n">left</span> <span class="o">=</span> <span class="n">c</span><span class="o">.</span><span class="n">box</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">text_columns</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">image</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)</span> <span class="o">-</span> <span class="mf">0.3</span> <span class="o">*</span> <span class="n">c</span><span class="o">.</span><span class="n">lh</span>
+                <span class="n">other</span><span class="p">[</span><span class="s2">&quot;key_column&quot;</span> <span class="k">if</span> <span class="n">left</span> <span class="k">else</span> <span class="s2">&quot;elsewhere&quot;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+    <span class="k">return</span> <span class="p">{</span><span class="o">**</span><span class="n">stats</span><span class="p">,</span> <span class="s2">&quot;false_boxes&quot;</span><span class="p">:</span> <span class="nb">dict</span><span class="p">(</span><span class="n">other</span><span class="p">)}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">stats</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">p</span><span class="p">,</span> <span class="n">n</span> <span class="o">=</span> <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;placed&quot;</span><span class="p">],</span> <span class="n">stats</span><span class="p">[</span><span class="s2">&quot;claims&quot;</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: placed </span><span class="si">{</span><span class="n">p</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s2"> claims (</span><span class="si">{</span><span class="n">p</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">n</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">); of the placed, box on a clicked glyph &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;on_any_click&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;on_any_click&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">p</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">), on the claimed token&#39;s glyph &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;on_claimed_token&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;on_claimed_token&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">p</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">); &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;boxes on no click: </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;false_boxes&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    placement accuracy over ALL claims (right glyph / claims): </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;on_claimed_token&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">n</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--rounds&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--pad&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mf">0.25</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;slack around a box, in line heights&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+
+    <span class="kn">import</span><span class="w"> </span><span class="nn">locate_glyphs</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">lg</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">german_locator_trial</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">trial</span>
+
+    <span class="n">clicks</span> <span class="o">=</span> <span class="n">load_clicks</span><span class="p">()</span>
+    <span class="n">pages</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">({</span><span class="n">p</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">clicks</span><span class="o">.</span><span class="n">values</span><span class="p">()</span> <span class="k">for</span> <span class="n">_x</span><span class="p">,</span> <span class="n">_y</span><span class="p">,</span> <span class="n">_t</span><span class="p">,</span> <span class="n">p</span><span class="p">,</span> <span class="n">_s</span> <span class="ow">in</span> <span class="n">v</span><span class="p">})</span>
+    <span class="n">sections</span><span class="p">,</span> <span class="n">_unmatched</span> <span class="o">=</span> <span class="n">trial</span><span class="o">.</span><span class="n">german_sections</span><span class="p">()</span>
+    <span class="n">sections</span> <span class="o">=</span> <span class="p">[</span><span class="n">s</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">sections</span> <span class="k">if</span> <span class="n">s</span><span class="o">.</span><span class="n">kind</span> <span class="o">==</span> <span class="s2">&quot;offices&quot;</span> <span class="ow">and</span> <span class="n">s</span><span class="o">.</span><span class="n">scan</span> <span class="ow">in</span> <span class="n">pages</span><span class="p">]</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="p">[(</span><span class="n">s</span><span class="p">,</span> <span class="n">lg</span><span class="o">.</span><span class="n">section_candidates</span><span class="p">(</span><span class="n">s</span><span class="p">))</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">sections</span><span class="p">]</span>
+    <span class="n">columns</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">section</span><span class="p">,</span> <span class="n">_c</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+        <span class="n">columns</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">lg</span><span class="o">.</span><span class="n">section_text_columns</span><span class="p">(</span><span class="n">section</span><span class="p">))</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">)</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">v</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">clicks</span><span class="o">.</span><span class="n">values</span><span class="p">())</span><span class="si">}</span><span class="s2"> clicks on pages </span><span class="si">{</span><span class="n">pages</span><span class="si">}</span><span class="s2">; </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">sections</span><span class="p">)</span><span class="si">}</span><span class="s2"> offices sections, &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">claims</span><span class="p">)</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">sections</span><span class="p">)</span><span class="si">}</span><span class="s2"> gold claims, </span><span class="si">{</span><span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">c</span><span class="p">)</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">_s</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">data</span><span class="p">)</span><span class="si">}</span><span class="s2"> candidate clusters&quot;</span><span class="p">)</span>
+
+    <span class="n">r</span> <span class="o">=</span> <span class="n">candidate_recall</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">clicks</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">pad</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">candidate recall: </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;in_any&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;clicks&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> clicks inside some candidate &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;in_any&#39;</span><span class="p">]</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;clicks&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">); inside exactly one </span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;in_one&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  clicks in no candidate (page, strip, token, x, y):&quot;</span><span class="p">,</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;missed&quot;</span><span class="p">][:</span><span class="mi">12</span><span class="p">],</span> <span class="s2">&quot;...&quot;</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;missed&quot;</span><span class="p">])</span> <span class="o">&gt;</span> <span class="mi">12</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Czech-trained locator:&quot;</span><span class="p">)</span>
+    <span class="n">czech</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">load_sections</span><span class="p">()</span>
+    <span class="n">locator</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">train_locator</span><span class="p">(</span><span class="n">czech</span><span class="p">,</span> <span class="p">{</span><span class="n">s</span><span class="o">.</span><span class="n">scan</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">czech</span> <span class="k">if</span> <span class="n">s</span><span class="o">.</span><span class="n">role</span> <span class="o">==</span> <span class="s2">&quot;calibration&quot;</span><span class="p">},</span> <span class="n">args</span><span class="o">.</span><span class="n">rounds</span><span class="p">)</span>
+    <span class="n">placed</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">section</span><span class="p">,</span> <span class="n">cands</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+        <span class="n">scores</span> <span class="o">=</span> <span class="n">locator</span><span class="o">.</span><span class="n">glyph</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="n">cands</span><span class="p">)</span> <span class="k">if</span> <span class="n">cands</span> <span class="k">else</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">c</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">cands</span><span class="p">,</span> <span class="n">scores</span><span class="p">):</span>
+            <span class="n">c</span><span class="o">.</span><span class="n">glyphness</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+        <span class="n">placed</span><span class="p">[</span><span class="n">section</span><span class="o">.</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">section</span><span class="p">,</span> <span class="n">cands</span><span class="p">,</span> <span class="n">locator</span><span class="o">.</span><span class="n">place</span><span class="p">(</span><span class="n">cands</span><span class="p">,</span> <span class="n">section</span><span class="o">.</span><span class="n">claims</span><span class="p">))</span>
+    <span class="n">report</span><span class="p">(</span><span class="s2">&quot;Czech-trained&quot;</span><span class="p">,</span> <span class="n">placement_accuracy</span><span class="p">(</span><span class="n">placed</span><span class="p">,</span> <span class="n">clicks</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">pad</span><span class="p">,</span> <span class="n">columns</span><span class="p">))</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">German-trained locator, each page placed by locators trained on the other German gold pages:&quot;</span><span class="p">)</span>
+    <span class="n">all_sections</span><span class="p">,</span> <span class="n">_u</span> <span class="o">=</span> <span class="n">trial</span><span class="o">.</span><span class="n">german_sections</span><span class="p">()</span>
+    <span class="n">all_data</span> <span class="o">=</span> <span class="p">[(</span><span class="n">s</span><span class="p">,</span> <span class="n">lg</span><span class="o">.</span><span class="n">section_candidates</span><span class="p">(</span><span class="n">s</span><span class="p">))</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">all_sections</span><span class="p">]</span>
+    <span class="n">calibration</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">({</span><span class="n">s</span><span class="o">.</span><span class="n">scan</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">all_data</span> <span class="k">if</span> <span class="n">s</span><span class="o">.</span><span class="n">role</span> <span class="o">==</span> <span class="s2">&quot;calibration&quot;</span><span class="p">})</span>
+    <span class="n">seeds</span> <span class="o">=</span> <span class="n">trial</span><span class="o">.</span><span class="n">safe_plate_templates</span><span class="p">(</span><span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;places&quot;</span> <span class="o">/</span> <span class="s2">&quot;symbols&quot;</span> <span class="o">/</span> <span class="s2">&quot;de&quot;</span><span class="p">)</span>
+    <span class="n">trained</span><span class="p">,</span> <span class="n">placed</span> <span class="o">=</span> <span class="p">{},</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">section</span><span class="p">,</span> <span class="n">cands</span> <span class="ow">in</span> <span class="n">all_data</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">section</span><span class="o">.</span><span class="n">kind</span> <span class="o">!=</span> <span class="s2">&quot;offices&quot;</span> <span class="ow">or</span> <span class="n">section</span><span class="o">.</span><span class="n">scan</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">pages</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">key</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">calibration</span><span class="p">)</span> <span class="o">-</span> <span class="p">{</span><span class="n">section</span><span class="o">.</span><span class="n">scan</span><span class="p">}))</span>
+        <span class="k">if</span> <span class="n">key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">trained</span><span class="p">:</span>
+            <span class="n">trained</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">lg</span><span class="o">.</span><span class="n">train_locator</span><span class="p">(</span><span class="n">all_data</span><span class="p">,</span> <span class="nb">set</span><span class="p">(</span><span class="n">key</span><span class="p">),</span> <span class="n">args</span><span class="o">.</span><span class="n">rounds</span><span class="p">,</span> <span class="n">seeds</span><span class="p">)</span>
+        <span class="n">loc</span> <span class="o">=</span> <span class="n">trained</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+        <span class="n">scores</span> <span class="o">=</span> <span class="n">loc</span><span class="o">.</span><span class="n">glyph</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="n">cands</span><span class="p">)</span> <span class="k">if</span> <span class="n">cands</span> <span class="k">else</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">c</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">cands</span><span class="p">,</span> <span class="n">scores</span><span class="p">):</span>
+            <span class="n">c</span><span class="o">.</span><span class="n">glyphness</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+        <span class="n">placed</span><span class="p">[</span><span class="n">section</span><span class="o">.</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">section</span><span class="p">,</span> <span class="n">cands</span><span class="p">,</span> <span class="n">loc</span><span class="o">.</span><span class="n">place</span><span class="p">(</span><span class="n">cands</span><span class="p">,</span> <span class="n">section</span><span class="o">.</span><span class="n">claims</span><span class="p">))</span>
+    <span class="n">report</span><span class="p">(</span><span class="s2">&quot;German-trained&quot;</span><span class="p">,</span> <span class="n">placement_accuracy</span><span class="p">(</span><span class="n">placed</span><span class="p">,</span> <span class="n">clicks</span><span class="p">,</span> <span class="n">args</span><span class="o">.</span><span class="n">pad</span><span class="p">,</span> <span class="n">columns</span><span class="p">))</span>
+    <span class="k">return</span> <span class="mi">0</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>

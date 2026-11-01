@@ -1,0 +1,958 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Score the text abbreviations on the sealed certification pages — a second metric, fixed before it was run.</p><p class="tldr-facts"><b>Reference tools</b> · v1.0.0 · 260 lines · 11 public functions · 5 constants · used by nothing else · <code>utils/reference_tools/places/score_sealed_abbreviations.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-reference_tools-places-score_sealed_abbreviations-upper_bound">upper_bound</a><a class="chip" href="#fn-utils-reference_tools-places-score_sealed_abbreviations-parse_language_counts">parse_language_counts</a><a class="chip" href="#fn-utils-reference_tools-places-score_sealed_abbreviations-route_side">route_side</a><a class="chip" href="#fn-utils-reference_tools-places-score_sealed_abbreviations-gold_side">gold_side</a><a class="chip" href="#fn-utils-reference_tools-places-score_sealed_abbreviations-sides">sides</a><a class="chip" href="#fn-utils-reference_tools-places-score_sealed_abbreviations-merge">merge</a><a class="chip" href="#fn-utils-reference_tools-places-score_sealed_abbreviations-block">block</a><a class="chip" href="#fn-utils-reference_tools-places-score_sealed_abbreviations-measure">measure</a><a class="chip" href="#fn-utils-reference_tools-places-score_sealed_abbreviations-report">report</a><a class="chip" href="#fn-utils-reference_tools-places-score_sealed_abbreviations-write">write</a><a class="chip" href="#fn-utils-reference_tools-places-score_sealed_abbreviations-main">main</a><a class="chip const" href="#c-utils-reference_tools-places-score_sealed_abbreviations-ROOT">ROOT</a><a class="chip const" href="#c-utils-reference_tools-places-score_sealed_abbreviations-LEXIKON">LEXIKON</a><a class="chip const" href="#c-utils-reference_tools-places-score_sealed_abbreviations-GERMAN">GERMAN</a><a class="chip const" href="#c-utils-reference_tools-places-score_sealed_abbreviations-KINDS">KINDS</a><a class="chip const" href="#c-utils-reference_tools-places-score_sealed_abbreviations-ALPHA">ALPHA</a></div>
+<h2>How it works</h2><p>The sealed scorer (<code>utils/lexikon_1910/score_certification.py</code>) scores the pictograms and,
+for German Böhmen, the cooperative letters; the other text abbreviations (a school printed
+<code>Volksschule</code>, a fire brigade <code>F.W.</code>, a course) had no sealed-page score, and the only
+measure of them was the gold's, which counts the entries every reader reached
+(<code>run_frozen.score_abbreviations</code>). They feed the register (cooperative counts by language,
+school classes), so this scores them the way the pictograms are scored. Written 2026-10-31,
+before it was run on any edition.</p>
+<p>The sheets are the same eight sealed pages, already transcribed; nothing is read again and
+no paid call is made. It lives outside <code>utils/lexikon_1910</code> on purpose: every module in that
+folder is digested into the route's freeze, so a new one there would make the full run read
+as another route (<code>run_frozen._code_digests</code>).</p>
+<h4>What it reports (all on the claim <code>(page, court, municipality, part, code)</code>)</h4>
+<ol>
+<li>Claim-level P / R / F1 over <strong>every entry the sheets print</strong>, with the 95 % page-clustered
+   interval (<code>score_certification.page_clustered_interval</code>: 10,000 draws, seed 1910).</li>
+<li>The same by kind: institution, cooperative, course.</li>
+<li><strong>Exact upper bounds</strong> (the upper end of the two-sided 95 % Clopper-Pearson interval, claims taken as independent, which
+   understates the uncertainty) on the false share of the route's claims and on the missed
+   share of the gold's: the bootstrap over eight pages is anti-conservative when errors are
+   few, and this is the figure to quote beside it.</li>
+<li>Count accuracy: among true claims, the share whose printed count the route reproduces.</li>
+<li>For cooperatives, <strong>language accuracy</strong>: among true cooperative claims, the share whose
+   count by printed language letter (<code>{none: 1, d: 1}</code>) the route reproduces exactly.</li>
+<li>Per code: gold instances, hit, missed, false.</li>
+</ol>
+<p>Both decoders are the route's own (<code>run_frozen.sheet_abbreviations</code> for the sheets), so the
+score measures reading, not decoding. A run folder is read, never written to except its own
+<code>abbreviation_score.{json,txt}</code>.</p>
+<pre><code>python utils/reference_tools/places/score_sealed_abbreviations.py [--run de-bohemia_certification]
+    [--edition de-bohemia] [--german]
+</code></pre>
+<p><code>--german</code> scores Böhmen, Mähren and Schlesien and then the three pooled. <code>--run</code> names
+the run folder under <code>output/frozen</code> (for round 1: <code>de-bohemia_certification_superseded_round1</code>).
+The Czech sealed pages have no abbreviation file until the full run reads them again.</p>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-reference_tools-places-score_sealed_abbreviations-upper_bound">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">upper_bound</span><span class="p">(</span><span class="n">k</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">n</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">alpha</span><span class="p">:</span> <span class="nb">float</span><span class="o">=</span><span class="n">ALPHA</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span></pre>
+<div class="fndoc"><p>Exact (Clopper-Pearson) <code>1 - alpha</code> upper bound on a proportion: the
+largest <code>p</code> with <code>P(X &lt;= k) &gt;= alpha</code> for <code>X ~ Binomial(n, p)</code>. <code>None</code> for <code>n = 0</code>.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_sealed_abbreviations.py</code></p>
+<details><summary>source · lines 67–79 (13 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">67</span>
+<span class="normal">68</span>
+<span class="normal">69</span>
+<span class="normal">70</span>
+<span class="normal">71</span>
+<span class="normal">72</span>
+<span class="normal">73</span>
+<span class="normal">74</span>
+<span class="normal">75</span>
+<span class="normal">76</span>
+<span class="normal">77</span>
+<span class="normal">78</span>
+<span class="normal">79</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">upper_bound</span><span class="p">(</span><span class="n">k</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">n</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">alpha</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">ALPHA</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Exact (Clopper-Pearson) ``1 - alpha`` upper bound on a proportion: the</span>
+<span class="sd">    largest ``p`` with ``P(X &lt;= k) &gt;= alpha`` for ``X ~ Binomial(n, p)``. ``None`` for ``n = 0``.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">n</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="n">k</span> <span class="o">&gt;=</span> <span class="n">n</span><span class="p">:</span>
+        <span class="k">return</span> <span class="mf">1.0</span>
+    <span class="n">lo</span><span class="p">,</span> <span class="n">hi</span> <span class="o">=</span> <span class="n">k</span> <span class="o">/</span> <span class="n">n</span><span class="p">,</span> <span class="mf">1.0</span>
+    <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">80</span><span class="p">):</span>
+        <span class="n">mid</span> <span class="o">=</span> <span class="p">(</span><span class="n">lo</span> <span class="o">+</span> <span class="n">hi</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
+        <span class="n">cdf</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">comb</span><span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="n">i</span><span class="p">)</span> <span class="o">*</span> <span class="n">mid</span><span class="o">**</span><span class="n">i</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">mid</span><span class="p">)</span> <span class="o">**</span> <span class="p">(</span><span class="n">n</span> <span class="o">-</span> <span class="n">i</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">k</span> <span class="o">+</span> <span class="mi">1</span><span class="p">))</span>
+        <span class="n">lo</span><span class="p">,</span> <span class="n">hi</span> <span class="o">=</span> <span class="p">(</span><span class="n">mid</span><span class="p">,</span> <span class="n">hi</span><span class="p">)</span> <span class="k">if</span> <span class="n">cdf</span> <span class="o">&gt;=</span> <span class="n">alpha</span> <span class="k">else</span> <span class="p">(</span><span class="n">lo</span><span class="p">,</span> <span class="n">mid</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">lo</span> <span class="o">+</span> <span class="n">hi</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-score_sealed_abbreviations-parse_language_counts">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">parse_language_counts</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span></pre>
+<div class="fndoc"><p><code>"none:1|d:1"</code> -&gt; <code>{"none": 1, "d": 1}</code> (the route's <code>language_counts</code>).</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_sealed_abbreviations.py</code></p>
+<details><summary>source · lines 82–89 (8 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">82</span>
+<span class="normal">83</span>
+<span class="normal">84</span>
+<span class="normal">85</span>
+<span class="normal">86</span>
+<span class="normal">87</span>
+<span class="normal">88</span>
+<span class="normal">89</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">parse_language_counts</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``&quot;none:1|d:1&quot;`` -&gt; ``{&quot;none&quot;: 1, &quot;d&quot;: 1}`` (the route&#39;s ``language_counts``).&quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">part</span> <span class="ow">in</span> <span class="p">(</span><span class="n">text</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;|&quot;</span><span class="p">):</span>
+        <span class="k">if</span> <span class="s2">&quot;:&quot;</span> <span class="ow">in</span> <span class="n">part</span><span class="p">:</span>
+            <span class="n">key</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">value</span> <span class="o">=</span> <span class="n">part</span><span class="o">.</span><span class="n">rpartition</span><span class="p">(</span><span class="s2">&quot;:&quot;</span><span class="p">)</span>
+            <span class="n">out</span><span class="p">[</span><span class="n">key</span><span class="o">.</span><span class="n">strip</span><span class="p">()]</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-score_sealed_abbreviations-route_side">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">route_side</span><span class="p">(</span><span class="n">run</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">dict</span><span class="p">,</span> <span class="nb">dict</span><span class="p">,</span> <span class="nb">dict</span><span class="p">,</span> <span class="nb">set</span><span class="p">]</span></pre>
+<div class="fndoc"><p><code>({claim: count}, {claim: kind}, {claim: languages}, entries)</code> from a run's
+<code>final_abbreviations.csv</code>, keyed as the sealed scorer keys a claim.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 92–104 (13 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">route_side</span><span class="p">(</span><span class="n">run</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">dict</span><span class="p">,</span> <span class="nb">dict</span><span class="p">,</span> <span class="nb">dict</span><span class="p">,</span> <span class="nb">set</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``({claim: count}, {claim: kind}, {claim: languages}, entries)`` from a run&#39;s</span>
+<span class="sd">    ``final_abbreviations.csv``, keyed as the sealed scorer keys a claim.&quot;&quot;&quot;</span>
+    <span class="n">counts</span><span class="p">,</span> <span class="n">kind_of</span><span class="p">,</span> <span class="n">languages</span><span class="p">,</span> <span class="n">entries</span> <span class="o">=</span> <span class="p">{},</span> <span class="p">{},</span> <span class="p">{},</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">with</span> <span class="p">(</span><span class="n">run</span> <span class="o">/</span> <span class="s2">&quot;final_abbreviations.csv&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictReader</span><span class="p">(</span><span class="n">fh</span><span class="p">):</span>
+            <span class="n">place</span> <span class="o">=</span> <span class="p">(</span><span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;court_id&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="ow">or</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;district&quot;</span><span class="p">]</span>
+            <span class="n">claim</span> <span class="o">=</span> <span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">],</span> <span class="n">place</span><span class="p">,</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;muni_seq&quot;</span><span class="p">],</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;settlement_seq&quot;</span><span class="p">],</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;code&quot;</span><span class="p">])</span>
+            <span class="n">counts</span><span class="p">[</span><span class="n">claim</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;count&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+            <span class="n">kind_of</span><span class="p">[</span><span class="n">claim</span><span class="p">]</span> <span class="o">=</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;kind&quot;</span><span class="p">]</span>
+            <span class="n">languages</span><span class="p">[</span><span class="n">claim</span><span class="p">]</span> <span class="o">=</span> <span class="n">parse_language_counts</span><span class="p">(</span><span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;language_counts&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+            <span class="n">entries</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">claim</span><span class="p">[:</span><span class="mi">3</span><span class="p">])</span>
+    <span class="k">return</span> <span class="n">counts</span><span class="p">,</span> <span class="n">kind_of</span><span class="p">,</span> <span class="n">languages</span><span class="p">,</span> <span class="n">entries</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-score_sealed_abbreviations-gold_side">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">gold_side</span><span class="p">(</span><span class="n">edition</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span></pre>
+<div class="fndoc"><p>The sealed sheets' abbreviations: <code>counts</code>, <code>kinds</code>, <code>languages</code> per claim, the
+printed entries (the population) and the sealed pages.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 107–123 (17 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">gold_side</span><span class="p">(</span><span class="n">edition</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The sealed sheets&#39; abbreviations: ``counts``, ``kinds``, ``languages`` per claim, the</span>
+<span class="sd">    printed entries (the population) and the sealed pages.&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">run_frozen</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">rf</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">score_certification</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">sc</span>
+
+    <span class="n">court</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">court_of</span><span class="p">(</span><span class="n">edition</span><span class="p">)</span>
+    <span class="n">_entries</span><span class="p">,</span> <span class="n">claims</span> <span class="o">=</span> <span class="n">rf</span><span class="o">.</span><span class="n">sheet_abbreviations</span><span class="p">(</span><span class="n">sc</span><span class="o">.</span><span class="n">sealed_paths</span><span class="p">(</span><span class="n">edition</span><span class="p">),</span> <span class="n">edition</span><span class="p">)</span>
+    <span class="n">table</span> <span class="o">=</span> <span class="n">rf</span><span class="o">.</span><span class="n">abbreviation_table</span><span class="p">(</span><span class="n">edition</span><span class="p">)</span>
+    <span class="n">key</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">t</span><span class="p">:</span> <span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="n">court</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mi">1</span><span class="p">])),</span> <span class="o">*</span><span class="nb">map</span><span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">t</span><span class="p">[</span><span class="mi">2</span><span class="p">:]))</span>               <span class="c1"># noqa: E731</span>
+    <span class="n">counts</span> <span class="o">=</span> <span class="p">{</span><span class="n">key</span><span class="p">(</span><span class="n">c</span><span class="p">):</span> <span class="nb">str</span><span class="p">(</span><span class="n">v</span><span class="p">[</span><span class="s2">&quot;count&quot;</span><span class="p">])</span> <span class="k">for</span> <span class="n">c</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">claims</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="n">kinds</span> <span class="o">=</span> <span class="p">{</span><span class="n">key</span><span class="p">(</span><span class="n">c</span><span class="p">):</span> <span class="n">table</span><span class="p">[</span><span class="n">c</span><span class="p">[</span><span class="mi">4</span><span class="p">]]</span><span class="o">.</span><span class="n">kind</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">claims</span><span class="p">}</span>
+    <span class="n">languages</span> <span class="o">=</span> <span class="p">{</span><span class="n">key</span><span class="p">(</span><span class="n">c</span><span class="p">):</span> <span class="nb">dict</span><span class="p">(</span><span class="n">v</span><span class="p">[</span><span class="s2">&quot;languages&quot;</span><span class="p">])</span> <span class="k">for</span> <span class="n">c</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">claims</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="n">sheets</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">sealed_sheets</span><span class="p">(</span><span class="n">edition</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;counts&quot;</span><span class="p">:</span> <span class="n">counts</span><span class="p">,</span> <span class="s2">&quot;kinds&quot;</span><span class="p">:</span> <span class="n">kinds</span><span class="p">,</span> <span class="s2">&quot;languages&quot;</span><span class="p">:</span> <span class="n">languages</span><span class="p">,</span>
+            <span class="s2">&quot;entries&quot;</span><span class="p">:</span> <span class="n">sc</span><span class="o">.</span><span class="n">printed_entries</span><span class="p">(</span><span class="n">sheets</span><span class="p">,</span> <span class="n">court</span><span class="p">),</span>
+            <span class="s2">&quot;pages&quot;</span><span class="p">:</span> <span class="p">{</span><span class="nb">str</span><span class="p">(</span><span class="n">sheet</span><span class="p">[</span><span class="s2">&quot;scan&quot;</span><span class="p">])</span> <span class="k">for</span> <span class="n">sheet</span> <span class="ow">in</span> <span class="n">sheets</span><span class="p">}}</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-score_sealed_abbreviations-sides">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">sides</span><span class="p">(</span><span class="n">edition</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">run</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">tag</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;&#39;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span></pre>
+<div class="fndoc"><p>Both sides of one edition, the pages prefixed with <code>tag</code> when editions are pooled.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_sealed_scorer.py</code> <code>utils/lexikon_1910/score_certification.py</code></p>
+<details><summary>source · lines 126–142 (17 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">sides</span><span class="p">(</span><span class="n">edition</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">run</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">tag</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Both sides of one edition, the pages prefixed with ``tag`` when editions are pooled.&quot;&quot;&quot;</span>
+    <span class="n">gold</span> <span class="o">=</span> <span class="n">gold_side</span><span class="p">(</span><span class="n">edition</span><span class="p">)</span>
+    <span class="n">counts</span><span class="p">,</span> <span class="n">kinds</span><span class="p">,</span> <span class="n">languages</span><span class="p">,</span> <span class="n">entries</span> <span class="o">=</span> <span class="n">route_side</span><span class="p">(</span><span class="n">run</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;gold_counts&quot;</span><span class="p">:</span> <span class="n">gold</span><span class="p">[</span><span class="s2">&quot;counts&quot;</span><span class="p">],</span> <span class="s2">&quot;gold_kinds&quot;</span><span class="p">:</span> <span class="n">gold</span><span class="p">[</span><span class="s2">&quot;kinds&quot;</span><span class="p">],</span>
+           <span class="s2">&quot;gold_languages&quot;</span><span class="p">:</span> <span class="n">gold</span><span class="p">[</span><span class="s2">&quot;languages&quot;</span><span class="p">],</span> <span class="s2">&quot;route_counts&quot;</span><span class="p">:</span> <span class="n">counts</span><span class="p">,</span> <span class="s2">&quot;route_kinds&quot;</span><span class="p">:</span> <span class="n">kinds</span><span class="p">,</span>
+           <span class="s2">&quot;route_languages&quot;</span><span class="p">:</span> <span class="n">languages</span><span class="p">,</span> <span class="s2">&quot;entries&quot;</span><span class="p">:</span> <span class="n">gold</span><span class="p">[</span><span class="s2">&quot;entries&quot;</span><span class="p">]</span> <span class="o">|</span> <span class="n">entries</span><span class="p">,</span>
+           <span class="s2">&quot;printed&quot;</span><span class="p">:</span> <span class="n">gold</span><span class="p">[</span><span class="s2">&quot;entries&quot;</span><span class="p">],</span> <span class="s2">&quot;pages&quot;</span><span class="p">:</span> <span class="n">gold</span><span class="p">[</span><span class="s2">&quot;pages&quot;</span><span class="p">]}</span>
+    <span class="k">if</span> <span class="n">tag</span><span class="p">:</span>
+        <span class="n">page</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">c</span><span class="p">:</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">tag</span><span class="si">}</span><span class="s2">:</span><span class="si">{</span><span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="o">*</span><span class="n">c</span><span class="p">[</span><span class="mi">1</span><span class="p">:])</span>                                <span class="c1"># noqa: E731</span>
+        <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;gold_counts&quot;</span><span class="p">,</span> <span class="s2">&quot;gold_kinds&quot;</span><span class="p">,</span> <span class="s2">&quot;gold_languages&quot;</span><span class="p">,</span> <span class="s2">&quot;route_counts&quot;</span><span class="p">,</span>
+                     <span class="s2">&quot;route_kinds&quot;</span><span class="p">,</span> <span class="s2">&quot;route_languages&quot;</span><span class="p">):</span>
+            <span class="n">out</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="n">page</span><span class="p">(</span><span class="n">c</span><span class="p">):</span> <span class="n">v</span> <span class="k">for</span> <span class="n">c</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">out</span><span class="p">[</span><span class="n">name</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+        <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;entries&quot;</span><span class="p">,</span> <span class="s2">&quot;printed&quot;</span><span class="p">):</span>
+            <span class="n">out</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="n">page</span><span class="p">(</span><span class="n">e</span><span class="p">)</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">out</span><span class="p">[</span><span class="n">name</span><span class="p">]}</span>
+        <span class="n">out</span><span class="p">[</span><span class="s2">&quot;pages&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">tag</span><span class="si">}</span><span class="s2">:</span><span class="si">{</span><span class="n">p</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;pages&quot;</span><span class="p">]}</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-score_sealed_abbreviations-merge">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">merge</span><span class="p">(</span><span class="n">parts</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">dict</span></pre>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code> <code>tests/test_pooled_score.py</code> <code>utils/lexikon_1910/lexikon_1910_register.py</code> <code>utils/lexikon_1910/score_certification.py</code> <code>utils/parsing/amateur_theatre.py</code> <code>utils/parsing/amateur_theatre_model.py</code> <code>utils/parsing/census_hu.py</code> <code>utils/parsing/districts.py</code> <code>utils/parsing/matice.py</code> <code>utils/parsing/vua_courts.py</code> <code>utils/reference_tools/education/score_education_gold.py</code> <code>utils/reference_tools/occupations/build_czisco_bridge.py</code> <code>utils/reference_tools/occupations/build_hisco_authority.py</code> <code>utils/reference_tools/occupations/build_occupation_curation.py</code> <code>utils/reference_tools/occupations/run_census_berufsstellung_check.py</code> <code>utils/reference_tools/places/merge_matice_readings.py</code> <code>utils/reference_tools/places/run_matice_pilot.py</code> <code>utils/reference_tools/units/build_unit_timeline.py</code> <code>utils/scraping/scraper_amaterskedivadlo.py</code></p>
+<details><summary>source · lines 145–153 (9 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">merge</span><span class="p">(</span><span class="n">parts</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+    <span class="n">out</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">part</span> <span class="ow">in</span> <span class="n">parts</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">part</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="nb">set</span><span class="p">):</span>
+                <span class="n">out</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">set</span><span class="p">())</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">out</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-score_sealed_abbreviations-block">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">block</span><span class="p">(</span><span class="n">s</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">keep</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span></pre>
+<div class="fndoc"><p>The metrics for the claims <code>keep</code> selects (a kind, or all).</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_de_table.py</code></p>
+<details><summary>source · lines 156–174 (19 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">block</span><span class="p">(</span><span class="n">s</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">keep</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The metrics for the claims ``keep`` selects (a kind, or all).&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">score_certification</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">sc</span>
+
+    <span class="n">pages</span> <span class="o">=</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;pages&quot;</span><span class="p">]</span>
+    <span class="n">truth</span> <span class="o">=</span> <span class="p">{</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;gold_counts&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">in</span> <span class="n">pages</span> <span class="ow">and</span> <span class="n">keep</span><span class="p">(</span><span class="n">s</span><span class="p">[</span><span class="s2">&quot;gold_kinds&quot;</span><span class="p">][</span><span class="n">c</span><span class="p">])}</span>
+    <span class="n">got</span> <span class="o">=</span> <span class="p">{</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;route_counts&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">in</span> <span class="n">pages</span> <span class="ow">and</span> <span class="n">keep</span><span class="p">(</span><span class="n">s</span><span class="p">[</span><span class="s2">&quot;route_kinds&quot;</span><span class="p">][</span><span class="n">c</span><span class="p">])}</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">score_sets</span><span class="p">(</span><span class="n">truth</span><span class="p">,</span> <span class="n">got</span><span class="p">)</span>
+    <span class="n">result</span><span class="p">[</span><span class="s2">&quot;interval&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">page_clustered_interval</span><span class="p">(</span><span class="n">truth</span><span class="p">,</span> <span class="n">got</span><span class="p">)</span>
+    <span class="n">result</span><span class="p">[</span><span class="s2">&quot;false_upper&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">upper_bound</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">&quot;false&quot;</span><span class="p">],</span> <span class="nb">len</span><span class="p">(</span><span class="n">got</span><span class="p">))</span>
+    <span class="n">result</span><span class="p">[</span><span class="s2">&quot;missed_upper&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">upper_bound</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">&quot;missed&quot;</span><span class="p">],</span> <span class="nb">len</span><span class="p">(</span><span class="n">truth</span><span class="p">))</span>
+    <span class="n">right</span> <span class="o">=</span> <span class="n">got</span> <span class="o">&amp;</span> <span class="n">truth</span>
+    <span class="n">result</span><span class="p">[</span><span class="s2">&quot;count&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">count_accuracy</span><span class="p">(</span><span class="n">s</span><span class="p">[</span><span class="s2">&quot;gold_counts&quot;</span><span class="p">],</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;route_counts&quot;</span><span class="p">],</span> <span class="n">right</span><span class="p">)</span>
+    <span class="n">languages</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">right</span> <span class="k">if</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;gold_kinds&quot;</span><span class="p">][</span><span class="n">c</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;cooperative&quot;</span><span class="p">]</span>
+    <span class="n">same</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="mi">1</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">languages</span> <span class="k">if</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;gold_languages&quot;</span><span class="p">][</span><span class="n">c</span><span class="p">]</span> <span class="o">==</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;route_languages&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">c</span><span class="p">))</span>
+    <span class="n">result</span><span class="p">[</span><span class="s2">&quot;language&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;claims&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">languages</span><span class="p">),</span> <span class="s2">&quot;language_right&quot;</span><span class="p">:</span> <span class="n">same</span><span class="p">,</span>
+                          <span class="s2">&quot;share&quot;</span><span class="p">:</span> <span class="n">same</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">languages</span><span class="p">)</span> <span class="k">if</span> <span class="n">languages</span> <span class="k">else</span> <span class="kc">None</span><span class="p">}</span>
+    <span class="n">result</span><span class="p">[</span><span class="s2">&quot;symbols&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">per_symbol</span><span class="p">(</span><span class="n">truth</span><span class="p">,</span> <span class="n">got</span><span class="p">,</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;printed&quot;</span><span class="p">])</span>
+    <span class="k">return</span> <span class="n">result</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-score_sealed_abbreviations-measure">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">measure</span><span class="p">(</span><span class="n">s</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span></pre>
+<p class="calls"><b>Called by</b> <code>tests/test_religion_categories.py</code> <code>tests/test_sealed_scorer.py</code> <code>utils/lexikon_1910/score_certification.py</code> <code>utils/reference_tools/places/run_german_oracle.py</code></p>
+<details><summary>source · lines 177–181 (5 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">measure</span><span class="p">(</span><span class="n">s</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;all&quot;</span><span class="p">:</span> <span class="n">block</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="k">lambda</span> <span class="n">kind</span><span class="p">:</span> <span class="kc">True</span><span class="p">)}</span>
+    <span class="k">for</span> <span class="n">kind</span> <span class="ow">in</span> <span class="n">KINDS</span><span class="p">:</span>
+        <span class="n">result</span><span class="p">[</span><span class="n">kind</span><span class="p">]</span> <span class="o">=</span> <span class="n">block</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="k">lambda</span> <span class="n">k</span><span class="p">,</span> <span class="n">kind</span><span class="o">=</span><span class="n">kind</span><span class="p">:</span> <span class="n">k</span> <span class="o">==</span> <span class="n">kind</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">result</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-score_sealed_abbreviations-report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">result</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code> <code>03_visualisation.ipynb</code> <code>tests/test_religion_categories.py</code> <code>tests/test_sealed_scorer.py</code> <code>utils/docs/build_docs.py</code> <code>utils/lexikon_1910/build_de_page_map.py</code> <code>utils/lexikon_1910/build_mark_ledger.py</code> <code>utils/lexikon_1910/build_symbol_atlas_de.py</code> <code>utils/lexikon_1910/read_transcription_md.py</code> <code>utils/lexikon_1910/run_frozen.py</code> <code>utils/lexikon_1910/run_glyph_e3.py</code> <code>utils/lexikon_1910/score_certification.py</code> <code>utils/lexikon_1910/score_table_passes.py</code> <code>utils/linkage.py</code> <code>utils/parsing/clean.py</code> <code>utils/parsing/dates.py</code> <code>utils/parsing/exit_codes.py</code> <code>utils/parsing/habsburg.py</code> <code>utils/reference_tools/places/german_click_recall.py</code> <code>utils/reference_tools/places/run_matice_pilot.py</code> <code>utils/validation/data_checks.py</code></p>
+<details><summary>source · lines 195–215 (21 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">result</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span><span class="n">title</span><span class="p">,</span> <span class="s2">&quot;  claims on the sealed pages, over every entry the sheets print&quot;</span><span class="p">,</span>
+             <span class="s2">&quot;  (the interval is 95 </span><span class="si">% o</span><span class="s2">ver the pages resampled; the exact bounds treat claims as independent)&quot;</span><span class="p">]</span>
+    <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;all&quot;</span><span class="p">,</span> <span class="o">*</span><span class="n">KINDS</span><span class="p">):</span>
+        <span class="n">b</span> <span class="o">=</span> <span class="n">result</span><span class="p">[</span><span class="n">name</span><span class="p">]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="n">b</span><span class="p">[</span><span class="s2">&quot;claims_gold&quot;</span><span class="p">]</span> <span class="ow">or</span> <span class="n">b</span><span class="p">[</span><span class="s2">&quot;claims_route&quot;</span><span class="p">]):</span>
+            <span class="k">continue</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">_line</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">b</span><span class="p">))</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="s1">&#39;&#39;</span><span class="si">:</span><span class="s2">12s</span><span class="si">}</span><span class="s2"> exact 95 % (two-sided) upper bound: false share of the route&#39;s claims &quot;</span>
+                     <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">_bound</span><span class="p">(</span><span class="n">b</span><span class="p">[</span><span class="s1">&#39;false_upper&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2">, missed share of the sheets&#39; &quot;</span>
+                     <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">_bound</span><span class="p">(</span><span class="n">b</span><span class="p">[</span><span class="s1">&#39;missed_upper&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">c</span> <span class="o">=</span> <span class="n">b</span><span class="p">[</span><span class="s2">&quot;count&quot;</span><span class="p">]</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="s1">&#39;&#39;</span><span class="si">:</span><span class="s2">12s</span><span class="si">}</span><span class="s2"> printed count right on </span><span class="si">{</span><span class="n">c</span><span class="p">[</span><span class="s1">&#39;count_right&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="n">c</span><span class="p">[</span><span class="s1">&#39;claims&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> true claims&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">name</span> <span class="o">==</span> <span class="s2">&quot;cooperative&quot;</span> <span class="ow">and</span> <span class="n">b</span><span class="p">[</span><span class="s2">&quot;language&quot;</span><span class="p">][</span><span class="s2">&quot;claims&quot;</span><span class="p">]:</span>
+            <span class="n">lg</span> <span class="o">=</span> <span class="n">b</span><span class="p">[</span><span class="s2">&quot;language&quot;</span><span class="p">]</span>
+            <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="s1">&#39;&#39;</span><span class="si">:</span><span class="s2">12s</span><span class="si">}</span><span class="s2"> language letters right on </span><span class="si">{</span><span class="n">lg</span><span class="p">[</span><span class="s1">&#39;language_right&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> of &quot;</span>
+                         <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">lg</span><span class="p">[</span><span class="s1">&#39;claims&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> true cooperative claims&quot;</span><span class="p">)</span>
+    <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;  per code (as printed)&quot;</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="s1">&#39;code&#39;</span><span class="si">:</span><span class="s2">14s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;gold&#39;</span><span class="si">:</span><span class="s2">&gt;5s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;hit&#39;</span><span class="si">:</span><span class="s2">&gt;4s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;miss&#39;</span><span class="si">:</span><span class="s2">&gt;5s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;false&#39;</span><span class="si">:</span><span class="s2">&gt;6s</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span>
+    <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">result</span><span class="p">[</span><span class="s2">&quot;all&quot;</span><span class="p">][</span><span class="s2">&quot;symbols&quot;</span><span class="p">]:</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;token&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">14s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;gold&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">5d</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;hit&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">4d</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;missed&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">5d</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;false&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">6d</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-score_sealed_abbreviations-write">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">write</span><span class="p">(</span><span class="n">run</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">result</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span></pre>
+<p class="calls"><b>Called by</b> <code>tests/test_lookalike_rules.py</code> <code>tests/test_pooled_score.py</code> <code>tests/test_r5_german_notes.py</code> <code>tests/test_reader_batches_gemini.py</code> <code>tests/test_sealed_scorer.py</code> <code>utils/lexikon_1910/bakeoff.py</code> <code>utils/lexikon_1910/read_transcription_md.py</code> <code>utils/lexikon_1910/reader_batches.py</code> <code>utils/lexikon_1910/run_de_table.py</code> <code>utils/lexikon_1910/run_frozen.py</code> <code>utils/lexikon_1910/run_lexikon_1910_pilot.py</code> <code>utils/lexikon_1910/run_r5_german_notes.py</code> <code>utils/reference_tools/occupations/download_hisco_sources.py</code> <code>utils/scraping/progress.py</code> <code>utils/scraping/scraper_csol.py</code> <code>utils/scraping/scraper_kramerius.py</code> <code>utils/scraping/scraper_kramerius7.py</code> <code>utils/scraping/scraper_vuapraha.py</code> <code>utils/tables/latex_tables.py</code></p>
+<details><summary>source · lines 218–223 (6 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">write</span><span class="p">(</span><span class="n">run</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">result</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">run</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="p">(</span><span class="n">run</span> <span class="o">/</span> <span class="s2">&quot;abbreviation_score.json&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span>
+        <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">({</span><span class="s2">&quot;scorer&quot;</span><span class="p">:</span> <span class="n">__version__</span><span class="p">,</span> <span class="s2">&quot;title&quot;</span><span class="p">:</span> <span class="n">title</span><span class="p">,</span> <span class="o">**</span><span class="n">result</span><span class="p">},</span> <span class="n">indent</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="nb">list</span><span class="p">),</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="p">(</span><span class="n">run</span> <span class="o">/</span> <span class="s2">&quot;abbreviation_score.txt&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">report</span><span class="p">(</span><span class="n">title</span><span class="p">,</span> <span class="n">result</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-score_sealed_abbreviations-main">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 226–256 (31 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--edition&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;de-bohemia&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--run&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;run folder under output/frozen&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--german&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;the three German editions, then pooled&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+    <span class="n">frozen</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;output&quot;</span> <span class="o">/</span> <span class="s2">&quot;frozen&quot;</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">args</span><span class="o">.</span><span class="n">german</span><span class="p">:</span>
+        <span class="n">run</span> <span class="o">=</span> <span class="n">frozen</span> <span class="o">/</span> <span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">run</span> <span class="ow">or</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">edition</span><span class="si">}</span><span class="s2">_certification&quot;</span><span class="p">)</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">measure</span><span class="p">(</span><span class="n">sides</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">edition</span><span class="p">,</span> <span class="n">run</span><span class="p">))</span>
+        <span class="n">title</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;Sealed-page abbreviations — </span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">edition</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">run</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">report</span><span class="p">(</span><span class="n">title</span><span class="p">,</span> <span class="n">result</span><span class="p">))</span>
+        <span class="n">write</span><span class="p">(</span><span class="n">run</span><span class="p">,</span> <span class="n">title</span><span class="p">,</span> <span class="n">result</span><span class="p">)</span>
+        <span class="k">return</span> <span class="mi">0</span>
+
+    <span class="n">suffix</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">args</span><span class="o">.</span><span class="n">run</span> <span class="k">else</span> <span class="n">args</span><span class="o">.</span><span class="n">run</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;de-bohemia_certification&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">parts</span><span class="p">,</span> <span class="n">pooled</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">edition</span> <span class="ow">in</span> <span class="n">GERMAN</span><span class="p">:</span>
+        <span class="n">run</span> <span class="o">=</span> <span class="n">frozen</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">edition</span><span class="si">}</span><span class="s2">_certification</span><span class="si">{</span><span class="n">suffix</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="n">side</span> <span class="o">=</span> <span class="n">sides</span><span class="p">(</span><span class="n">edition</span><span class="p">,</span> <span class="n">run</span><span class="p">)</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">measure</span><span class="p">(</span><span class="n">side</span><span class="p">)</span>
+        <span class="n">title</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;Sealed-page abbreviations — </span><span class="si">{</span><span class="n">edition</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">run</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">report</span><span class="p">(</span><span class="n">title</span><span class="p">,</span> <span class="n">result</span><span class="p">),</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">write</span><span class="p">(</span><span class="n">run</span><span class="p">,</span> <span class="n">title</span><span class="p">,</span> <span class="n">result</span><span class="p">)</span>
+        <span class="n">parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">sides</span><span class="p">(</span><span class="n">edition</span><span class="p">,</span> <span class="n">run</span><span class="p">,</span> <span class="n">tag</span><span class="o">=</span><span class="n">edition</span><span class="p">))</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">measure</span><span class="p">(</span><span class="n">merge</span><span class="p">(</span><span class="n">parts</span><span class="p">))</span>
+    <span class="n">title</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;Sealed-page abbreviations — German pooled, </span><span class="si">{</span><span class="n">suffix</span><span class="w"> </span><span class="ow">or</span><span class="w"> </span><span class="s1">&#39;round 2&#39;</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">report</span><span class="p">(</span><span class="n">title</span><span class="p">,</span> <span class="n">result</span><span class="p">))</span>
+    <span class="n">write</span><span class="p">(</span><span class="n">frozen</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;de-pooled_certification</span><span class="si">{</span><span class="n">suffix</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">title</span><span class="p">,</span> <span class="n">result</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-reference_tools-places-score_sealed_abbreviations-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-score_sealed_abbreviations-LEXIKON"><pre class="sig">LEXIKON<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;utils&#39;</span> <span class="o">/</span> <span class="s1">&#39;lexikon_1910&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-score_sealed_abbreviations-GERMAN"><pre class="sig">GERMAN<span class="kind">tuple · 3 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">(</span><span class="s1">&#39;de-bohemia&#39;</span><span class="p">,</span> <span class="s1">&#39;de-moravia&#39;</span><span class="p">,</span> <span class="s1">&#39;de-silesia&#39;</span><span class="p">)</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-score_sealed_abbreviations-KINDS"><pre class="sig">KINDS<span class="kind">tuple · 3 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">(</span><span class="s1">&#39;institution&#39;</span><span class="p">,</span> <span class="s1">&#39;cooperative&#39;</span><span class="p">,</span> <span class="s1">&#39;course&#39;</span><span class="p">)</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-score_sealed_abbreviations-ALPHA"><pre class="sig">ALPHA<span class="kind">float</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mf">0.025</span>
+</pre></div>
+</details></div>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/reference_tools/places/score_sealed_abbreviations.py · 260 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;Score the text abbreviations on the sealed certification pages — a second metric, fixed before it was run.</span>
+
+<span class="sd">The sealed scorer (``utils/lexikon_1910/score_certification.py``) scores the pictograms and,</span>
+<span class="sd">for German Böhmen, the cooperative letters; the other text abbreviations (a school printed</span>
+<span class="sd">``Volksschule``, a fire brigade ``F.W.``, a course) had no sealed-page score, and the only</span>
+<span class="sd">measure of them was the gold&#39;s, which counts the entries every reader reached</span>
+<span class="sd">(``run_frozen.score_abbreviations``). They feed the register (cooperative counts by language,</span>
+<span class="sd">school classes), so this scores them the way the pictograms are scored. Written 2026-10-31,</span>
+<span class="sd">before it was run on any edition.</span>
+
+<span class="sd">The sheets are the same eight sealed pages, already transcribed; nothing is read again and</span>
+<span class="sd">no paid call is made. It lives outside ``utils/lexikon_1910`` on purpose: every module in that</span>
+<span class="sd">folder is digested into the route&#39;s freeze, so a new one there would make the full run read</span>
+<span class="sd">as another route (``run_frozen._code_digests``).</span>
+
+<span class="sd">What it reports (all on the claim ``(page, court, municipality, part, code)``)</span>
+<span class="sd">-----------------------------------------------------------------------------</span>
+<span class="sd">1. Claim-level P / R / F1 over **every entry the sheets print**, with the 95 % page-clustered</span>
+<span class="sd">   interval (``score_certification.page_clustered_interval``: 10,000 draws, seed 1910).</span>
+<span class="sd">2. The same by kind: institution, cooperative, course.</span>
+<span class="sd">3. **Exact upper bounds** (the upper end of the two-sided 95 % Clopper-Pearson interval, claims taken as independent, which</span>
+<span class="sd">   understates the uncertainty) on the false share of the route&#39;s claims and on the missed</span>
+<span class="sd">   share of the gold&#39;s: the bootstrap over eight pages is anti-conservative when errors are</span>
+<span class="sd">   few, and this is the figure to quote beside it.</span>
+<span class="sd">4. Count accuracy: among true claims, the share whose printed count the route reproduces.</span>
+<span class="sd">5. For cooperatives, **language accuracy**: among true cooperative claims, the share whose</span>
+<span class="sd">   count by printed language letter (``{none: 1, d: 1}``) the route reproduces exactly.</span>
+<span class="sd">6. Per code: gold instances, hit, missed, false.</span>
+
+<span class="sd">Both decoders are the route&#39;s own (``run_frozen.sheet_abbreviations`` for the sheets), so the</span>
+<span class="sd">score measures reading, not decoding. A run folder is read, never written to except its own</span>
+<span class="sd">``abbreviation_score.{json,txt}``.</span>
+
+<span class="sd">    python utils/reference_tools/places/score_sealed_abbreviations.py [--run de-bohemia_certification]</span>
+<span class="sd">        [--edition de-bohemia] [--german]</span>
+
+<span class="sd">``--german`` scores Böhmen, Mähren and Schlesien and then the three pooled. ``--run`` names</span>
+<span class="sd">the run folder under ``output/frozen`` (for round 1: ``de-bohemia_certification_superseded_round1``).</span>
+<span class="sd">The Czech sealed pages have no abbreviation file until the full run reads them again.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;1.0.0&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">csv</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">defaultdict</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">math</span><span class="w"> </span><span class="kn">import</span> <span class="n">comb</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+<span class="n">LEXIKON</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;utils&quot;</span> <span class="o">/</span> <span class="s2">&quot;lexikon_1910&quot;</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">))</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">LEXIKON</span><span class="p">))</span>
+
+<span class="k">for</span> <span class="n">stream</span> <span class="ow">in</span> <span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">stdout</span><span class="p">,</span> <span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">):</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">stream</span><span class="p">,</span> <span class="s2">&quot;reconfigure&quot;</span><span class="p">):</span>
+        <span class="n">stream</span><span class="o">.</span><span class="n">reconfigure</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">errors</span><span class="o">=</span><span class="s2">&quot;replace&quot;</span><span class="p">)</span>
+
+<span class="n">GERMAN</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;de-bohemia&quot;</span><span class="p">,</span> <span class="s2">&quot;de-moravia&quot;</span><span class="p">,</span> <span class="s2">&quot;de-silesia&quot;</span><span class="p">)</span>
+<span class="n">KINDS</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;institution&quot;</span><span class="p">,</span> <span class="s2">&quot;cooperative&quot;</span><span class="p">,</span> <span class="s2">&quot;course&quot;</span><span class="p">)</span>
+<span class="n">ALPHA</span> <span class="o">=</span> <span class="mf">0.025</span>                  <span class="c1"># the upper end of a two-sided 95 % Clopper-Pearson interval</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">upper_bound</span><span class="p">(</span><span class="n">k</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">n</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">alpha</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="n">ALPHA</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Exact (Clopper-Pearson) ``1 - alpha`` upper bound on a proportion: the</span>
+<span class="sd">    largest ``p`` with ``P(X &lt;= k) &gt;= alpha`` for ``X ~ Binomial(n, p)``. ``None`` for ``n = 0``.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">n</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="n">k</span> <span class="o">&gt;=</span> <span class="n">n</span><span class="p">:</span>
+        <span class="k">return</span> <span class="mf">1.0</span>
+    <span class="n">lo</span><span class="p">,</span> <span class="n">hi</span> <span class="o">=</span> <span class="n">k</span> <span class="o">/</span> <span class="n">n</span><span class="p">,</span> <span class="mf">1.0</span>
+    <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">80</span><span class="p">):</span>
+        <span class="n">mid</span> <span class="o">=</span> <span class="p">(</span><span class="n">lo</span> <span class="o">+</span> <span class="n">hi</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
+        <span class="n">cdf</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">comb</span><span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="n">i</span><span class="p">)</span> <span class="o">*</span> <span class="n">mid</span><span class="o">**</span><span class="n">i</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">mid</span><span class="p">)</span> <span class="o">**</span> <span class="p">(</span><span class="n">n</span> <span class="o">-</span> <span class="n">i</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">k</span> <span class="o">+</span> <span class="mi">1</span><span class="p">))</span>
+        <span class="n">lo</span><span class="p">,</span> <span class="n">hi</span> <span class="o">=</span> <span class="p">(</span><span class="n">mid</span><span class="p">,</span> <span class="n">hi</span><span class="p">)</span> <span class="k">if</span> <span class="n">cdf</span> <span class="o">&gt;=</span> <span class="n">alpha</span> <span class="k">else</span> <span class="p">(</span><span class="n">lo</span><span class="p">,</span> <span class="n">mid</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">lo</span> <span class="o">+</span> <span class="n">hi</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">parse_language_counts</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``&quot;none:1|d:1&quot;`` -&gt; ``{&quot;none&quot;: 1, &quot;d&quot;: 1}`` (the route&#39;s ``language_counts``).&quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">part</span> <span class="ow">in</span> <span class="p">(</span><span class="n">text</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;|&quot;</span><span class="p">):</span>
+        <span class="k">if</span> <span class="s2">&quot;:&quot;</span> <span class="ow">in</span> <span class="n">part</span><span class="p">:</span>
+            <span class="n">key</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">value</span> <span class="o">=</span> <span class="n">part</span><span class="o">.</span><span class="n">rpartition</span><span class="p">(</span><span class="s2">&quot;:&quot;</span><span class="p">)</span>
+            <span class="n">out</span><span class="p">[</span><span class="n">key</span><span class="o">.</span><span class="n">strip</span><span class="p">()]</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">key</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">route_side</span><span class="p">(</span><span class="n">run</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">dict</span><span class="p">,</span> <span class="nb">dict</span><span class="p">,</span> <span class="nb">dict</span><span class="p">,</span> <span class="nb">set</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``({claim: count}, {claim: kind}, {claim: languages}, entries)`` from a run&#39;s</span>
+<span class="sd">    ``final_abbreviations.csv``, keyed as the sealed scorer keys a claim.&quot;&quot;&quot;</span>
+    <span class="n">counts</span><span class="p">,</span> <span class="n">kind_of</span><span class="p">,</span> <span class="n">languages</span><span class="p">,</span> <span class="n">entries</span> <span class="o">=</span> <span class="p">{},</span> <span class="p">{},</span> <span class="p">{},</span> <span class="nb">set</span><span class="p">()</span>
+    <span class="k">with</span> <span class="p">(</span><span class="n">run</span> <span class="o">/</span> <span class="s2">&quot;final_abbreviations.csv&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictReader</span><span class="p">(</span><span class="n">fh</span><span class="p">):</span>
+            <span class="n">place</span> <span class="o">=</span> <span class="p">(</span><span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;court_id&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="ow">or</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;district&quot;</span><span class="p">]</span>
+            <span class="n">claim</span> <span class="o">=</span> <span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">],</span> <span class="n">place</span><span class="p">,</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;muni_seq&quot;</span><span class="p">],</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;settlement_seq&quot;</span><span class="p">],</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;code&quot;</span><span class="p">])</span>
+            <span class="n">counts</span><span class="p">[</span><span class="n">claim</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;count&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+            <span class="n">kind_of</span><span class="p">[</span><span class="n">claim</span><span class="p">]</span> <span class="o">=</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;kind&quot;</span><span class="p">]</span>
+            <span class="n">languages</span><span class="p">[</span><span class="n">claim</span><span class="p">]</span> <span class="o">=</span> <span class="n">parse_language_counts</span><span class="p">(</span><span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;language_counts&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+            <span class="n">entries</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">claim</span><span class="p">[:</span><span class="mi">3</span><span class="p">])</span>
+    <span class="k">return</span> <span class="n">counts</span><span class="p">,</span> <span class="n">kind_of</span><span class="p">,</span> <span class="n">languages</span><span class="p">,</span> <span class="n">entries</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">gold_side</span><span class="p">(</span><span class="n">edition</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The sealed sheets&#39; abbreviations: ``counts``, ``kinds``, ``languages`` per claim, the</span>
+<span class="sd">    printed entries (the population) and the sealed pages.&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">run_frozen</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">rf</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">score_certification</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">sc</span>
+
+    <span class="n">court</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">court_of</span><span class="p">(</span><span class="n">edition</span><span class="p">)</span>
+    <span class="n">_entries</span><span class="p">,</span> <span class="n">claims</span> <span class="o">=</span> <span class="n">rf</span><span class="o">.</span><span class="n">sheet_abbreviations</span><span class="p">(</span><span class="n">sc</span><span class="o">.</span><span class="n">sealed_paths</span><span class="p">(</span><span class="n">edition</span><span class="p">),</span> <span class="n">edition</span><span class="p">)</span>
+    <span class="n">table</span> <span class="o">=</span> <span class="n">rf</span><span class="o">.</span><span class="n">abbreviation_table</span><span class="p">(</span><span class="n">edition</span><span class="p">)</span>
+    <span class="n">key</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">t</span><span class="p">:</span> <span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="n">court</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mi">1</span><span class="p">])),</span> <span class="o">*</span><span class="nb">map</span><span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="n">t</span><span class="p">[</span><span class="mi">2</span><span class="p">:]))</span>               <span class="c1"># noqa: E731</span>
+    <span class="n">counts</span> <span class="o">=</span> <span class="p">{</span><span class="n">key</span><span class="p">(</span><span class="n">c</span><span class="p">):</span> <span class="nb">str</span><span class="p">(</span><span class="n">v</span><span class="p">[</span><span class="s2">&quot;count&quot;</span><span class="p">])</span> <span class="k">for</span> <span class="n">c</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">claims</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="n">kinds</span> <span class="o">=</span> <span class="p">{</span><span class="n">key</span><span class="p">(</span><span class="n">c</span><span class="p">):</span> <span class="n">table</span><span class="p">[</span><span class="n">c</span><span class="p">[</span><span class="mi">4</span><span class="p">]]</span><span class="o">.</span><span class="n">kind</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">claims</span><span class="p">}</span>
+    <span class="n">languages</span> <span class="o">=</span> <span class="p">{</span><span class="n">key</span><span class="p">(</span><span class="n">c</span><span class="p">):</span> <span class="nb">dict</span><span class="p">(</span><span class="n">v</span><span class="p">[</span><span class="s2">&quot;languages&quot;</span><span class="p">])</span> <span class="k">for</span> <span class="n">c</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">claims</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="n">sheets</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">sealed_sheets</span><span class="p">(</span><span class="n">edition</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;counts&quot;</span><span class="p">:</span> <span class="n">counts</span><span class="p">,</span> <span class="s2">&quot;kinds&quot;</span><span class="p">:</span> <span class="n">kinds</span><span class="p">,</span> <span class="s2">&quot;languages&quot;</span><span class="p">:</span> <span class="n">languages</span><span class="p">,</span>
+            <span class="s2">&quot;entries&quot;</span><span class="p">:</span> <span class="n">sc</span><span class="o">.</span><span class="n">printed_entries</span><span class="p">(</span><span class="n">sheets</span><span class="p">,</span> <span class="n">court</span><span class="p">),</span>
+            <span class="s2">&quot;pages&quot;</span><span class="p">:</span> <span class="p">{</span><span class="nb">str</span><span class="p">(</span><span class="n">sheet</span><span class="p">[</span><span class="s2">&quot;scan&quot;</span><span class="p">])</span> <span class="k">for</span> <span class="n">sheet</span> <span class="ow">in</span> <span class="n">sheets</span><span class="p">}}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">sides</span><span class="p">(</span><span class="n">edition</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">run</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">tag</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Both sides of one edition, the pages prefixed with ``tag`` when editions are pooled.&quot;&quot;&quot;</span>
+    <span class="n">gold</span> <span class="o">=</span> <span class="n">gold_side</span><span class="p">(</span><span class="n">edition</span><span class="p">)</span>
+    <span class="n">counts</span><span class="p">,</span> <span class="n">kinds</span><span class="p">,</span> <span class="n">languages</span><span class="p">,</span> <span class="n">entries</span> <span class="o">=</span> <span class="n">route_side</span><span class="p">(</span><span class="n">run</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;gold_counts&quot;</span><span class="p">:</span> <span class="n">gold</span><span class="p">[</span><span class="s2">&quot;counts&quot;</span><span class="p">],</span> <span class="s2">&quot;gold_kinds&quot;</span><span class="p">:</span> <span class="n">gold</span><span class="p">[</span><span class="s2">&quot;kinds&quot;</span><span class="p">],</span>
+           <span class="s2">&quot;gold_languages&quot;</span><span class="p">:</span> <span class="n">gold</span><span class="p">[</span><span class="s2">&quot;languages&quot;</span><span class="p">],</span> <span class="s2">&quot;route_counts&quot;</span><span class="p">:</span> <span class="n">counts</span><span class="p">,</span> <span class="s2">&quot;route_kinds&quot;</span><span class="p">:</span> <span class="n">kinds</span><span class="p">,</span>
+           <span class="s2">&quot;route_languages&quot;</span><span class="p">:</span> <span class="n">languages</span><span class="p">,</span> <span class="s2">&quot;entries&quot;</span><span class="p">:</span> <span class="n">gold</span><span class="p">[</span><span class="s2">&quot;entries&quot;</span><span class="p">]</span> <span class="o">|</span> <span class="n">entries</span><span class="p">,</span>
+           <span class="s2">&quot;printed&quot;</span><span class="p">:</span> <span class="n">gold</span><span class="p">[</span><span class="s2">&quot;entries&quot;</span><span class="p">],</span> <span class="s2">&quot;pages&quot;</span><span class="p">:</span> <span class="n">gold</span><span class="p">[</span><span class="s2">&quot;pages&quot;</span><span class="p">]}</span>
+    <span class="k">if</span> <span class="n">tag</span><span class="p">:</span>
+        <span class="n">page</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">c</span><span class="p">:</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">tag</span><span class="si">}</span><span class="s2">:</span><span class="si">{</span><span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="o">*</span><span class="n">c</span><span class="p">[</span><span class="mi">1</span><span class="p">:])</span>                                <span class="c1"># noqa: E731</span>
+        <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;gold_counts&quot;</span><span class="p">,</span> <span class="s2">&quot;gold_kinds&quot;</span><span class="p">,</span> <span class="s2">&quot;gold_languages&quot;</span><span class="p">,</span> <span class="s2">&quot;route_counts&quot;</span><span class="p">,</span>
+                     <span class="s2">&quot;route_kinds&quot;</span><span class="p">,</span> <span class="s2">&quot;route_languages&quot;</span><span class="p">):</span>
+            <span class="n">out</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="n">page</span><span class="p">(</span><span class="n">c</span><span class="p">):</span> <span class="n">v</span> <span class="k">for</span> <span class="n">c</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">out</span><span class="p">[</span><span class="n">name</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+        <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;entries&quot;</span><span class="p">,</span> <span class="s2">&quot;printed&quot;</span><span class="p">):</span>
+            <span class="n">out</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="n">page</span><span class="p">(</span><span class="n">e</span><span class="p">)</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">out</span><span class="p">[</span><span class="n">name</span><span class="p">]}</span>
+        <span class="n">out</span><span class="p">[</span><span class="s2">&quot;pages&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">tag</span><span class="si">}</span><span class="s2">:</span><span class="si">{</span><span class="n">p</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;pages&quot;</span><span class="p">]}</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">merge</span><span class="p">(</span><span class="n">parts</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+    <span class="n">out</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">part</span> <span class="ow">in</span> <span class="n">parts</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">part</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="nb">set</span><span class="p">):</span>
+                <span class="n">out</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="nb">set</span><span class="p">())</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">out</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">block</span><span class="p">(</span><span class="n">s</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">keep</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The metrics for the claims ``keep`` selects (a kind, or all).&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">score_certification</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">sc</span>
+
+    <span class="n">pages</span> <span class="o">=</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;pages&quot;</span><span class="p">]</span>
+    <span class="n">truth</span> <span class="o">=</span> <span class="p">{</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;gold_counts&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">in</span> <span class="n">pages</span> <span class="ow">and</span> <span class="n">keep</span><span class="p">(</span><span class="n">s</span><span class="p">[</span><span class="s2">&quot;gold_kinds&quot;</span><span class="p">][</span><span class="n">c</span><span class="p">])}</span>
+    <span class="n">got</span> <span class="o">=</span> <span class="p">{</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;route_counts&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">in</span> <span class="n">pages</span> <span class="ow">and</span> <span class="n">keep</span><span class="p">(</span><span class="n">s</span><span class="p">[</span><span class="s2">&quot;route_kinds&quot;</span><span class="p">][</span><span class="n">c</span><span class="p">])}</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">score_sets</span><span class="p">(</span><span class="n">truth</span><span class="p">,</span> <span class="n">got</span><span class="p">)</span>
+    <span class="n">result</span><span class="p">[</span><span class="s2">&quot;interval&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">page_clustered_interval</span><span class="p">(</span><span class="n">truth</span><span class="p">,</span> <span class="n">got</span><span class="p">)</span>
+    <span class="n">result</span><span class="p">[</span><span class="s2">&quot;false_upper&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">upper_bound</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">&quot;false&quot;</span><span class="p">],</span> <span class="nb">len</span><span class="p">(</span><span class="n">got</span><span class="p">))</span>
+    <span class="n">result</span><span class="p">[</span><span class="s2">&quot;missed_upper&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">upper_bound</span><span class="p">(</span><span class="n">result</span><span class="p">[</span><span class="s2">&quot;missed&quot;</span><span class="p">],</span> <span class="nb">len</span><span class="p">(</span><span class="n">truth</span><span class="p">))</span>
+    <span class="n">right</span> <span class="o">=</span> <span class="n">got</span> <span class="o">&amp;</span> <span class="n">truth</span>
+    <span class="n">result</span><span class="p">[</span><span class="s2">&quot;count&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">count_accuracy</span><span class="p">(</span><span class="n">s</span><span class="p">[</span><span class="s2">&quot;gold_counts&quot;</span><span class="p">],</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;route_counts&quot;</span><span class="p">],</span> <span class="n">right</span><span class="p">)</span>
+    <span class="n">languages</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">right</span> <span class="k">if</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;gold_kinds&quot;</span><span class="p">][</span><span class="n">c</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;cooperative&quot;</span><span class="p">]</span>
+    <span class="n">same</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="mi">1</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">languages</span> <span class="k">if</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;gold_languages&quot;</span><span class="p">][</span><span class="n">c</span><span class="p">]</span> <span class="o">==</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;route_languages&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">c</span><span class="p">))</span>
+    <span class="n">result</span><span class="p">[</span><span class="s2">&quot;language&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;claims&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">languages</span><span class="p">),</span> <span class="s2">&quot;language_right&quot;</span><span class="p">:</span> <span class="n">same</span><span class="p">,</span>
+                          <span class="s2">&quot;share&quot;</span><span class="p">:</span> <span class="n">same</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">languages</span><span class="p">)</span> <span class="k">if</span> <span class="n">languages</span> <span class="k">else</span> <span class="kc">None</span><span class="p">}</span>
+    <span class="n">result</span><span class="p">[</span><span class="s2">&quot;symbols&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">per_symbol</span><span class="p">(</span><span class="n">truth</span><span class="p">,</span> <span class="n">got</span><span class="p">,</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;printed&quot;</span><span class="p">])</span>
+    <span class="k">return</span> <span class="n">result</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">measure</span><span class="p">(</span><span class="n">s</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;all&quot;</span><span class="p">:</span> <span class="n">block</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="k">lambda</span> <span class="n">kind</span><span class="p">:</span> <span class="kc">True</span><span class="p">)}</span>
+    <span class="k">for</span> <span class="n">kind</span> <span class="ow">in</span> <span class="n">KINDS</span><span class="p">:</span>
+        <span class="n">result</span><span class="p">[</span><span class="n">kind</span><span class="p">]</span> <span class="o">=</span> <span class="n">block</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="k">lambda</span> <span class="n">k</span><span class="p">,</span> <span class="n">kind</span><span class="o">=</span><span class="n">kind</span><span class="p">:</span> <span class="n">k</span> <span class="o">==</span> <span class="n">kind</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">result</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_line</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">b</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">lo</span><span class="p">,</span> <span class="n">hi</span> <span class="o">=</span> <span class="n">b</span><span class="p">[</span><span class="s2">&quot;interval&quot;</span><span class="p">][</span><span class="s2">&quot;f1&quot;</span><span class="p">]</span>
+    <span class="k">return</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">name</span><span class="si">:</span><span class="s2">12s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">b</span><span class="p">[</span><span class="s1">&#39;claims_gold&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">4d</span><span class="si">}</span><span class="s2"> printed </span><span class="si">{</span><span class="n">b</span><span class="p">[</span><span class="s1">&#39;claims_route&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">4d</span><span class="si">}</span><span class="s2"> by the route &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">b</span><span class="p">[</span><span class="s1">&#39;hit&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> hit, </span><span class="si">{</span><span class="n">b</span><span class="p">[</span><span class="s1">&#39;false&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> false, </span><span class="si">{</span><span class="n">b</span><span class="p">[</span><span class="s1">&#39;missed&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> missed)  F1 </span><span class="si">{</span><span class="n">b</span><span class="p">[</span><span class="s1">&#39;f1&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;[</span><span class="si">{</span><span class="n">lo</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">hi</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">]  precision </span><span class="si">{</span><span class="n">b</span><span class="p">[</span><span class="s1">&#39;precision&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">  recall </span><span class="si">{</span><span class="n">b</span><span class="p">[</span><span class="s1">&#39;recall&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_bound</span><span class="p">(</span><span class="n">value</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="s2">&quot;—&quot;</span> <span class="k">if</span> <span class="n">value</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">value</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">result</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span><span class="n">title</span><span class="p">,</span> <span class="s2">&quot;  claims on the sealed pages, over every entry the sheets print&quot;</span><span class="p">,</span>
+             <span class="s2">&quot;  (the interval is 95 </span><span class="si">% o</span><span class="s2">ver the pages resampled; the exact bounds treat claims as independent)&quot;</span><span class="p">]</span>
+    <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;all&quot;</span><span class="p">,</span> <span class="o">*</span><span class="n">KINDS</span><span class="p">):</span>
+        <span class="n">b</span> <span class="o">=</span> <span class="n">result</span><span class="p">[</span><span class="n">name</span><span class="p">]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="n">b</span><span class="p">[</span><span class="s2">&quot;claims_gold&quot;</span><span class="p">]</span> <span class="ow">or</span> <span class="n">b</span><span class="p">[</span><span class="s2">&quot;claims_route&quot;</span><span class="p">]):</span>
+            <span class="k">continue</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">_line</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">b</span><span class="p">))</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="s1">&#39;&#39;</span><span class="si">:</span><span class="s2">12s</span><span class="si">}</span><span class="s2"> exact 95 % (two-sided) upper bound: false share of the route&#39;s claims &quot;</span>
+                     <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">_bound</span><span class="p">(</span><span class="n">b</span><span class="p">[</span><span class="s1">&#39;false_upper&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2">, missed share of the sheets&#39; &quot;</span>
+                     <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">_bound</span><span class="p">(</span><span class="n">b</span><span class="p">[</span><span class="s1">&#39;missed_upper&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">c</span> <span class="o">=</span> <span class="n">b</span><span class="p">[</span><span class="s2">&quot;count&quot;</span><span class="p">]</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="s1">&#39;&#39;</span><span class="si">:</span><span class="s2">12s</span><span class="si">}</span><span class="s2"> printed count right on </span><span class="si">{</span><span class="n">c</span><span class="p">[</span><span class="s1">&#39;count_right&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> of </span><span class="si">{</span><span class="n">c</span><span class="p">[</span><span class="s1">&#39;claims&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> true claims&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">name</span> <span class="o">==</span> <span class="s2">&quot;cooperative&quot;</span> <span class="ow">and</span> <span class="n">b</span><span class="p">[</span><span class="s2">&quot;language&quot;</span><span class="p">][</span><span class="s2">&quot;claims&quot;</span><span class="p">]:</span>
+            <span class="n">lg</span> <span class="o">=</span> <span class="n">b</span><span class="p">[</span><span class="s2">&quot;language&quot;</span><span class="p">]</span>
+            <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="s1">&#39;&#39;</span><span class="si">:</span><span class="s2">12s</span><span class="si">}</span><span class="s2"> language letters right on </span><span class="si">{</span><span class="n">lg</span><span class="p">[</span><span class="s1">&#39;language_right&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> of &quot;</span>
+                         <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">lg</span><span class="p">[</span><span class="s1">&#39;claims&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> true cooperative claims&quot;</span><span class="p">)</span>
+    <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;  per code (as printed)&quot;</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="s1">&#39;code&#39;</span><span class="si">:</span><span class="s2">14s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;gold&#39;</span><span class="si">:</span><span class="s2">&gt;5s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;hit&#39;</span><span class="si">:</span><span class="s2">&gt;4s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;miss&#39;</span><span class="si">:</span><span class="s2">&gt;5s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="s1">&#39;false&#39;</span><span class="si">:</span><span class="s2">&gt;6s</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span>
+    <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">result</span><span class="p">[</span><span class="s2">&quot;all&quot;</span><span class="p">][</span><span class="s2">&quot;symbols&quot;</span><span class="p">]:</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;token&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">14s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;gold&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">5d</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;hit&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">4d</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;missed&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">5d</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;false&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">6d</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">write</span><span class="p">(</span><span class="n">run</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">title</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">result</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">run</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="p">(</span><span class="n">run</span> <span class="o">/</span> <span class="s2">&quot;abbreviation_score.json&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span>
+        <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">({</span><span class="s2">&quot;scorer&quot;</span><span class="p">:</span> <span class="n">__version__</span><span class="p">,</span> <span class="s2">&quot;title&quot;</span><span class="p">:</span> <span class="n">title</span><span class="p">,</span> <span class="o">**</span><span class="n">result</span><span class="p">},</span> <span class="n">indent</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="nb">list</span><span class="p">),</span>
+        <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="p">(</span><span class="n">run</span> <span class="o">/</span> <span class="s2">&quot;abbreviation_score.txt&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">report</span><span class="p">(</span><span class="n">title</span><span class="p">,</span> <span class="n">result</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n\n</span><span class="s2">&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--edition&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;de-bohemia&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--run&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;run folder under output/frozen&quot;</span><span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--german&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;the three German editions, then pooled&quot;</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">(</span><span class="n">argv</span><span class="p">)</span>
+    <span class="n">frozen</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;output&quot;</span> <span class="o">/</span> <span class="s2">&quot;frozen&quot;</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">args</span><span class="o">.</span><span class="n">german</span><span class="p">:</span>
+        <span class="n">run</span> <span class="o">=</span> <span class="n">frozen</span> <span class="o">/</span> <span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">run</span> <span class="ow">or</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">edition</span><span class="si">}</span><span class="s2">_certification&quot;</span><span class="p">)</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">measure</span><span class="p">(</span><span class="n">sides</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">edition</span><span class="p">,</span> <span class="n">run</span><span class="p">))</span>
+        <span class="n">title</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;Sealed-page abbreviations — </span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">edition</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">run</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">report</span><span class="p">(</span><span class="n">title</span><span class="p">,</span> <span class="n">result</span><span class="p">))</span>
+        <span class="n">write</span><span class="p">(</span><span class="n">run</span><span class="p">,</span> <span class="n">title</span><span class="p">,</span> <span class="n">result</span><span class="p">)</span>
+        <span class="k">return</span> <span class="mi">0</span>
+
+    <span class="n">suffix</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">args</span><span class="o">.</span><span class="n">run</span> <span class="k">else</span> <span class="n">args</span><span class="o">.</span><span class="n">run</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;de-bohemia_certification&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">parts</span><span class="p">,</span> <span class="n">pooled</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">edition</span> <span class="ow">in</span> <span class="n">GERMAN</span><span class="p">:</span>
+        <span class="n">run</span> <span class="o">=</span> <span class="n">frozen</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">edition</span><span class="si">}</span><span class="s2">_certification</span><span class="si">{</span><span class="n">suffix</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="n">side</span> <span class="o">=</span> <span class="n">sides</span><span class="p">(</span><span class="n">edition</span><span class="p">,</span> <span class="n">run</span><span class="p">)</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">measure</span><span class="p">(</span><span class="n">side</span><span class="p">)</span>
+        <span class="n">title</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;Sealed-page abbreviations — </span><span class="si">{</span><span class="n">edition</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">run</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">report</span><span class="p">(</span><span class="n">title</span><span class="p">,</span> <span class="n">result</span><span class="p">),</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">write</span><span class="p">(</span><span class="n">run</span><span class="p">,</span> <span class="n">title</span><span class="p">,</span> <span class="n">result</span><span class="p">)</span>
+        <span class="n">parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">sides</span><span class="p">(</span><span class="n">edition</span><span class="p">,</span> <span class="n">run</span><span class="p">,</span> <span class="n">tag</span><span class="o">=</span><span class="n">edition</span><span class="p">))</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">measure</span><span class="p">(</span><span class="n">merge</span><span class="p">(</span><span class="n">parts</span><span class="p">))</span>
+    <span class="n">title</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;Sealed-page abbreviations — German pooled, </span><span class="si">{</span><span class="n">suffix</span><span class="w"> </span><span class="ow">or</span><span class="w"> </span><span class="s1">&#39;round 2&#39;</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">report</span><span class="p">(</span><span class="n">title</span><span class="p">,</span> <span class="n">result</span><span class="p">))</span>
+    <span class="n">write</span><span class="p">(</span><span class="n">frozen</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;de-pooled_certification</span><span class="si">{</span><span class="n">suffix</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">title</span><span class="p">,</span> <span class="n">result</span><span class="p">)</span>
+    <span class="k">return</span> <span class="mi">0</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>
