@@ -1,0 +1,399 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Whether a frozen run has every reply it asked for, before anything is built on it.</p><p class="tldr-facts"><b>Output &amp; support</b> · v0.1.0 · 104 lines · 7 public functions · 2 constants · used by <code>15_frozen_run.ipynb</code> · <code>utils/validation/run_completeness.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-validation-run_completeness-queue_label">queue_label</a><a class="chip" href="#fn-utils-validation-run_completeness-missing_replies">missing_replies</a><a class="chip" href="#fn-utils-validation-run_completeness-read_gaps">read_gaps</a><a class="chip" href="#fn-utils-validation-run_completeness-opus_gaps">opus_gaps</a><a class="chip" href="#fn-utils-validation-run_completeness-unaccepted">unaccepted</a><a class="chip" href="#fn-utils-validation-run_completeness-write_record">write_record</a><a class="chip" href="#fn-utils-validation-run_completeness-report">report</a><a class="chip const" href="#c-utils-validation-run_completeness-QUEUE_SUFFIX">QUEUE_SUFFIX</a><a class="chip const" href="#c-utils-validation-run_completeness-RECORD_NAME">RECORD_NAME</a></div>
+<h2>How it works</h2><p>The route learns that a call failed by recognising the error: a 429 or a word like <em>quota</em>
+stops a pass and marks it incomplete. Any other wording — an exhausted credit balance, an
+outage, a refusal — is an ordinary failure: the crop is retried, dropped, and the pass is
+still marked finished. Its marks are then missing from the inventory, which reads as <em>not
+printed</em>: zero where the truth is unknown, the error shape that fabricated <code>exit_N</code>.</p>
+<p>So completeness is checked on the <strong>outcome</strong>, whatever the cause: every request a pass
+queued (<code>&amp;lt;label&amp;gt;.queue.jsonl</code>, one line per crop or table block, with its <code>key</code> and
+<code>cache_dir</code>) must have its reply in the cache (<code>&amp;lt;cache_dir&amp;gt;/&amp;lt;key&amp;gt;.json</code>) — a reply that
+failed is never cached. Every Opus call the run built must have its answer. A gap the author
+accepts is listed by key in notebook 15's <code>ACCEPT_FAILED</code>, so letting one through is a
+recorded decision, never a silence; the record is written beside the run's reads.</p>
+<p>Notebook 15 calls this after 7d (an incomplete pass loses its <code>.done</code>, so 7d reads the gap
+again), before the ledger (section 12) and before the anchor's ledger (14b). It lives outside
+<code>utils/lexikon_1910</code> on purpose: every module there is digested into the freeze, and a guard
+must not make the full run a different route from the gold it is held to.</p>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-validation-run_completeness-queue_label">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">queue_label</span><span class="p">(</span><span class="n">queue</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<div class="fndoc"><p>The pass a queue belongs to: its file name less <code>QUEUE_SUFFIX</code>.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_run_completeness.py</code></p>
+<details><summary>source · lines 35–38 (4 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">35</span>
+<span class="normal">36</span>
+<span class="normal">37</span>
+<span class="normal">38</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">queue_label</span><span class="p">(</span><span class="n">queue</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The pass a queue belongs to: its file name less :data:`QUEUE_SUFFIX`.&quot;&quot;&quot;</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">queue</span><span class="p">)</span><span class="o">.</span><span class="n">name</span>
+    <span class="k">return</span> <span class="n">name</span><span class="p">[:</span> <span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">QUEUE_SUFFIX</span><span class="p">)]</span> <span class="k">if</span> <span class="n">name</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="n">QUEUE_SUFFIX</span><span class="p">)</span> <span class="k">else</span> <span class="n">Path</span><span class="p">(</span><span class="n">queue</span><span class="p">)</span><span class="o">.</span><span class="n">stem</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-validation-run_completeness-missing_replies">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">missing_replies</span><span class="p">(</span><span class="n">queue</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span></pre>
+<div class="fndoc"><p>The keys of a queue's requests whose reply is not in their cache, sorted. One line a
+key, the last (as <code>reader_batches.read_queue</code> keeps it); a missing queue has none.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_run_completeness.py</code></p>
+<details><summary>source · lines 41–52 (12 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">41</span>
+<span class="normal">42</span>
+<span class="normal">43</span>
+<span class="normal">44</span>
+<span class="normal">45</span>
+<span class="normal">46</span>
+<span class="normal">47</span>
+<span class="normal">48</span>
+<span class="normal">49</span>
+<span class="normal">50</span>
+<span class="normal">51</span>
+<span class="normal">52</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">missing_replies</span><span class="p">(</span><span class="n">queue</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The keys of a queue&#39;s requests whose reply is not in their cache, sorted. One line a</span>
+<span class="sd">    key, the last (as ``reader_batches.read_queue`` keeps it); a missing queue has none.&quot;&quot;&quot;</span>
+    <span class="n">lines</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">Path</span><span class="p">(</span><span class="n">queue</span><span class="p">)</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="k">return</span> <span class="p">[]</span>
+    <span class="k">with</span> <span class="n">Path</span><span class="p">(</span><span class="n">queue</span><span class="p">)</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;rb&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">raw</span> <span class="ow">in</span> <span class="n">fh</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">raw</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+                <span class="n">rec</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span>
+                <span class="n">lines</span><span class="p">[</span><span class="n">rec</span><span class="p">[</span><span class="s2">&quot;key&quot;</span><span class="p">]]</span> <span class="o">=</span> <span class="n">rec</span><span class="p">[</span><span class="s2">&quot;cache_dir&quot;</span><span class="p">]</span>
+    <span class="k">return</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">key</span> <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">folder</span> <span class="ow">in</span> <span class="n">lines</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="n">folder</span><span class="p">)</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s2">.json&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">exists</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-validation-run_completeness-read_gaps">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">read_gaps</span><span class="p">(</span><span class="n">queues</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">Path</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span></pre>
+<div class="fndoc"><p><code>{pass label: keys with no reply}</code> over a run's queues, passes with none left out.</p></div>
+<p class="calls"><b>Called by</b> <code>15_frozen_run.ipynb</code> <code>tests/test_run_completeness.py</code></p>
+<details><summary>source · lines 55–62 (8 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">55</span>
+<span class="normal">56</span>
+<span class="normal">57</span>
+<span class="normal">58</span>
+<span class="normal">59</span>
+<span class="normal">60</span>
+<span class="normal">61</span>
+<span class="normal">62</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">read_gaps</span><span class="p">(</span><span class="n">queues</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">Path</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``{pass label: keys with no reply}`` over a run&#39;s queues, passes with none left out.&quot;&quot;&quot;</span>
+    <span class="n">out</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">queue</span> <span class="ow">in</span> <span class="n">queues</span><span class="p">:</span>
+        <span class="n">keys</span> <span class="o">=</span> <span class="n">missing_replies</span><span class="p">(</span><span class="n">queue</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">keys</span><span class="p">:</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">queue_label</span><span class="p">(</span><span class="n">queue</span><span class="p">),</span> <span class="p">[])</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">keys</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-validation-run_completeness-opus_gaps">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">opus_gaps</span><span class="p">(</span><span class="n">unanswered</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span></pre>
+<div class="fndoc"><p><code>{"opus": call ids}</code> for the Opus items no answer came back for
+(<code>run_frozen.opus_unanswered</code>); empty when every call is answered.</p></div>
+<p class="calls"><b>Called by</b> <code>15_frozen_run.ipynb</code> <code>tests/test_run_completeness.py</code></p>
+<details><summary>source · lines 65–69 (5 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">65</span>
+<span class="normal">66</span>
+<span class="normal">67</span>
+<span class="normal">68</span>
+<span class="normal">69</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">opus_gaps</span><span class="p">(</span><span class="n">unanswered</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``{&quot;opus&quot;: call ids}`` for the Opus items no answer came back for</span>
+<span class="sd">    (``run_frozen.opus_unanswered``); empty when every call is answered.&quot;&quot;&quot;</span>
+    <span class="n">ids</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">item</span><span class="p">[</span><span class="s2">&quot;id&quot;</span><span class="p">])</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">unanswered</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;opus&quot;</span><span class="p">:</span> <span class="n">ids</span><span class="p">}</span> <span class="k">if</span> <span class="n">ids</span> <span class="k">else</span> <span class="p">{}</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-validation-run_completeness-unaccepted">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">unaccepted</span><span class="p">(</span><span class="n">gaps</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]],</span> <span class="n">accept</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span></pre>
+<div class="fndoc"><p>The gaps the author has not accepted. <code>accept</code> is that edition's entry of
+<code>ACCEPT_FAILED</code>: keys and Opus call ids, in any order, in one list.</p></div>
+<p class="calls"><b>Called by</b> <code>15_frozen_run.ipynb</code> <code>tests/test_run_completeness.py</code></p>
+<details><summary>source · lines 72–77 (6 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">72</span>
+<span class="normal">73</span>
+<span class="normal">74</span>
+<span class="normal">75</span>
+<span class="normal">76</span>
+<span class="normal">77</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">unaccepted</span><span class="p">(</span><span class="n">gaps</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]],</span> <span class="n">accept</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The gaps the author has not accepted. ``accept`` is that edition&#39;s entry of</span>
+<span class="sd">    ``ACCEPT_FAILED``: keys and Opus call ids, in any order, in one list.&quot;&quot;&quot;</span>
+    <span class="n">allowed</span> <span class="o">=</span> <span class="p">{</span><span class="nb">str</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="p">(</span><span class="n">accept</span> <span class="ow">or</span> <span class="p">())}</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">{</span><span class="n">label</span><span class="p">:</span> <span class="p">[</span><span class="n">k</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">keys</span> <span class="k">if</span> <span class="n">k</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">allowed</span><span class="p">]</span> <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">keys</span> <span class="ow">in</span> <span class="n">gaps</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="k">return</span> <span class="p">{</span><span class="n">label</span><span class="p">:</span> <span class="n">keys</span> <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">keys</span> <span class="ow">in</span> <span class="n">out</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">keys</span><span class="p">}</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-validation-run_completeness-write_record">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">write_record</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">gaps</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]],</span> <span class="n">accept</span><span class="p">,</span> <span class="n">stage</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span></pre>
+<div class="fndoc"><p>Keep what was found at <code>stage</code> and what was accepted, the earlier stages' entries
+kept beside it; returns the record.</p></div>
+<p class="calls"><b>Called by</b> <code>15_frozen_run.ipynb</code> <code>tests/test_run_completeness.py</code></p>
+<details><summary>source · lines 80–90 (11 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">80</span>
+<span class="normal">81</span>
+<span class="normal">82</span>
+<span class="normal">83</span>
+<span class="normal">84</span>
+<span class="normal">85</span>
+<span class="normal">86</span>
+<span class="normal">87</span>
+<span class="normal">88</span>
+<span class="normal">89</span>
+<span class="normal">90</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">write_record</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">gaps</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]],</span> <span class="n">accept</span><span class="p">,</span> <span class="n">stage</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Keep what was found at ``stage`` and what was accepted, the earlier stages&#39; entries</span>
+<span class="sd">    kept beside it; returns the record.&quot;&quot;&quot;</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="n">record</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">path</span><span class="o">.</span><span class="n">read_text</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">))</span> <span class="k">if</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="k">else</span> <span class="p">{}</span>
+    <span class="n">record</span><span class="p">[</span><span class="n">stage</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;checked&quot;</span><span class="p">:</span> <span class="n">time</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s2">&quot;%Y-%m-</span><span class="si">%d</span><span class="s2"> %H:%M:%S&quot;</span><span class="p">),</span> <span class="s2">&quot;runner&quot;</span><span class="p">:</span> <span class="n">__version__</span><span class="p">,</span>
+                     <span class="s2">&quot;gaps&quot;</span><span class="p">:</span> <span class="n">gaps</span><span class="p">,</span> <span class="s2">&quot;accepted&quot;</span><span class="p">:</span> <span class="nb">sorted</span><span class="p">({</span><span class="nb">str</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="p">(</span><span class="n">accept</span> <span class="ow">or</span> <span class="p">())}),</span>
+                     <span class="s2">&quot;unaccepted&quot;</span><span class="p">:</span> <span class="n">unaccepted</span><span class="p">(</span><span class="n">gaps</span><span class="p">,</span> <span class="n">accept</span><span class="p">)}</span>
+    <span class="n">path</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">path</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">record</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">ensure_ascii</span><span class="o">=</span><span class="kc">False</span><span class="p">),</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">record</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-validation-run_completeness-report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">edition</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">gaps</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]],</span> <span class="n">open_gaps</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<div class="fndoc"><p>One line per pass with a gap: how many replies are missing and how many are accepted.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code> <code>03_visualisation.ipynb</code> <code>15_frozen_run.ipynb</code> <code>tests/test_religion_categories.py</code> <code>tests/test_run_completeness.py</code> <code>tests/test_sealed_scorer.py</code> <code>utils/docs/build_docs.py</code> <code>utils/lexikon_1910/build_de_page_map.py</code> <code>utils/lexikon_1910/build_mark_ledger.py</code> <code>utils/lexikon_1910/build_symbol_atlas_de.py</code> <code>utils/lexikon_1910/read_transcription_md.py</code> <code>utils/lexikon_1910/run_frozen.py</code> <code>utils/lexikon_1910/run_glyph_e3.py</code> <code>utils/lexikon_1910/score_certification.py</code> <code>utils/lexikon_1910/score_table_passes.py</code> <code>utils/linkage.py</code> <code>utils/parsing/clean.py</code> <code>utils/parsing/dates.py</code> <code>utils/parsing/exit_codes.py</code> <code>utils/parsing/habsburg.py</code> <code>utils/reference_tools/places/german_click_recall.py</code> <code>utils/reference_tools/places/run_matice_pilot.py</code> <code>utils/reference_tools/places/score_sealed_abbreviations.py</code> <code>utils/validation/data_checks.py</code></p>
+<details><summary>source · lines 93–104 (12 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">edition</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">gaps</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]],</span> <span class="n">open_gaps</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;One line per pass with a gap: how many replies are missing and how many are accepted.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">gaps</span><span class="p">:</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">edition</span><span class="si">}</span><span class="s2">: complete — every queued request has its reply&quot;</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">edition</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">sum</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="nb">len</span><span class="p">,</span><span class="w"> </span><span class="n">open_gaps</span><span class="o">.</span><span class="n">values</span><span class="p">()))</span><span class="si">}</span><span class="s2"> replies missing&quot;</span>
+             <span class="o">+</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot; (</span><span class="si">{</span><span class="nb">sum</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="nb">len</span><span class="p">,</span><span class="w"> </span><span class="n">gaps</span><span class="o">.</span><span class="n">values</span><span class="p">()))</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nb">sum</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="nb">len</span><span class="p">,</span><span class="w"> </span><span class="n">open_gaps</span><span class="o">.</span><span class="n">values</span><span class="p">()))</span><span class="si">}</span><span class="s2"> accepted)&quot;</span>
+                <span class="k">if</span> <span class="n">gaps</span> <span class="o">!=</span> <span class="n">open_gaps</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">)]</span>
+    <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">keys</span> <span class="ow">in</span> <span class="n">gaps</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">still</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">open_gaps</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">label</span><span class="p">,</span> <span class="p">[]))</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">keys</span><span class="p">)</span><span class="si">}</span><span class="s2"> without a reply, </span><span class="si">{</span><span class="n">still</span><span class="si">}</span><span class="s2"> not accepted&quot;</span>
+                     <span class="o">+</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot; — e.g. </span><span class="si">{</span><span class="n">open_gaps</span><span class="p">[</span><span class="n">label</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">if</span> <span class="n">still</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+    <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-validation-run_completeness-QUEUE_SUFFIX"><pre class="sig">QUEUE_SUFFIX<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;.queue.jsonl&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-validation-run_completeness-RECORD_NAME"><pre class="sig">RECORD_NAME<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;completeness.json&#39;</span>
+</pre></div>
+</details></div>
+<h2>Used by</h2><p><code>15_frozen_run.ipynb</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/validation/run_completeness.py · 104 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;Whether a frozen run has every reply it asked for, before anything is built on it.</span>
+
+<span class="sd">The route learns that a call failed by recognising the error: a 429 or a word like *quota*</span>
+<span class="sd">stops a pass and marks it incomplete. Any other wording — an exhausted credit balance, an</span>
+<span class="sd">outage, a refusal — is an ordinary failure: the crop is retried, dropped, and the pass is</span>
+<span class="sd">still marked finished. Its marks are then missing from the inventory, which reads as *not</span>
+<span class="sd">printed*: zero where the truth is unknown, the error shape that fabricated ``exit_N``.</span>
+
+<span class="sd">So completeness is checked on the **outcome**, whatever the cause: every request a pass</span>
+<span class="sd">queued (``&lt;label&gt;.queue.jsonl``, one line per crop or table block, with its ``key`` and</span>
+<span class="sd">``cache_dir``) must have its reply in the cache (``&lt;cache_dir&gt;/&lt;key&gt;.json``) — a reply that</span>
+<span class="sd">failed is never cached. Every Opus call the run built must have its answer. A gap the author</span>
+<span class="sd">accepts is listed by key in notebook 15&#39;s ``ACCEPT_FAILED``, so letting one through is a</span>
+<span class="sd">recorded decision, never a silence; the record is written beside the run&#39;s reads.</span>
+
+<span class="sd">Notebook 15 calls this after 7d (an incomplete pass loses its ``.done``, so 7d reads the gap</span>
+<span class="sd">again), before the ledger (section 12) and before the anchor&#39;s ledger (14b). It lives outside</span>
+<span class="sd">``utils/lexikon_1910`` on purpose: every module there is digested into the freeze, and a guard</span>
+<span class="sd">must not make the full run a different route from the gold it is held to.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;0.1.0&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="c1">#: A queue&#39;s file name is its pass&#39;s label and this suffix (``run_frozen._queue``).</span>
+<span class="n">QUEUE_SUFFIX</span> <span class="o">=</span> <span class="s2">&quot;.queue.jsonl&quot;</span>
+<span class="c1">#: Written beside the run&#39;s reads: every gap found and every gap the author accepted.</span>
+<span class="n">RECORD_NAME</span> <span class="o">=</span> <span class="s2">&quot;completeness.json&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">queue_label</span><span class="p">(</span><span class="n">queue</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The pass a queue belongs to: its file name less :data:`QUEUE_SUFFIX`.&quot;&quot;&quot;</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">queue</span><span class="p">)</span><span class="o">.</span><span class="n">name</span>
+    <span class="k">return</span> <span class="n">name</span><span class="p">[:</span> <span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">QUEUE_SUFFIX</span><span class="p">)]</span> <span class="k">if</span> <span class="n">name</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="n">QUEUE_SUFFIX</span><span class="p">)</span> <span class="k">else</span> <span class="n">Path</span><span class="p">(</span><span class="n">queue</span><span class="p">)</span><span class="o">.</span><span class="n">stem</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">missing_replies</span><span class="p">(</span><span class="n">queue</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The keys of a queue&#39;s requests whose reply is not in their cache, sorted. One line a</span>
+<span class="sd">    key, the last (as ``reader_batches.read_queue`` keeps it); a missing queue has none.&quot;&quot;&quot;</span>
+    <span class="n">lines</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">Path</span><span class="p">(</span><span class="n">queue</span><span class="p">)</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="k">return</span> <span class="p">[]</span>
+    <span class="k">with</span> <span class="n">Path</span><span class="p">(</span><span class="n">queue</span><span class="p">)</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">&quot;rb&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">raw</span> <span class="ow">in</span> <span class="n">fh</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">raw</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+                <span class="n">rec</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span>
+                <span class="n">lines</span><span class="p">[</span><span class="n">rec</span><span class="p">[</span><span class="s2">&quot;key&quot;</span><span class="p">]]</span> <span class="o">=</span> <span class="n">rec</span><span class="p">[</span><span class="s2">&quot;cache_dir&quot;</span><span class="p">]</span>
+    <span class="k">return</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">key</span> <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">folder</span> <span class="ow">in</span> <span class="n">lines</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="n">folder</span><span class="p">)</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s2">.json&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">exists</span><span class="p">())</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">read_gaps</span><span class="p">(</span><span class="n">queues</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">Path</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``{pass label: keys with no reply}`` over a run&#39;s queues, passes with none left out.&quot;&quot;&quot;</span>
+    <span class="n">out</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">queue</span> <span class="ow">in</span> <span class="n">queues</span><span class="p">:</span>
+        <span class="n">keys</span> <span class="o">=</span> <span class="n">missing_replies</span><span class="p">(</span><span class="n">queue</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">keys</span><span class="p">:</span>
+            <span class="n">out</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">queue_label</span><span class="p">(</span><span class="n">queue</span><span class="p">),</span> <span class="p">[])</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">keys</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">opus_gaps</span><span class="p">(</span><span class="n">unanswered</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``{&quot;opus&quot;: call ids}`` for the Opus items no answer came back for</span>
+<span class="sd">    (``run_frozen.opus_unanswered``); empty when every call is answered.&quot;&quot;&quot;</span>
+    <span class="n">ids</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">item</span><span class="p">[</span><span class="s2">&quot;id&quot;</span><span class="p">])</span> <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">unanswered</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;opus&quot;</span><span class="p">:</span> <span class="n">ids</span><span class="p">}</span> <span class="k">if</span> <span class="n">ids</span> <span class="k">else</span> <span class="p">{}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">unaccepted</span><span class="p">(</span><span class="n">gaps</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]],</span> <span class="n">accept</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The gaps the author has not accepted. ``accept`` is that edition&#39;s entry of</span>
+<span class="sd">    ``ACCEPT_FAILED``: keys and Opus call ids, in any order, in one list.&quot;&quot;&quot;</span>
+    <span class="n">allowed</span> <span class="o">=</span> <span class="p">{</span><span class="nb">str</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="p">(</span><span class="n">accept</span> <span class="ow">or</span> <span class="p">())}</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">{</span><span class="n">label</span><span class="p">:</span> <span class="p">[</span><span class="n">k</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">keys</span> <span class="k">if</span> <span class="n">k</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">allowed</span><span class="p">]</span> <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">keys</span> <span class="ow">in</span> <span class="n">gaps</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="k">return</span> <span class="p">{</span><span class="n">label</span><span class="p">:</span> <span class="n">keys</span> <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">keys</span> <span class="ow">in</span> <span class="n">out</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">keys</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">write_record</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">gaps</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]],</span> <span class="n">accept</span><span class="p">,</span> <span class="n">stage</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Keep what was found at ``stage`` and what was accepted, the earlier stages&#39; entries</span>
+<span class="sd">    kept beside it; returns the record.&quot;&quot;&quot;</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="n">record</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">path</span><span class="o">.</span><span class="n">read_text</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">))</span> <span class="k">if</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">()</span> <span class="k">else</span> <span class="p">{}</span>
+    <span class="n">record</span><span class="p">[</span><span class="n">stage</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;checked&quot;</span><span class="p">:</span> <span class="n">time</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s2">&quot;%Y-%m-</span><span class="si">%d</span><span class="s2"> %H:%M:%S&quot;</span><span class="p">),</span> <span class="s2">&quot;runner&quot;</span><span class="p">:</span> <span class="n">__version__</span><span class="p">,</span>
+                     <span class="s2">&quot;gaps&quot;</span><span class="p">:</span> <span class="n">gaps</span><span class="p">,</span> <span class="s2">&quot;accepted&quot;</span><span class="p">:</span> <span class="nb">sorted</span><span class="p">({</span><span class="nb">str</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="p">(</span><span class="n">accept</span> <span class="ow">or</span> <span class="p">())}),</span>
+                     <span class="s2">&quot;unaccepted&quot;</span><span class="p">:</span> <span class="n">unaccepted</span><span class="p">(</span><span class="n">gaps</span><span class="p">,</span> <span class="n">accept</span><span class="p">)}</span>
+    <span class="n">path</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">path</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">record</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">ensure_ascii</span><span class="o">=</span><span class="kc">False</span><span class="p">),</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">record</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">edition</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">gaps</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]],</span> <span class="n">open_gaps</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;One line per pass with a gap: how many replies are missing and how many are accepted.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">gaps</span><span class="p">:</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">edition</span><span class="si">}</span><span class="s2">: complete — every queued request has its reply&quot;</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">edition</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">sum</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="nb">len</span><span class="p">,</span><span class="w"> </span><span class="n">open_gaps</span><span class="o">.</span><span class="n">values</span><span class="p">()))</span><span class="si">}</span><span class="s2"> replies missing&quot;</span>
+             <span class="o">+</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot; (</span><span class="si">{</span><span class="nb">sum</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="nb">len</span><span class="p">,</span><span class="w"> </span><span class="n">gaps</span><span class="o">.</span><span class="n">values</span><span class="p">()))</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nb">sum</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="nb">len</span><span class="p">,</span><span class="w"> </span><span class="n">open_gaps</span><span class="o">.</span><span class="n">values</span><span class="p">()))</span><span class="si">}</span><span class="s2"> accepted)&quot;</span>
+                <span class="k">if</span> <span class="n">gaps</span> <span class="o">!=</span> <span class="n">open_gaps</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">)]</span>
+    <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">keys</span> <span class="ow">in</span> <span class="n">gaps</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">still</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">open_gaps</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">label</span><span class="p">,</span> <span class="p">[]))</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">keys</span><span class="p">)</span><span class="si">}</span><span class="s2"> without a reply, </span><span class="si">{</span><span class="n">still</span><span class="si">}</span><span class="s2"> not accepted&quot;</span>
+                     <span class="o">+</span> <span class="p">(</span><span class="sa">f</span><span class="s2">&quot; — e.g. </span><span class="si">{</span><span class="n">open_gaps</span><span class="p">[</span><span class="n">label</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">if</span> <span class="n">still</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+    <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
