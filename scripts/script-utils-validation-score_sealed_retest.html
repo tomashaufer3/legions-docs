@@ -1,0 +1,541 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>The full run's readings of the sealed certification pages, scored — a test–retest (D-181).</p><p class="tldr-facts"><b>Output &amp; support</b> · v0.1.0 · 149 lines · 5 public functions · 4 constants · used by nothing else · <code>utils/validation/score_sealed_retest.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-validation-score_sealed_retest-score_run">score_run</a><a class="chip" href="#fn-utils-validation-score_sealed_retest-between">between</a><a class="chip" href="#fn-utils-validation-score_sealed_retest-report">report</a><a class="chip" href="#fn-utils-validation-score_sealed_retest-retest">retest</a><a class="chip" href="#fn-utils-validation-score_sealed_retest-main">main</a><a class="chip const" href="#c-utils-validation-score_sealed_retest-ROOT">ROOT</a><a class="chip const" href="#c-utils-validation-score_sealed_retest-COPIED">COPIED</a><a class="chip const" href="#c-utils-validation-score_sealed_retest-RUNS">RUNS</a><a class="chip const" href="#c-utils-validation-score_sealed_retest-OUT">OUT</a></div>
+<h2>How it works</h2><p>The full run reads every table page of a volume, the sealed certification pages among them,
+with fresh reader calls: its labels are not the certification run's, so nothing comes back
+from that run's cache. Scored against the same sealed sheets, by the same metrics as
+<code>score_certification.py</code>, it is a second measurement of the route on the same pages — what
+the route doc planned ("a test–retest, not an independent measure"). It is reported beside
+the certification score and <strong>never in its place</strong>:</p>
+<ul>
+<li>it is not blind: the certification run of these pages was scored and the route changed on
+  what it showed (the German colon and position rules, D-169, were found on these pages), so
+  it measures the route's stability across reads, not its error on unseen pages;</li>
+<li>the readers sample, so two reads of one page on one route differ by a few marks, and the
+  gap between the two scores is that variation, not a change of route.</li>
+</ul>
+<p><code>score_certification</code> reads a run from <code>FROZEN / f"{edition}_certification"</code> and cannot be
+edited here: it lives in <code>utils/lexikon_1910</code>, whose every module is digested into the
+freeze, so a change would take the full run off its gold's route. This module therefore
+copies each run's outputs into a temporary folder under that name and points the scorer at
+it. Nothing is written into a run folder: the result goes to <code>OUT</code>, rewritten each run.</p>
+<pre><code>python utils/validation/score_sealed_retest.py                 # every edition with a full run
+python utils/validation/score_sealed_retest.py --edition de-silesia
+</code></pre>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-validation-score_sealed_retest-score_run">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">score_run</span><span class="p">(</span><span class="n">edition</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">folder</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">dict</span><span class="p">,</span> <span class="nb">dict</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span></pre>
+<div class="fndoc"><p><code>(result, sides)</code> for one run folder scored on the edition's sealed sheets, or
+<code>None</code> when the folder has no final inventory. The result has the shape
+<code>score_certification.score</code> writes, with the run folder named.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 52–82 (31 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">52</span>
+<span class="normal">53</span>
+<span class="normal">54</span>
+<span class="normal">55</span>
+<span class="normal">56</span>
+<span class="normal">57</span>
+<span class="normal">58</span>
+<span class="normal">59</span>
+<span class="normal">60</span>
+<span class="normal">61</span>
+<span class="normal">62</span>
+<span class="normal">63</span>
+<span class="normal">64</span>
+<span class="normal">65</span>
+<span class="normal">66</span>
+<span class="normal">67</span>
+<span class="normal">68</span>
+<span class="normal">69</span>
+<span class="normal">70</span>
+<span class="normal">71</span>
+<span class="normal">72</span>
+<span class="normal">73</span>
+<span class="normal">74</span>
+<span class="normal">75</span>
+<span class="normal">76</span>
+<span class="normal">77</span>
+<span class="normal">78</span>
+<span class="normal">79</span>
+<span class="normal">80</span>
+<span class="normal">81</span>
+<span class="normal">82</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">score_run</span><span class="p">(</span><span class="n">edition</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">folder</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">dict</span><span class="p">,</span> <span class="nb">dict</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``(result, sides)`` for one run folder scored on the edition&#39;s sealed sheets, or</span>
+<span class="sd">    ``None`` when the folder has no final inventory. The result has the shape</span>
+<span class="sd">    ``score_certification.score`` writes, with the run folder named.&quot;&quot;&quot;</span>
+    <span class="n">source</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">FROZEN</span> <span class="o">/</span> <span class="n">folder</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="n">source</span> <span class="o">/</span> <span class="s2">&quot;final_inventory.csv&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">is_file</span><span class="p">():</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">real</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">FROZEN</span>
+    <span class="k">with</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">TemporaryDirectory</span><span class="p">()</span> <span class="k">as</span> <span class="n">tmp</span><span class="p">:</span>
+        <span class="n">target</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">tmp</span><span class="p">)</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">edition</span><span class="si">}</span><span class="s2">_certification&quot;</span>
+        <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">COPIED</span><span class="p">:</span>
+            <span class="k">if</span> <span class="p">(</span><span class="n">source</span> <span class="o">/</span> <span class="n">name</span><span class="p">)</span><span class="o">.</span><span class="n">is_file</span><span class="p">():</span>
+                <span class="p">(</span><span class="n">target</span> <span class="o">/</span> <span class="n">name</span><span class="p">)</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                <span class="n">shutil</span><span class="o">.</span><span class="n">copy2</span><span class="p">(</span><span class="n">source</span> <span class="o">/</span> <span class="n">name</span><span class="p">,</span> <span class="n">target</span> <span class="o">/</span> <span class="n">name</span><span class="p">)</span>
+        <span class="n">sc</span><span class="o">.</span><span class="n">FROZEN</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">tmp</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">both</span><span class="p">,</span> <span class="n">categories</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">sides</span><span class="p">(</span><span class="n">edition</span><span class="p">),</span> <span class="n">sc</span><span class="o">.</span><span class="n">_categories</span><span class="p">()</span>
+            <span class="n">freeze</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">freeze_record</span><span class="p">(</span><span class="n">edition</span><span class="p">)</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;edition&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">edition</span><span class="si">}</span><span class="s2"> — </span><span class="si">{</span><span class="n">folder</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;scorer&quot;</span><span class="p">:</span> <span class="n">sc</span><span class="o">.</span><span class="n">__version__</span><span class="p">,</span>
+                      <span class="s2">&quot;retest&quot;</span><span class="p">:</span> <span class="n">__version__</span><span class="p">,</span> <span class="s2">&quot;scored&quot;</span><span class="p">:</span> <span class="n">time</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s2">&quot;%Y-%m-</span><span class="si">%d</span><span class="s2"> %H:%M:%S&quot;</span><span class="p">),</span>
+                      <span class="s2">&quot;forced&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;sheets&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">p</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">sc</span><span class="o">.</span><span class="n">sealed_paths</span><span class="p">(</span><span class="n">edition</span><span class="p">)],</span>
+                      <span class="s2">&quot;freeze&quot;</span><span class="p">:</span> <span class="n">freeze</span><span class="p">,</span> <span class="s2">&quot;off_plate&quot;</span><span class="p">:</span> <span class="n">both</span><span class="p">[</span><span class="s2">&quot;off_plate&quot;</span><span class="p">],</span> <span class="o">**</span><span class="n">sc</span><span class="o">.</span><span class="n">measure</span><span class="p">(</span><span class="n">both</span><span class="p">),</span>
+                      <span class="s2">&quot;marks_awaiting_a_ruling&quot;</span><span class="p">:</span> <span class="n">sc</span><span class="o">.</span><span class="n">waiting_marks</span><span class="p">(</span><span class="n">edition</span><span class="p">),</span>
+                      <span class="s2">&quot;by_category&quot;</span><span class="p">:</span> <span class="n">sc</span><span class="o">.</span><span class="n">measure</span><span class="p">(</span><span class="n">sc</span><span class="o">.</span><span class="n">by_category</span><span class="p">(</span><span class="n">both</span><span class="p">,</span> <span class="n">categories</span><span class="p">))}</span>
+            <span class="k">if</span> <span class="n">edition</span> <span class="o">==</span> <span class="n">sc</span><span class="o">.</span><span class="n">POOLED_PARTS</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]:</span>
+                <span class="n">result</span><span class="p">[</span><span class="s2">&quot;without_anchor&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">without_anchor</span><span class="p">(</span><span class="n">edition</span><span class="p">,</span> <span class="n">categories</span><span class="p">)</span>
+        <span class="k">finally</span><span class="p">:</span>
+            <span class="n">sc</span><span class="o">.</span><span class="n">FROZEN</span> <span class="o">=</span> <span class="n">real</span>
+    <span class="k">if</span> <span class="s2">&quot;missing&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">freeze</span><span class="p">[</span><span class="s2">&quot;against_gold&quot;</span><span class="p">]:</span>      <span class="c1"># the real file, not the temporary copy</span>
+        <span class="n">freeze</span><span class="p">[</span><span class="s2">&quot;against_gold&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">_shown</span><span class="p">(</span><span class="n">source</span> <span class="o">/</span> <span class="n">sc</span><span class="o">.</span><span class="n">AGAINST_GOLD</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">result</span><span class="p">,</span> <span class="n">both</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-validation-score_sealed_retest-between">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">between</span><span class="p">(</span><span class="n">full</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">record</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span></pre>
+<div class="fndoc"><p>The sealed-page claims the two runs settle differently, each with the sheet's verdict:
+<code>in</code> names the run that claims it, <code>sheet</code> whether the sheet prints it.</p></div>
+<p class="calls"><b>Called by</b> <code>03_visualisation.ipynb</code> <code>utils/reference_tools/occupations/build_hisco_authority.py</code> <code>utils/reference_tools/occupations/run_mosaic_beruf_check.py</code> <code>utils/reference_tools/places/run_german_oracle.py</code> <code>utils/reference_tools/places/run_intensities.py</code> <code>utils/validation/data_checks.py</code></p>
+<details><summary>source · lines 85–95 (11 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">85</span>
+<span class="normal">86</span>
+<span class="normal">87</span>
+<span class="normal">88</span>
+<span class="normal">89</span>
+<span class="normal">90</span>
+<span class="normal">91</span>
+<span class="normal">92</span>
+<span class="normal">93</span>
+<span class="normal">94</span>
+<span class="normal">95</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">between</span><span class="p">(</span><span class="n">full</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">record</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The sealed-page claims the two runs settle differently, each with the sheet&#39;s verdict:</span>
+<span class="sd">    ``in`` names the run that claims it, ``sheet`` whether the sheet prints it.&quot;&quot;&quot;</span>
+    <span class="n">truth</span><span class="p">,</span> <span class="n">pages</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">full</span><span class="p">[</span><span class="s2">&quot;gold_counts&quot;</span><span class="p">]),</span> <span class="n">full</span><span class="p">[</span><span class="s2">&quot;pages&quot;</span><span class="p">]</span>
+    <span class="n">on_page</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">s</span><span class="p">:</span> <span class="p">{</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;route_counts&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">in</span> <span class="n">pages</span><span class="p">}</span>          <span class="c1"># noqa: E731</span>
+    <span class="n">got_full</span><span class="p">,</span> <span class="n">got_record</span> <span class="o">=</span> <span class="n">on_page</span><span class="p">(</span><span class="n">full</span><span class="p">),</span> <span class="n">on_page</span><span class="p">(</span><span class="n">record</span><span class="p">)</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[{</span><span class="s2">&quot;claim&quot;</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="n">c</span><span class="p">),</span> <span class="s2">&quot;in&quot;</span><span class="p">:</span> <span class="s2">&quot;full&quot;</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">got_full</span> <span class="k">else</span> <span class="s2">&quot;certification&quot;</span><span class="p">,</span>
+             <span class="s2">&quot;sheet&quot;</span><span class="p">:</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">truth</span><span class="p">,</span>
+             <span class="s2">&quot;rule&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">full</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">got_full</span> <span class="k">else</span> <span class="n">record</span><span class="p">)[</span><span class="s2">&quot;rules&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)}</span>
+            <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">got_full</span> <span class="o">^</span> <span class="n">got_record</span><span class="p">)]</span>
+    <span class="k">return</span> <span class="n">rows</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-validation-score_sealed_retest-report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">edition</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">results</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">diffs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code> <code>03_visualisation.ipynb</code> <code>15_frozen_run.ipynb</code> <code>tests/test_religion_categories.py</code> <code>tests/test_run_completeness.py</code> <code>tests/test_sealed_scorer.py</code> <code>utils/docs/build_docs.py</code> <code>utils/lexikon_1910/build_de_page_map.py</code> <code>utils/lexikon_1910/build_mark_ledger.py</code> <code>utils/lexikon_1910/build_symbol_atlas_de.py</code> <code>utils/lexikon_1910/read_transcription_md.py</code> <code>utils/lexikon_1910/run_frozen.py</code> <code>utils/lexikon_1910/run_glyph_e3.py</code> <code>utils/lexikon_1910/score_certification.py</code> <code>utils/lexikon_1910/score_table_passes.py</code> <code>utils/linkage.py</code> <code>utils/parsing/clean.py</code> <code>utils/parsing/dates.py</code> <code>utils/parsing/exit_codes.py</code> <code>utils/parsing/habsburg.py</code> <code>utils/reference_tools/places/german_click_recall.py</code> <code>utils/reference_tools/places/run_matice_pilot.py</code> <code>utils/reference_tools/places/score_sealed_abbreviations.py</code> <code>utils/validation/data_checks.py</code> <code>utils/validation/run_completeness.py</code></p>
+<details><summary>source · lines 98–110 (13 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">edition</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">results</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">diffs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;Sealed-page test–retest — </span><span class="si">{</span><span class="n">edition</span><span class="si">}</span><span class="s2"> (score_sealed_retest </span><span class="si">{</span><span class="n">__version__</span><span class="si">}</span><span class="s2">, D-181)&quot;</span><span class="p">,</span>
+             <span class="s2">&quot;  the full run&#39;s readings of the sealed pages beside the certification run&#39;s; &quot;</span>
+             <span class="s2">&quot;in sample, never the record&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">]</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">result</span> <span class="ow">in</span> <span class="n">results</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;######## </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2"> run&quot;</span><span class="p">,</span> <span class="n">sc</span><span class="o">.</span><span class="n">report</span><span class="p">(</span><span class="n">result</span><span class="p">),</span> <span class="s2">&quot;&quot;</span><span class="p">]</span>
+    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;  between the runs (claims one run makes and the other does not)&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">diffs</span><span class="p">:</span>
+        <span class="n">verdict</span> <span class="o">=</span> <span class="s2">&quot;right&quot;</span> <span class="k">if</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;sheet&quot;</span><span class="p">]</span> <span class="k">else</span> <span class="s2">&quot;false&quot;</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;in&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">13</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">verdict</span><span class="si">:</span><span class="s2">5</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="nb">tuple</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;claim&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;rule&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">diffs</span><span class="p">:</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;    none&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-validation-score_sealed_retest-retest">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">retest</span><span class="p">(</span><span class="n">edition</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span></pre>
+<div class="fndoc"><p>Both runs of one edition scored, the record and its report written to <code>OUT</code>.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 113–135 (23 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">retest</span><span class="p">(</span><span class="n">edition</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Both runs of one edition scored, the record and its report written to :data:`OUT`.&quot;&quot;&quot;</span>
+    <span class="n">paths</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">sealed_paths</span><span class="p">(</span><span class="n">edition</span><span class="p">)</span>
+    <span class="n">drafts</span> <span class="o">=</span> <span class="p">[</span><span class="n">p</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">paths</span> <span class="k">if</span> <span class="n">sc</span><span class="o">.</span><span class="n">sheet_status</span><span class="p">(</span><span class="n">p</span><span class="p">)</span> <span class="o">!=</span> <span class="s2">&quot;complete&quot;</span><span class="p">]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">paths</span> <span class="ow">or</span> <span class="n">drafts</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">edition</span><span class="si">}</span><span class="s2">: sealed sheets not complete (</span><span class="si">{</span><span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">drafts</span><span class="p">)</span><span class="w"> </span><span class="ow">or</span><span class="w"> </span><span class="s1">&#39;none&#39;</span><span class="si">}</span><span class="s2">) — skipped&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">scored</span> <span class="o">=</span> <span class="p">{</span><span class="n">name</span><span class="p">:</span> <span class="n">score_run</span><span class="p">(</span><span class="n">edition</span><span class="p">,</span> <span class="n">folder</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">edition</span><span class="o">=</span><span class="n">edition</span><span class="p">))</span>
+              <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">folder</span> <span class="ow">in</span> <span class="n">RUNS</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="k">if</span> <span class="n">scored</span><span class="p">[</span><span class="s2">&quot;full&quot;</span><span class="p">]</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">edition</span><span class="si">}</span><span class="s2">: no full run with a final inventory — skipped&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="p">{</span><span class="n">name</span><span class="p">:</span> <span class="n">pair</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">pair</span> <span class="ow">in</span> <span class="n">scored</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">pair</span><span class="p">}</span>
+    <span class="n">diffs</span> <span class="o">=</span> <span class="n">between</span><span class="p">(</span><span class="n">scored</span><span class="p">[</span><span class="s2">&quot;full&quot;</span><span class="p">][</span><span class="mi">1</span><span class="p">],</span> <span class="n">scored</span><span class="p">[</span><span class="s2">&quot;certification&quot;</span><span class="p">][</span><span class="mi">1</span><span class="p">])</span> <span class="k">if</span> <span class="n">scored</span><span class="p">[</span><span class="s2">&quot;certification&quot;</span><span class="p">]</span> <span class="k">else</span> <span class="p">[]</span>
+    <span class="n">record</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;edition&quot;</span><span class="p">:</span> <span class="n">edition</span><span class="p">,</span> <span class="s2">&quot;retest&quot;</span><span class="p">:</span> <span class="n">__version__</span><span class="p">,</span> <span class="s2">&quot;runs&quot;</span><span class="p">:</span> <span class="n">results</span><span class="p">,</span> <span class="s2">&quot;between&quot;</span><span class="p">:</span> <span class="n">diffs</span><span class="p">}</span>
+    <span class="n">OUT</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="p">(</span><span class="n">OUT</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">edition</span><span class="si">}</span><span class="s2">.json&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">record</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">ensure_ascii</span><span class="o">=</span><span class="kc">False</span><span class="p">),</span>
+                                         <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">report</span><span class="p">(</span><span class="n">edition</span><span class="p">,</span> <span class="n">results</span><span class="p">,</span> <span class="n">diffs</span><span class="p">)</span>
+    <span class="p">(</span><span class="n">OUT</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">edition</span><span class="si">}</span><span class="s2">.txt&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">text</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  written: </span><span class="si">{</span><span class="n">sc</span><span class="o">.</span><span class="n">_shown</span><span class="p">(</span><span class="n">OUT</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">edition</span><span class="p">)</span><span class="si">}</span><span class="s2">.</span><span class="se">{{</span><span class="s2">json,txt</span><span class="se">}}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">record</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-validation-score_sealed_retest-main">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 138–145 (8 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="p">,</span>
+                                 <span class="n">formatter_class</span><span class="o">=</span><span class="n">argparse</span><span class="o">.</span><span class="n">RawDescriptionHelpFormatter</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--edition&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;all&quot;</span><span class="p">,</span> <span class="n">choices</span><span class="o">=</span><span class="p">(</span><span class="o">*</span><span class="n">sc</span><span class="o">.</span><span class="n">EDITIONS</span><span class="p">,</span> <span class="s2">&quot;all&quot;</span><span class="p">))</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+    <span class="n">editions</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">EDITIONS</span> <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">edition</span> <span class="o">==</span> <span class="s2">&quot;all&quot;</span> <span class="k">else</span> <span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">edition</span><span class="p">,)</span>
+    <span class="n">done</span> <span class="o">=</span> <span class="p">[</span><span class="n">retest</span><span class="p">(</span><span class="n">e</span><span class="p">)</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">editions</span><span class="p">]</span>
+    <span class="k">return</span> <span class="mi">0</span> <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">done</span><span class="p">)</span> <span class="k">else</span> <span class="mi">1</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-validation-score_sealed_retest-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-validation-score_sealed_retest-COPIED"><pre class="sig">COPIED<span class="kind">tuple · 5 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">(</span><span class="s1">&#39;final_inventory.csv&#39;</span><span class="p">,</span> <span class="s1">&#39;final_inventory_no_anchor.csv&#39;</span><span class="p">,</span> <span class="s1">&#39;final_abbreviations.csv&#39;</span><span class="p">,</span> <span class="s1">&#39;rulings_queue.csv&#39;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">sc</span><span class="o">.</span><span class="n">AGAINST_GOLD</span><span class="p">))</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-validation-score_sealed_retest-RUNS"><pre class="sig">RUNS<span class="kind">dict · 2 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;full&#39;</span><span class="p">:</span> <span class="s1">&#39;</span><span class="si">{edition}</span><span class="s1">_full&#39;</span><span class="p">,</span> <span class="s1">&#39;certification&#39;</span><span class="p">:</span> <span class="s1">&#39;</span><span class="si">{edition}</span><span class="s1">_certification&#39;</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-validation-score_sealed_retest-OUT"><pre class="sig">OUT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;output&#39;</span> <span class="o">/</span> <span class="s1">&#39;frozen&#39;</span> <span class="o">/</span> <span class="s1">&#39;sealed_retest&#39;</span>
+</pre></div>
+</details></div>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/validation/score_sealed_retest.py · 149 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;The full run&#39;s readings of the sealed certification pages, scored — a test–retest (D-181).</span>
+
+<span class="sd">The full run reads every table page of a volume, the sealed certification pages among them,</span>
+<span class="sd">with fresh reader calls: its labels are not the certification run&#39;s, so nothing comes back</span>
+<span class="sd">from that run&#39;s cache. Scored against the same sealed sheets, by the same metrics as</span>
+<span class="sd">``score_certification.py``, it is a second measurement of the route on the same pages — what</span>
+<span class="sd">the route doc planned (&quot;a test–retest, not an independent measure&quot;). It is reported beside</span>
+<span class="sd">the certification score and **never in its place**:</span>
+
+<span class="sd">* it is not blind: the certification run of these pages was scored and the route changed on</span>
+<span class="sd">  what it showed (the German colon and position rules, D-169, were found on these pages), so</span>
+<span class="sd">  it measures the route&#39;s stability across reads, not its error on unseen pages;</span>
+<span class="sd">* the readers sample, so two reads of one page on one route differ by a few marks, and the</span>
+<span class="sd">  gap between the two scores is that variation, not a change of route.</span>
+
+<span class="sd">``score_certification`` reads a run from ``FROZEN / f&quot;{edition}_certification&quot;`` and cannot be</span>
+<span class="sd">edited here: it lives in ``utils/lexikon_1910``, whose every module is digested into the</span>
+<span class="sd">freeze, so a change would take the full run off its gold&#39;s route. This module therefore</span>
+<span class="sd">copies each run&#39;s outputs into a temporary folder under that name and points the scorer at</span>
+<span class="sd">it. Nothing is written into a run folder: the result goes to :data:`OUT`, rewritten each run.</span>
+
+<span class="sd">    python utils/validation/score_sealed_retest.py                 # every edition with a full run</span>
+<span class="sd">    python utils/validation/score_sealed_retest.py --edition de-silesia</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;0.1.0&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">shutil</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">tempfile</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">))</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;utils&quot;</span> <span class="o">/</span> <span class="s2">&quot;lexikon_1910&quot;</span><span class="p">))</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">score_certification</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">sc</span>  <span class="c1"># noqa: E402</span>
+
+<span class="c1">#: A run&#39;s outputs the scorer reads (the cooperatives, the anchor-free Böhmen, the freeze).</span>
+<span class="n">COPIED</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;final_inventory.csv&quot;</span><span class="p">,</span> <span class="s2">&quot;final_inventory_no_anchor.csv&quot;</span><span class="p">,</span> <span class="s2">&quot;final_abbreviations.csv&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;rulings_queue.csv&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">sc</span><span class="o">.</span><span class="n">AGAINST_GOLD</span><span class="p">))</span>
+<span class="c1">#: The two runs of an edition that read the sealed pages: the retest and the record it sits beside.</span>
+<span class="n">RUNS</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;full&quot;</span><span class="p">:</span> <span class="s2">&quot;</span><span class="si">{edition}</span><span class="s2">_full&quot;</span><span class="p">,</span> <span class="s2">&quot;certification&quot;</span><span class="p">:</span> <span class="s2">&quot;</span><span class="si">{edition}</span><span class="s2">_certification&quot;</span><span class="p">}</span>
+<span class="c1">#: Where the result is written — beside the run folders, never inside one.</span>
+<span class="n">OUT</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;output&quot;</span> <span class="o">/</span> <span class="s2">&quot;frozen&quot;</span> <span class="o">/</span> <span class="s2">&quot;sealed_retest&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">score_run</span><span class="p">(</span><span class="n">edition</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">folder</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">dict</span><span class="p">,</span> <span class="nb">dict</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``(result, sides)`` for one run folder scored on the edition&#39;s sealed sheets, or</span>
+<span class="sd">    ``None`` when the folder has no final inventory. The result has the shape</span>
+<span class="sd">    ``score_certification.score`` writes, with the run folder named.&quot;&quot;&quot;</span>
+    <span class="n">source</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">FROZEN</span> <span class="o">/</span> <span class="n">folder</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="n">source</span> <span class="o">/</span> <span class="s2">&quot;final_inventory.csv&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">is_file</span><span class="p">():</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">real</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">FROZEN</span>
+    <span class="k">with</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">TemporaryDirectory</span><span class="p">()</span> <span class="k">as</span> <span class="n">tmp</span><span class="p">:</span>
+        <span class="n">target</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">tmp</span><span class="p">)</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">edition</span><span class="si">}</span><span class="s2">_certification&quot;</span>
+        <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">COPIED</span><span class="p">:</span>
+            <span class="k">if</span> <span class="p">(</span><span class="n">source</span> <span class="o">/</span> <span class="n">name</span><span class="p">)</span><span class="o">.</span><span class="n">is_file</span><span class="p">():</span>
+                <span class="p">(</span><span class="n">target</span> <span class="o">/</span> <span class="n">name</span><span class="p">)</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                <span class="n">shutil</span><span class="o">.</span><span class="n">copy2</span><span class="p">(</span><span class="n">source</span> <span class="o">/</span> <span class="n">name</span><span class="p">,</span> <span class="n">target</span> <span class="o">/</span> <span class="n">name</span><span class="p">)</span>
+        <span class="n">sc</span><span class="o">.</span><span class="n">FROZEN</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">tmp</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">both</span><span class="p">,</span> <span class="n">categories</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">sides</span><span class="p">(</span><span class="n">edition</span><span class="p">),</span> <span class="n">sc</span><span class="o">.</span><span class="n">_categories</span><span class="p">()</span>
+            <span class="n">freeze</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">freeze_record</span><span class="p">(</span><span class="n">edition</span><span class="p">)</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;edition&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">edition</span><span class="si">}</span><span class="s2"> — </span><span class="si">{</span><span class="n">folder</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;scorer&quot;</span><span class="p">:</span> <span class="n">sc</span><span class="o">.</span><span class="n">__version__</span><span class="p">,</span>
+                      <span class="s2">&quot;retest&quot;</span><span class="p">:</span> <span class="n">__version__</span><span class="p">,</span> <span class="s2">&quot;scored&quot;</span><span class="p">:</span> <span class="n">time</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s2">&quot;%Y-%m-</span><span class="si">%d</span><span class="s2"> %H:%M:%S&quot;</span><span class="p">),</span>
+                      <span class="s2">&quot;forced&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;sheets&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">p</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">sc</span><span class="o">.</span><span class="n">sealed_paths</span><span class="p">(</span><span class="n">edition</span><span class="p">)],</span>
+                      <span class="s2">&quot;freeze&quot;</span><span class="p">:</span> <span class="n">freeze</span><span class="p">,</span> <span class="s2">&quot;off_plate&quot;</span><span class="p">:</span> <span class="n">both</span><span class="p">[</span><span class="s2">&quot;off_plate&quot;</span><span class="p">],</span> <span class="o">**</span><span class="n">sc</span><span class="o">.</span><span class="n">measure</span><span class="p">(</span><span class="n">both</span><span class="p">),</span>
+                      <span class="s2">&quot;marks_awaiting_a_ruling&quot;</span><span class="p">:</span> <span class="n">sc</span><span class="o">.</span><span class="n">waiting_marks</span><span class="p">(</span><span class="n">edition</span><span class="p">),</span>
+                      <span class="s2">&quot;by_category&quot;</span><span class="p">:</span> <span class="n">sc</span><span class="o">.</span><span class="n">measure</span><span class="p">(</span><span class="n">sc</span><span class="o">.</span><span class="n">by_category</span><span class="p">(</span><span class="n">both</span><span class="p">,</span> <span class="n">categories</span><span class="p">))}</span>
+            <span class="k">if</span> <span class="n">edition</span> <span class="o">==</span> <span class="n">sc</span><span class="o">.</span><span class="n">POOLED_PARTS</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]:</span>
+                <span class="n">result</span><span class="p">[</span><span class="s2">&quot;without_anchor&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">without_anchor</span><span class="p">(</span><span class="n">edition</span><span class="p">,</span> <span class="n">categories</span><span class="p">)</span>
+        <span class="k">finally</span><span class="p">:</span>
+            <span class="n">sc</span><span class="o">.</span><span class="n">FROZEN</span> <span class="o">=</span> <span class="n">real</span>
+    <span class="k">if</span> <span class="s2">&quot;missing&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">freeze</span><span class="p">[</span><span class="s2">&quot;against_gold&quot;</span><span class="p">]:</span>      <span class="c1"># the real file, not the temporary copy</span>
+        <span class="n">freeze</span><span class="p">[</span><span class="s2">&quot;against_gold&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">_shown</span><span class="p">(</span><span class="n">source</span> <span class="o">/</span> <span class="n">sc</span><span class="o">.</span><span class="n">AGAINST_GOLD</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">result</span><span class="p">,</span> <span class="n">both</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">between</span><span class="p">(</span><span class="n">full</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">record</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The sealed-page claims the two runs settle differently, each with the sheet&#39;s verdict:</span>
+<span class="sd">    ``in`` names the run that claims it, ``sheet`` whether the sheet prints it.&quot;&quot;&quot;</span>
+    <span class="n">truth</span><span class="p">,</span> <span class="n">pages</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">full</span><span class="p">[</span><span class="s2">&quot;gold_counts&quot;</span><span class="p">]),</span> <span class="n">full</span><span class="p">[</span><span class="s2">&quot;pages&quot;</span><span class="p">]</span>
+    <span class="n">on_page</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">s</span><span class="p">:</span> <span class="p">{</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;route_counts&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="n">c</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">in</span> <span class="n">pages</span><span class="p">}</span>          <span class="c1"># noqa: E731</span>
+    <span class="n">got_full</span><span class="p">,</span> <span class="n">got_record</span> <span class="o">=</span> <span class="n">on_page</span><span class="p">(</span><span class="n">full</span><span class="p">),</span> <span class="n">on_page</span><span class="p">(</span><span class="n">record</span><span class="p">)</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[{</span><span class="s2">&quot;claim&quot;</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="n">c</span><span class="p">),</span> <span class="s2">&quot;in&quot;</span><span class="p">:</span> <span class="s2">&quot;full&quot;</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">got_full</span> <span class="k">else</span> <span class="s2">&quot;certification&quot;</span><span class="p">,</span>
+             <span class="s2">&quot;sheet&quot;</span><span class="p">:</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">truth</span><span class="p">,</span>
+             <span class="s2">&quot;rule&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">full</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">got_full</span> <span class="k">else</span> <span class="n">record</span><span class="p">)[</span><span class="s2">&quot;rules&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)}</span>
+            <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">got_full</span> <span class="o">^</span> <span class="n">got_record</span><span class="p">)]</span>
+    <span class="k">return</span> <span class="n">rows</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">edition</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">results</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">diffs</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;Sealed-page test–retest — </span><span class="si">{</span><span class="n">edition</span><span class="si">}</span><span class="s2"> (score_sealed_retest </span><span class="si">{</span><span class="n">__version__</span><span class="si">}</span><span class="s2">, D-181)&quot;</span><span class="p">,</span>
+             <span class="s2">&quot;  the full run&#39;s readings of the sealed pages beside the certification run&#39;s; &quot;</span>
+             <span class="s2">&quot;in sample, never the record&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">]</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">result</span> <span class="ow">in</span> <span class="n">results</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;######## </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2"> run&quot;</span><span class="p">,</span> <span class="n">sc</span><span class="o">.</span><span class="n">report</span><span class="p">(</span><span class="n">result</span><span class="p">),</span> <span class="s2">&quot;&quot;</span><span class="p">]</span>
+    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;  between the runs (claims one run makes and the other does not)&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">diffs</span><span class="p">:</span>
+        <span class="n">verdict</span> <span class="o">=</span> <span class="s2">&quot;right&quot;</span> <span class="k">if</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;sheet&quot;</span><span class="p">]</span> <span class="k">else</span> <span class="s2">&quot;false&quot;</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;in&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">13</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">verdict</span><span class="si">:</span><span class="s2">5</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="nb">tuple</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;claim&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2">  </span><span class="si">{</span><span class="n">row</span><span class="p">[</span><span class="s1">&#39;rule&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">diffs</span><span class="p">:</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;    none&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">retest</span><span class="p">(</span><span class="n">edition</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Both runs of one edition scored, the record and its report written to :data:`OUT`.&quot;&quot;&quot;</span>
+    <span class="n">paths</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">sealed_paths</span><span class="p">(</span><span class="n">edition</span><span class="p">)</span>
+    <span class="n">drafts</span> <span class="o">=</span> <span class="p">[</span><span class="n">p</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">paths</span> <span class="k">if</span> <span class="n">sc</span><span class="o">.</span><span class="n">sheet_status</span><span class="p">(</span><span class="n">p</span><span class="p">)</span> <span class="o">!=</span> <span class="s2">&quot;complete&quot;</span><span class="p">]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">paths</span> <span class="ow">or</span> <span class="n">drafts</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">edition</span><span class="si">}</span><span class="s2">: sealed sheets not complete (</span><span class="si">{</span><span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">drafts</span><span class="p">)</span><span class="w"> </span><span class="ow">or</span><span class="w"> </span><span class="s1">&#39;none&#39;</span><span class="si">}</span><span class="s2">) — skipped&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">scored</span> <span class="o">=</span> <span class="p">{</span><span class="n">name</span><span class="p">:</span> <span class="n">score_run</span><span class="p">(</span><span class="n">edition</span><span class="p">,</span> <span class="n">folder</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">edition</span><span class="o">=</span><span class="n">edition</span><span class="p">))</span>
+              <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">folder</span> <span class="ow">in</span> <span class="n">RUNS</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="k">if</span> <span class="n">scored</span><span class="p">[</span><span class="s2">&quot;full&quot;</span><span class="p">]</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">edition</span><span class="si">}</span><span class="s2">: no full run with a final inventory — skipped&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="p">{</span><span class="n">name</span><span class="p">:</span> <span class="n">pair</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">pair</span> <span class="ow">in</span> <span class="n">scored</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">pair</span><span class="p">}</span>
+    <span class="n">diffs</span> <span class="o">=</span> <span class="n">between</span><span class="p">(</span><span class="n">scored</span><span class="p">[</span><span class="s2">&quot;full&quot;</span><span class="p">][</span><span class="mi">1</span><span class="p">],</span> <span class="n">scored</span><span class="p">[</span><span class="s2">&quot;certification&quot;</span><span class="p">][</span><span class="mi">1</span><span class="p">])</span> <span class="k">if</span> <span class="n">scored</span><span class="p">[</span><span class="s2">&quot;certification&quot;</span><span class="p">]</span> <span class="k">else</span> <span class="p">[]</span>
+    <span class="n">record</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;edition&quot;</span><span class="p">:</span> <span class="n">edition</span><span class="p">,</span> <span class="s2">&quot;retest&quot;</span><span class="p">:</span> <span class="n">__version__</span><span class="p">,</span> <span class="s2">&quot;runs&quot;</span><span class="p">:</span> <span class="n">results</span><span class="p">,</span> <span class="s2">&quot;between&quot;</span><span class="p">:</span> <span class="n">diffs</span><span class="p">}</span>
+    <span class="n">OUT</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="p">(</span><span class="n">OUT</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">edition</span><span class="si">}</span><span class="s2">.json&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">record</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">ensure_ascii</span><span class="o">=</span><span class="kc">False</span><span class="p">),</span>
+                                         <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">report</span><span class="p">(</span><span class="n">edition</span><span class="p">,</span> <span class="n">results</span><span class="p">,</span> <span class="n">diffs</span><span class="p">)</span>
+    <span class="p">(</span><span class="n">OUT</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">edition</span><span class="si">}</span><span class="s2">.txt&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">text</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  written: </span><span class="si">{</span><span class="n">sc</span><span class="o">.</span><span class="n">_shown</span><span class="p">(</span><span class="n">OUT</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">edition</span><span class="p">)</span><span class="si">}</span><span class="s2">.</span><span class="se">{{</span><span class="s2">json,txt</span><span class="se">}}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">record</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">ap</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="vm">__doc__</span><span class="p">,</span>
+                                 <span class="n">formatter_class</span><span class="o">=</span><span class="n">argparse</span><span class="o">.</span><span class="n">RawDescriptionHelpFormatter</span><span class="p">)</span>
+    <span class="n">ap</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--edition&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="s2">&quot;all&quot;</span><span class="p">,</span> <span class="n">choices</span><span class="o">=</span><span class="p">(</span><span class="o">*</span><span class="n">sc</span><span class="o">.</span><span class="n">EDITIONS</span><span class="p">,</span> <span class="s2">&quot;all&quot;</span><span class="p">))</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">ap</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+    <span class="n">editions</span> <span class="o">=</span> <span class="n">sc</span><span class="o">.</span><span class="n">EDITIONS</span> <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">edition</span> <span class="o">==</span> <span class="s2">&quot;all&quot;</span> <span class="k">else</span> <span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">edition</span><span class="p">,)</span>
+    <span class="n">done</span> <span class="o">=</span> <span class="p">[</span><span class="n">retest</span><span class="p">(</span><span class="n">e</span><span class="p">)</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">editions</span><span class="p">]</span>
+    <span class="k">return</span> <span class="mi">0</span> <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">done</span><span class="p">)</span> <span class="k">else</span> <span class="mi">1</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>
