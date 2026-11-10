@@ -1,0 +1,736 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>§4 for the Czech volume: its blind offices regions read again by its own readers (D-206).</p><p class="tldr-facts"><b>1910 register</b> · v0.1.0 · 202 lines · 6 public functions · 9 constants · used by <code>17_recheck.ipynb</code> · <code>utils/recheck/offices_reread_cz.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-recheck-offices_reread_cz-abbreviations">abbreviations</a><a class="chip" href="#fn-utils-recheck-offices_reread_cz-cut">cut</a><a class="chip" href="#fn-utils-recheck-offices_reread_cz-readers">readers</a><a class="chip" href="#fn-utils-recheck-offices_reread_cz-decode">decode</a><a class="chip" href="#fn-utils-recheck-offices_reread_cz-read">read</a><a class="chip" href="#fn-utils-recheck-offices_reread_cz-main">main</a><a class="chip const" href="#c-utils-recheck-offices_reread_cz-ROOT">ROOT</a><a class="chip const" href="#c-utils-recheck-offices_reread_cz-EDITION">EDITION</a><a class="chip const" href="#c-utils-recheck-offices_reread_cz-OUT">OUT</a><a class="chip const" href="#c-utils-recheck-offices_reread_cz-SUB">SUB</a><a class="chip const" href="#c-utils-recheck-offices_reread_cz-ABBREVIATIONS">ABBREVIATIONS</a><a class="chip const" href="#c-utils-recheck-offices_reread_cz-ATLAS">ATLAS</a><a class="chip const" href="#c-utils-recheck-offices_reread_cz-MAX_HEIGHT">MAX_HEIGHT</a><a class="chip const" href="#c-utils-recheck-offices_reread_cz-GEMINI">GEMINI</a><a class="chip const" href="#c-utils-recheck-offices_reread_cz-HAIKU">HAIKU</a></div>
+<h2>How it works</h2><p>The section cutter labelled three Czech offices regions <code>parts</code> (D-192): Dvůr Králové nad Labem
+on page 0083 (two columns, below the <em>Úřady, ústavy</em> heading the cutter missed) and Vodňany on 0317.
+The route's readers named the symbols in those lines, but the lines sat in a <em>Části osad</em> section, so
+the decoder never read them as offices (and Gemini, the reader of record, skipped the left column's
+foot): the Czech register shows no institution for Dvůr Králové's 15 offices entries or Vodňany's 2,
+the volume's largest blind block. <code>offices_reread</code> re-reads such regions for the German volumes with
+the German readers; this module does it for the Czech volume with the <strong>Czech</strong> readers, as the
+frozen run built them (<code>run_frozen.read_plan</code>):</p>
+<ul>
+<li><strong>the crop</strong> — the Czech page as the pilot renders it (<code>lexikon_1910.render_page</code> at the ALTO
+  page's width, strips cut on the page's ink as under <code>--geometry image</code>), the region's box taken from the run's <code>sections/index.csv</code> (the section image is
+  the region enlarged by <code>enlarge</code>) from the located heading down, cut into strips 500 px tall and
+  upscaled (<code>--notes-max-height 500 --notes-upscale</code>), with the pilot's own captions;</li>
+<li><strong>the readers</strong> — built as <code>run_lexikon_1910_pilot.build_notes_reader</code> builds them from the
+  run's flags (its parser is inline in <code>main</code>, so the arguments are restated here, with the
+  pilot's defaults: 4,000 output tokens for Gemini, 8,000 for Haiku): Gemini 3.8 Flash once (temperature 0, reasoning off, the key image) and Haiku 5.5
+  three times (adaptive thinking, effort high, the key image and the run's contrast sheet), each with
+  the Czech <strong>offices</strong> prompt (<code>lexikon_1910_vision.build_system(section="offices")</code>), each label
+  with a crop cache of its own under <code>output/recheck/cz/reread/</code>;</li>
+<li><strong>the decode</strong> — the Czech decoder (<code>lexikon_1910_institutions.decode_sections</code>) on the lines
+  split at any heading they carry (<code>offices_resplit.resplit_sections</code>, a full-stop key mended);</li>
+<li><strong>the claims</strong> — settled as §4 settles the German ones (<code>offices_reread.settle</code>): every reader
+  agrees → added; disputed → Opus (§6); an entry only some readers reached → the reader of record's.</li>
+</ul>
+<p>Nothing is sent without <code>spend</code>, and then only on the machine of record (D-68).</p>
+<pre><code>python -m utils.recheck.offices_reread_cz              # cut, price, decode the cache
+</code></pre>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-recheck-offices_reread_cz-abbreviations">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">abbreviations</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">list</span></pre>
+<p class="calls"><b>Called by</b> <code>utils/docs/build_docs.py</code> <code>utils/lexikon_1910/score_r5_german_notes.py</code></p>
+<details><summary>source · lines 73–74 (2 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">73</span>
+<span class="normal">74</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">abbreviations</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">lxin</span><span class="o">.</span><span class="n">load_abbreviations</span><span class="p">(</span><span class="n">ABBREVIATIONS</span><span class="p">,</span> <span class="n">lang</span><span class="o">=</span><span class="s2">&quot;cs&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-recheck-offices_reread_cz-cut">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">cut</span><span class="p">(</span><span class="n">pages</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;full&#39;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">],</span> <span class="nb">dict</span><span class="p">]</span></pre>
+<div class="fndoc"><p><code>(jobs, segments)</code>: every Czech region of the coverage check cut as the pilot cuts a
+section — jobs <code>(slot, crop, caption, "offices")</code> in printed order, segments by slot.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_contrast_arm.py</code> <code>tests/test_glyph_e3.py</code> <code>utils/lexikon_1910/build_glyph_bank.py</code> <code>utils/lexikon_1910/make_gold_worksheet.py</code> <code>utils/lexikon_1910/run_de_table.py</code> <code>utils/lexikon_1910/run_glyph_e3.py</code> <code>utils/lexikon_1910/run_verify_test_b.py</code> <code>utils/parsing/amateur_theatre.py</code> <code>utils/parsing/ruian.py</code> <code>utils/recheck/offices_reread.py</code> <code>utils/recheck/opus_pass.py</code></p>
+<details><summary>source · lines 77–100 (24 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">cut</span><span class="p">(</span><span class="n">pages</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;full&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">],</span> <span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``(jobs, segments)``: every Czech region of the coverage check cut as the pilot cuts a</span>
+<span class="sd">    section — jobs ``(slot, crop, caption, &quot;offices&quot;)`` in printed order, segments by slot.&quot;&quot;&quot;</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="p">{</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;image&quot;</span><span class="p">]:</span> <span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">_read</span><span class="p">(</span><span class="n">rf</span><span class="o">.</span><span class="n">out_dir</span><span class="p">(</span><span class="n">EDITION</span><span class="p">,</span> <span class="n">pages</span><span class="p">)</span> <span class="o">/</span> <span class="s2">&quot;sections&quot;</span> <span class="o">/</span> <span class="s2">&quot;index.csv&quot;</span><span class="p">)}</span>
+    <span class="n">by_page</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">orr</span><span class="o">.</span><span class="n">regions</span><span class="p">(</span><span class="n">EDITION</span><span class="p">):</span>
+        <span class="n">row</span> <span class="o">=</span> <span class="n">index</span><span class="p">[</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;section&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="s2">&quot;.png&quot;</span><span class="p">]</span>
+        <span class="n">by_page</span><span class="p">[</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">r</span><span class="p">,</span> <span class="n">row</span><span class="p">))</span>
+    <span class="n">jobs</span><span class="p">,</span> <span class="n">segments</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">page</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">by_page</span><span class="p">):</span>
+        <span class="n">alto</span> <span class="o">=</span> <span class="n">lx</span><span class="o">.</span><span class="n">read_alto</span><span class="p">(</span><span class="n">pilot</span><span class="o">.</span><span class="n">CZ_PAGES</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">page</span><span class="si">}</span><span class="s2">.alto.xml&quot;</span><span class="p">)</span>
+        <span class="n">image</span> <span class="o">=</span> <span class="n">lx</span><span class="o">.</span><span class="n">render_page</span><span class="p">(</span><span class="n">pilot</span><span class="o">.</span><span class="n">CZ_PDF</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">page</span><span class="p">),</span> <span class="n">alto</span><span class="o">.</span><span class="n">width</span><span class="p">)</span>
+        <span class="n">geo</span> <span class="o">=</span> <span class="n">lximg</span><span class="o">.</span><span class="n">detect</span><span class="p">(</span><span class="n">image</span><span class="p">)</span>               <span class="c1"># --geometry image: strips cut on the page&#39;s ink</span>
+        <span class="n">ink</span> <span class="o">=</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">page_ink</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">geo</span><span class="p">)</span> <span class="k">if</span> <span class="n">geo</span><span class="o">.</span><span class="n">apparatus</span><span class="p">()</span> <span class="k">else</span> <span class="kc">None</span>
+        <span class="k">for</span> <span class="n">r</span><span class="p">,</span> <span class="n">row</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">by_page</span><span class="p">[</span><span class="n">page</span><span class="p">],</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">pair</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">pair</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="s2">&quot;order&quot;</span><span class="p">])):</span>
+            <span class="n">slot</span> <span class="o">=</span> <span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">],</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;region&quot;</span><span class="p">],</span> <span class="nb">int</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;order&quot;</span><span class="p">]))</span>
+            <span class="n">segment</span> <span class="o">=</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">Segment</span><span class="p">(</span><span class="n">kind</span><span class="o">=</span><span class="s2">&quot;offices&quot;</span><span class="p">,</span> <span class="n">district</span><span class="o">=</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;district&quot;</span><span class="p">],</span> <span class="n">page</span><span class="o">=</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">],</span>
+                                   <span class="n">region</span><span class="o">=</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;region&quot;</span><span class="p">],</span> <span class="n">box</span><span class="o">=</span><span class="n">orr</span><span class="o">.</span><span class="n">page_box</span><span class="p">(</span><span class="n">row</span><span class="p">,</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;y_from&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;y_to&quot;</span><span class="p">]),</span>
+                                   <span class="n">order</span><span class="o">=</span><span class="nb">int</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;order&quot;</span><span class="p">]))</span>
+            <span class="n">segments</span><span class="p">[</span><span class="n">slot</span><span class="p">]</span> <span class="o">=</span> <span class="n">segment</span>
+            <span class="k">for</span> <span class="n">crop</span><span class="p">,</span> <span class="n">_s</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">crop_segments</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="p">[</span><span class="n">segment</span><span class="p">],</span> <span class="n">alto</span><span class="p">,</span> <span class="n">upscale</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                                                     <span class="n">max_height</span><span class="o">=</span><span class="n">MAX_HEIGHT</span><span class="p">,</span> <span class="n">ink</span><span class="o">=</span><span class="n">ink</span><span class="p">):</span>
+                <span class="n">jobs</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">slot</span><span class="p">,</span> <span class="n">crop</span><span class="p">,</span> <span class="n">orr</span><span class="o">.</span><span class="n">_caption</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">n</span><span class="p">),</span> <span class="s2">&quot;offices&quot;</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">jobs</span><span class="p">,</span> <span class="n">segments</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-recheck-offices_reread_cz-readers">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">readers</span><span class="p">(</span><span class="n">pages</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;full&#39;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span></pre>
+<div class="fndoc"><p><code>{label: spec}</code> — the frozen run's four Czech readers with the Czech offices prompt.</p></div>
+<p class="calls"><b>Called by</b> <code>15_frozen_run.ipynb</code> <code>17_recheck.ipynb</code> <code>tests/test_court_key.py</code> <code>utils/lexikon_1910/lexikon_1910_courts.py</code> <code>utils/lexikon_1910/run_glyph_e3.py</code> <code>utils/recheck/entry_keys.py</code> <code>utils/recheck/merge.py</code> <code>utils/recheck/offices_reread.py</code> <code>utils/recheck/offices_resplit.py</code> <code>utils/recheck/opus_pass.py</code> <code>utils/recheck/unasked.py</code></p>
+<details><summary>source · lines 103–133 (31 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">readers</span><span class="p">(</span><span class="n">pages</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;full&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``{label: spec}`` — the frozen run&#39;s four Czech readers with the Czech offices prompt.&quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">PIL</span><span class="w"> </span><span class="kn">import</span> <span class="n">Image</span>
+
+    <span class="n">abbr</span> <span class="o">=</span> <span class="n">abbreviations</span><span class="p">()</span>
+    <span class="n">sheet</span> <span class="o">=</span> <span class="n">rf</span><span class="o">.</span><span class="n">out_dir</span><span class="p">(</span><span class="n">EDITION</span><span class="p">,</span> <span class="n">pages</span><span class="p">)</span> <span class="o">/</span> <span class="s2">&quot;freeze&quot;</span> <span class="o">/</span> <span class="s2">&quot;contrast_sheet.png&quot;</span>
+    <span class="n">contrast</span> <span class="o">=</span> <span class="n">Image</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">sheet</span><span class="p">)</span><span class="o">.</span><span class="n">convert</span><span class="p">(</span><span class="s2">&quot;RGB&quot;</span><span class="p">)</span>
+    <span class="n">digest</span> <span class="o">=</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">sha256</span><span class="p">(</span><span class="n">sheet</span><span class="o">.</span><span class="n">read_bytes</span><span class="p">())</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()[:</span><span class="mi">16</span><span class="p">]</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">with</span> <span class="n">orr</span><span class="o">.</span><span class="n">_placeholder_keys</span><span class="p">((</span><span class="s2">&quot;ANTHROPIC_API_KEY&quot;</span><span class="p">,</span> <span class="n">pilot</span><span class="o">.</span><span class="n">READER_ENDPOINTS</span><span class="p">[</span><span class="s2">&quot;gemini&quot;</span><span class="p">][</span><span class="mi">1</span><span class="p">])):</span>
+        <span class="k">for</span> <span class="n">label</span> <span class="ow">in</span> <span class="n">rs</span><span class="o">.</span><span class="n">readers</span><span class="p">(</span><span class="n">EDITION</span><span class="p">,</span> <span class="n">pages</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">label</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;gemini38&quot;</span><span class="p">):</span>
+                <span class="n">system</span> <span class="o">=</span> <span class="n">lxv</span><span class="o">.</span><span class="n">build_system</span><span class="p">(</span><span class="n">abbr</span><span class="p">,</span> <span class="n">style</span><span class="o">=</span><span class="s2">&quot;annotate&quot;</span><span class="p">,</span> <span class="n">section</span><span class="o">=</span><span class="s2">&quot;offices&quot;</span><span class="p">,</span> <span class="n">atlas</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                <span class="n">url</span><span class="p">,</span> <span class="n">key_env</span> <span class="o">=</span> <span class="n">pilot</span><span class="o">.</span><span class="n">READER_ENDPOINTS</span><span class="p">[</span><span class="s2">&quot;gemini&quot;</span><span class="p">]</span>
+                <span class="n">reader</span> <span class="o">=</span> <span class="n">pilot</span><span class="o">.</span><span class="n">OpenAICompatibleReader</span><span class="p">(</span>
+                    <span class="n">GEMINI</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">url</span><span class="p">,</span> <span class="n">key_env</span><span class="p">,</span> <span class="n">system</span><span class="o">=</span><span class="n">system</span><span class="p">,</span> <span class="n">schema</span><span class="o">=</span><span class="n">lxv</span><span class="o">.</span><span class="n">NOTES_SCHEMA</span><span class="p">,</span> <span class="n">payload_key</span><span class="o">=</span><span class="s2">&quot;lines&quot;</span><span class="p">,</span>
+                    <span class="n">schema_name</span><span class="o">=</span><span class="s2">&quot;notes&quot;</span><span class="p">,</span> <span class="n">max_tokens</span><span class="o">=</span><span class="n">GEMINI</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">temperature</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">reasoning_effort</span><span class="o">=</span><span class="s2">&quot;none&quot;</span><span class="p">)</span>
+                <span class="n">reader</span><span class="o">.</span><span class="n">prompt_style</span> <span class="o">=</span> <span class="s2">&quot;annotate&quot;</span>
+                <span class="n">reader</span><span class="o">.</span><span class="n">shared_parts</span> <span class="o">=</span> <span class="mi">1</span>
+                <span class="n">out</span><span class="p">[</span><span class="n">label</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;arm&quot;</span><span class="p">:</span> <span class="n">gn</span><span class="o">.</span><span class="n">ARMS</span><span class="p">[</span><span class="s2">&quot;gemini38&quot;</span><span class="p">],</span> <span class="s2">&quot;reader&quot;</span><span class="p">:</span> <span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;system&quot;</span><span class="p">:</span> <span class="n">system</span><span class="p">,</span>
+                              <span class="s2">&quot;contrast&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;contrast_digest&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">}</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">system</span> <span class="o">=</span> <span class="n">lxv</span><span class="o">.</span><span class="n">build_system</span><span class="p">(</span><span class="n">abbr</span><span class="p">,</span> <span class="n">style</span><span class="o">=</span><span class="s2">&quot;annotate&quot;</span><span class="p">,</span> <span class="n">section</span><span class="o">=</span><span class="s2">&quot;offices&quot;</span><span class="p">,</span> <span class="n">atlas</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                                          <span class="n">think</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">contrast</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                <span class="n">reader</span> <span class="o">=</span> <span class="n">pilot</span><span class="o">.</span><span class="n">ClaudeReader</span><span class="p">(</span><span class="n">HAIKU</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="s2">&quot;high&quot;</span><span class="p">,</span> <span class="n">thinking</span><span class="o">=</span><span class="s2">&quot;adaptive&quot;</span><span class="p">,</span> <span class="n">max_tokens</span><span class="o">=</span><span class="n">HAIKU</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span>
+                                            <span class="n">system</span><span class="o">=</span><span class="n">system</span><span class="p">,</span> <span class="n">schema</span><span class="o">=</span><span class="n">lxv</span><span class="o">.</span><span class="n">NOTES_SCHEMA</span><span class="p">,</span> <span class="n">payload_key</span><span class="o">=</span><span class="s2">&quot;lines&quot;</span><span class="p">)</span>
+                <span class="n">reader</span><span class="o">.</span><span class="n">prompt_style</span> <span class="o">=</span> <span class="s2">&quot;annotate&quot;</span>
+                <span class="n">reader</span><span class="o">.</span><span class="n">shared_parts</span> <span class="o">=</span> <span class="mi">2</span>
+                <span class="n">out</span><span class="p">[</span><span class="n">label</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;arm&quot;</span><span class="p">:</span> <span class="n">gn</span><span class="o">.</span><span class="n">ARMS</span><span class="p">[</span><span class="s2">&quot;haiku55nh&quot;</span><span class="p">],</span> <span class="s2">&quot;reader&quot;</span><span class="p">:</span> <span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;system&quot;</span><span class="p">:</span> <span class="n">system</span><span class="p">,</span>
+                              <span class="s2">&quot;contrast&quot;</span><span class="p">:</span> <span class="n">contrast</span><span class="p">,</span> <span class="s2">&quot;contrast_digest&quot;</span><span class="p">:</span> <span class="n">digest</span><span class="p">}</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-recheck-offices_reread_cz-decode">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">decode</span><span class="p">(</span><span class="n">label</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">segments</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">by_slot</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">folder</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span></pre>
+<div class="fndoc"><p>One Czech reader's lines into its inventory, as <code>offices_reread.decode</code> does for a
+German one: split at any heading the lines carry, a full-stop key mended, decoded by the Czech
+decoder. Writes <code>notes_&amp;lt;label&amp;gt;.csv</code>, <code>splits_&amp;lt;label&amp;gt;.csv</code> and <code>inventory_&amp;lt;label&amp;gt;.csv</code>.</p></div>
+<p class="calls"><b>Called by</b> <code>tests/test_ostafin_silesia.py</code> <code>tests/test_reader_batches_gemini.py</code> <code>utils/docs/build_docs.py</code> <code>utils/lexikon_1910/bakeoff.py</code> <code>utils/lexikon_1910/build_token_review.py</code> <code>utils/lexikon_1910/extract_prose_pages.py</code> <code>utils/lexikon_1910/lexikon_1910_pages.py</code> <code>utils/lexikon_1910/lexikon_1910_register.py</code> <code>utils/lexikon_1910/reader_batches.py</code> <code>utils/lexikon_1910/run_frozen.py</code> <code>utils/lexikon_1910/run_lexikon_1910_pilot.py</code> <code>utils/lexikon_1910/run_verify_test_b.py</code> <code>utils/parsing/districts.py</code> <code>utils/parsing/lexikon.py</code> <code>utils/parsing/matice.py</code> <code>utils/parsing/ruian.py</code> <code>utils/recheck/offices_reread.py</code> <code>utils/reference_tools/background/build_reading_map.py</code> <code>utils/reference_tools/background/prep_slices.py</code> <code>utils/reference_tools/places/statutory_prose.py</code> <code>utils/reference_tools/units/build_unit_authority.py</code> <code>utils/scraping/scraper_amaterskedivadlo.py</code> <code>utils/scraping/scraper_kramerius.py</code> <code>utils/scraping/scraper_kramerius7.py</code> <code>utils/validation/check_ostafin_silesia.py</code> <code>utils/validation/lexikon_population.py</code></p>
+<details><summary>source · lines 136–149 (14 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">decode</span><span class="p">(</span><span class="n">label</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">segments</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">by_slot</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">folder</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;One Czech reader&#39;s lines into its inventory, as :func:`offices_reread.decode` does for a</span>
+<span class="sd">    German one: split at any heading the lines carry, a full-stop key mended, decoded by the Czech</span>
+<span class="sd">    decoder. Writes ``notes_&lt;label&gt;.csv``, ``splits_&lt;label&gt;.csv`` and ``inventory_&lt;label&gt;.csv``.&quot;&quot;&quot;</span>
+    <span class="n">read_</span> <span class="o">=</span> <span class="p">[(</span><span class="n">segments</span><span class="p">[</span><span class="n">slot</span><span class="p">],</span> <span class="n">by_slot</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">slot</span><span class="p">,</span> <span class="p">[]))</span> <span class="k">for</span> <span class="n">slot</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">segments</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">s</span><span class="p">:</span> <span class="p">(</span><span class="n">s</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">s</span><span class="p">[</span><span class="mi">2</span><span class="p">]))]</span>
+    <span class="n">sections</span><span class="p">,</span> <span class="n">splits</span> <span class="o">=</span> <span class="n">rs</span><span class="o">.</span><span class="n">resplit_sections</span><span class="p">(</span><span class="n">read_</span><span class="p">,</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">find_heading</span><span class="p">,</span> <span class="n">mend</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">records</span><span class="p">,</span> <span class="n">_entries</span> <span class="o">=</span> <span class="n">lxin</span><span class="o">.</span><span class="n">decode_sections</span><span class="p">(</span><span class="n">sections</span><span class="p">,</span> <span class="n">abbreviations</span><span class="p">())</span>
+    <span class="n">inventory</span> <span class="o">=</span> <span class="n">lxin</span><span class="o">.</span><span class="n">build_inventory</span><span class="p">(</span><span class="n">records</span><span class="p">,</span> <span class="p">[])</span>
+    <span class="n">rs</span><span class="o">.</span><span class="n">_write</span><span class="p">(</span><span class="n">folder</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;notes_</span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">.csv&quot;</span><span class="p">,</span>
+              <span class="p">[{</span><span class="s2">&quot;page&quot;</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">page</span><span class="p">,</span> <span class="s2">&quot;region&quot;</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">region</span><span class="p">,</span> <span class="s2">&quot;order&quot;</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">order</span><span class="p">,</span> <span class="s2">&quot;court_de&quot;</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">district</span><span class="p">,</span>
+                <span class="s2">&quot;line_no&quot;</span><span class="p">:</span> <span class="n">i</span><span class="p">,</span> <span class="s2">&quot;text&quot;</span><span class="p">:</span> <span class="n">line</span><span class="p">}</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">lines</span> <span class="ow">in</span> <span class="n">read_</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">line</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">lines</span><span class="p">)])</span>
+    <span class="n">rs</span><span class="o">.</span><span class="n">_write</span><span class="p">(</span><span class="n">folder</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;splits_</span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">.csv&quot;</span><span class="p">,</span> <span class="n">splits</span><span class="p">)</span>
+    <span class="n">rs</span><span class="o">.</span><span class="n">_write</span><span class="p">(</span><span class="n">folder</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;inventory_</span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">.csv&quot;</span><span class="p">,</span> <span class="n">inventory</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">inventory</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-recheck-offices_reread_cz-read">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">read</span><span class="p">(</span><span class="n">pages</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;full&#39;</span><span class="p">,</span> <span class="n">spend</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">out</span><span class="p">:</span> <span class="n">Path</span><span class="o">=</span><span class="n">OUT</span><span class="p">,</span> <span class="n">allow_other_machine</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span></pre>
+<div class="fndoc"><p>Cut, price, and read the Czech regions with every Czech reader; decode what is read.
+Without <code>spend</code> nothing is sent. Returns the summary also written to <code>summary.json</code>.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code> <code>15_frozen_run.ipynb</code> <code>15b_rulings_into_the_runs.ipynb</code> <code>17_recheck.ipynb</code> <code>tests/test_amateur_theatre.py</code> <code>tests/test_reader_batches_gemini.py</code> <code>tests/test_scraper_amaterskedivadlo.py</code> <code>utils/docs/build_docs.py</code> <code>utils/lexikon_1910/lexikon_1910_institutions.py</code> <code>utils/lexikon_1910/lexikon_1910_pages.py</code> <code>utils/lexikon_1910/lexikon_1910_vision.py</code> <code>utils/lexikon_1910/reader_batches.py</code> <code>utils/lexikon_1910/run_de_table.py</code> <code>utils/lexikon_1910/run_lexikon_1910_pilot.py</code> <code>utils/lexikon_1910/run_r5_german_notes.py</code> <code>utils/parsing/prng.py</code> <code>utils/recheck/offices_reread.py</code> <code>utils/reference_tools/background/prep_slices.py</code> <code>utils/reference_tools/occupations/download_hisco_sources.py</code> <code>utils/reference_tools/places/run_german_reader_boxes.py</code> <code>utils/reference_tools/places/statutory_institutions.py</code> <code>utils/reference_tools/units/build_unit_authority.py</code> <code>utils/scraping/run_matice_downloads.py</code> <code>utils/validation/check_offices_coverage.py</code> <code>utils/validation/check_ostafin_silesia.py</code> <code>utils/validation/data_checks.py</code> <code>utils/validation/lexikon_population.py</code></p>
+<details><summary>source · lines 152–188 (37 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">read</span><span class="p">(</span><span class="n">pages</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;full&quot;</span><span class="p">,</span> <span class="n">spend</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">out</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">OUT</span><span class="p">,</span> <span class="n">allow_other_machine</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Cut, price, and read the Czech regions with every Czech reader; decode what is read.</span>
+<span class="sd">    Without ``spend`` nothing is sent. Returns the summary also written to ``summary.json``.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">spend</span> <span class="ow">and</span> <span class="n">bo</span><span class="o">.</span><span class="n">HOST</span> <span class="o">!=</span> <span class="n">orr</span><span class="o">.</span><span class="n">MACHINE_OF_RECORD</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">allow_other_machine</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;the re-read spends on </span><span class="si">{</span><span class="n">orr</span><span class="o">.</span><span class="n">MACHINE_OF_RECORD</span><span class="si">}</span><span class="s2"> only (D-68): this is </span><span class="si">{</span><span class="n">bo</span><span class="o">.</span><span class="n">HOST</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">PIL</span><span class="w"> </span><span class="kn">import</span> <span class="n">Image</span>
+
+    <span class="n">atlas</span> <span class="o">=</span> <span class="n">Image</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">ATLAS</span><span class="p">)</span><span class="o">.</span><span class="n">convert</span><span class="p">(</span><span class="s2">&quot;RGB&quot;</span><span class="p">)</span>
+    <span class="n">jobs</span><span class="p">,</span> <span class="n">segments</span> <span class="o">=</span> <span class="n">cut</span><span class="p">(</span><span class="n">pages</span><span class="p">)</span>
+    <span class="n">folder</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">out</span><span class="p">)</span> <span class="o">/</span> <span class="n">EDITION</span> <span class="o">/</span> <span class="n">SUB</span>
+    <span class="n">folder</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">spend</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_pages</span> <span class="k">as</span> <span class="n">lxp</span>
+        <span class="n">lxp</span><span class="o">.</span><span class="n">load_credentials</span><span class="p">()</span>
+    <span class="n">summary</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;module&quot;</span><span class="p">:</span> <span class="n">__version__</span><span class="p">,</span> <span class="s2">&quot;edition&quot;</span><span class="p">:</span> <span class="n">EDITION</span><span class="p">,</span> <span class="s2">&quot;pages&quot;</span><span class="p">:</span> <span class="n">pages</span><span class="p">,</span> <span class="s2">&quot;host&quot;</span><span class="p">:</span> <span class="n">bo</span><span class="o">.</span><span class="n">HOST</span><span class="p">,</span>
+               <span class="s2">&quot;run&quot;</span><span class="p">:</span> <span class="n">time</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s2">&quot;%Y-%m-</span><span class="si">%d</span><span class="s2"> %H:%M:%S&quot;</span><span class="p">),</span> <span class="s2">&quot;regions&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">segments</span><span class="p">),</span>
+               <span class="s2">&quot;crops&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">jobs</span><span class="p">),</span> <span class="s2">&quot;readers&quot;</span><span class="p">:</span> <span class="p">{}}</span>
+    <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">spec</span> <span class="ow">in</span> <span class="n">readers</span><span class="p">(</span><span class="n">pages</span><span class="p">)</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">cache</span> <span class="o">=</span> <span class="n">pilot</span><span class="o">.</span><span class="n">key_image_cache</span><span class="p">(</span><span class="n">folder</span> <span class="o">/</span> <span class="s2">&quot;crop_cache&quot;</span> <span class="o">/</span> <span class="n">label</span><span class="p">,</span> <span class="n">pilot</span><span class="o">.</span><span class="n">key_image_digest</span><span class="p">(</span><span class="n">atlas</span><span class="p">))</span>
+        <span class="n">missing</span> <span class="o">=</span> <span class="p">[</span><span class="n">j</span> <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="n">jobs</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">orr</span><span class="o">.</span><span class="n">_cached</span><span class="p">(</span><span class="n">j</span><span class="p">,</span> <span class="n">spec</span><span class="p">,</span> <span class="n">cache</span><span class="p">)]</span>
+        <span class="n">usd</span> <span class="o">=</span> <span class="n">orr</span><span class="o">.</span><span class="n">price</span><span class="p">(</span><span class="n">missing</span><span class="p">,</span> <span class="n">spec</span><span class="p">,</span> <span class="n">atlas</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">spec</span><span class="p">[</span><span class="s2">&quot;system&quot;</span><span class="p">]))</span>
+        <span class="n">entry</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;cached&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">jobs</span><span class="p">)</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">missing</span><span class="p">),</span> <span class="s2">&quot;to_read&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">missing</span><span class="p">),</span> <span class="s2">&quot;usd_live&quot;</span><span class="p">:</span> <span class="nb">round</span><span class="p">(</span><span class="n">usd</span><span class="p">,</span> <span class="mi">2</span><span class="p">)}</span>
+        <span class="k">if</span> <span class="n">missing</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">spend</span><span class="p">:</span>
+            <span class="n">entry</span><span class="p">[</span><span class="s2">&quot;state&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;not read (spend is off)&quot;</span>
+            <span class="n">summary</span><span class="p">[</span><span class="s2">&quot;readers&quot;</span><span class="p">][</span><span class="n">label</span><span class="p">]</span> <span class="o">=</span> <span class="n">entry</span>
+            <span class="k">continue</span>
+        <span class="n">results</span><span class="p">,</span> <span class="n">parked</span> <span class="o">=</span> <span class="n">gn</span><span class="o">.</span><span class="n">read_crops</span><span class="p">(</span><span class="n">jobs</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;offices&quot;</span><span class="p">:</span> <span class="n">spec</span><span class="p">[</span><span class="s2">&quot;reader&quot;</span><span class="p">]},</span> <span class="n">atlas</span><span class="p">,</span> <span class="n">cache</span><span class="p">,</span>
+                                        <span class="n">contrast</span><span class="o">=</span><span class="n">spec</span><span class="p">[</span><span class="s2">&quot;contrast&quot;</span><span class="p">],</span> <span class="n">contrast_digest</span><span class="o">=</span><span class="n">spec</span><span class="p">[</span><span class="s2">&quot;contrast_digest&quot;</span><span class="p">])</span>
+        <span class="n">by_slot</span><span class="p">,</span> <span class="n">counts</span> <span class="o">=</span> <span class="n">gn</span><span class="o">.</span><span class="n">clean_lines</span><span class="p">(</span><span class="n">results</span><span class="p">,</span> <span class="n">lxv</span><span class="o">.</span><span class="n">vocabulary</span><span class="p">(</span><span class="n">abbreviations</span><span class="p">()))</span>
+        <span class="n">entry</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="n">k</span><span class="p">:</span> <span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;failed&quot;</span><span class="p">,</span> <span class="s2">&quot;empty&quot;</span><span class="p">,</span> <span class="s2">&quot;rejected&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;output&quot;</span><span class="p">)})</span>
+        <span class="n">entry</span><span class="p">[</span><span class="s2">&quot;state&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;incomplete: run again to finish (the cache keeps what was read)&quot;</span>
+                          <span class="k">if</span> <span class="n">parked</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;at&quot;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;failed&quot;</span><span class="p">)</span> <span class="k">else</span> <span class="s2">&quot;read&quot;</span><span class="p">)</span>
+        <span class="n">entry</span><span class="p">[</span><span class="s2">&quot;rows&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">decode</span><span class="p">(</span><span class="n">label</span><span class="p">,</span> <span class="n">segments</span><span class="p">,</span> <span class="n">by_slot</span><span class="p">,</span> <span class="n">folder</span><span class="p">))</span>
+        <span class="n">summary</span><span class="p">[</span><span class="s2">&quot;readers&quot;</span><span class="p">][</span><span class="n">label</span><span class="p">]</span> <span class="o">=</span> <span class="n">entry</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">entry</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="p">(</span><span class="n">folder</span> <span class="o">/</span> <span class="s2">&quot;summary.json&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">summary</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">summary</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-recheck-offices_reread_cz-main">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 191–198 (8 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">stdout</span><span class="p">,</span> <span class="s2">&quot;reconfigure&quot;</span><span class="p">):</span>
+        <span class="n">sys</span><span class="o">.</span><span class="n">stdout</span><span class="o">.</span><span class="n">reconfigure</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="n">summary</span> <span class="o">=</span> <span class="n">read</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">orr</span><span class="o">.</span><span class="n">report</span><span class="p">(</span><span class="n">summary</span><span class="p">))</span>
+    <span class="k">if</span> <span class="nb">all</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;state&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;read&quot;</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">summary</span><span class="p">[</span><span class="s2">&quot;readers&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">()):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  consensus:&quot;</span><span class="p">,</span> <span class="n">orr</span><span class="o">.</span><span class="n">consensus</span><span class="p">(</span><span class="n">EDITION</span><span class="p">,</span> <span class="s2">&quot;full&quot;</span><span class="p">,</span> <span class="n">OUT</span><span class="p">))</span>
+    <span class="k">return</span> <span class="mi">0</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-recheck-offices_reread_cz-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-recheck-offices_reread_cz-EDITION"><pre class="sig">EDITION<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;cz&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-recheck-offices_reread_cz-OUT"><pre class="sig">OUT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">orr</span><span class="o">.</span><span class="n">OUT</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-recheck-offices_reread_cz-SUB"><pre class="sig">SUB<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">orr</span><span class="o">.</span><span class="n">SUB</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-recheck-offices_reread_cz-ABBREVIATIONS"><pre class="sig">ABBREVIATIONS<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;reference&#39;</span> <span class="o">/</span> <span class="s1">&#39;places&#39;</span> <span class="o">/</span> <span class="s1">&#39;institution_abbreviations.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-recheck-offices_reread_cz-ATLAS"><pre class="sig">ATLAS<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;reference&#39;</span> <span class="o">/</span> <span class="s1">&#39;places&#39;</span> <span class="o">/</span> <span class="s1">&#39;symbols&#39;</span> <span class="o">/</span> <span class="s1">&#39;atlas_prompt.png&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-recheck-offices_reread_cz-MAX_HEIGHT"><pre class="sig">MAX_HEIGHT<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">500</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-recheck-offices_reread_cz-GEMINI"><pre class="sig">GEMINI<span class="kind">tuple · 2 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">(</span><span class="s1">&#39;gemini-3.8-flash&#39;</span><span class="p">,</span> <span class="mi">4000</span><span class="p">)</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-recheck-offices_reread_cz-HAIKU"><pre class="sig">HAIKU<span class="kind">tuple · 2 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">(</span><span class="s1">&#39;claude-haiku-5-5&#39;</span><span class="p">,</span> <span class="mi">8000</span><span class="p">)</span>
+</pre></div>
+</details></div>
+<h2>Used by</h2><p><code>17_recheck.ipynb</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/recheck/offices_reread_cz.py · 202 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;§4 for the Czech volume: its blind offices regions read again by its own readers (D-206).</span>
+
+<span class="sd">The section cutter labelled three Czech offices regions ``parts`` (D-192): Dvůr Králové nad Labem</span>
+<span class="sd">on page 0083 (two columns, below the *Úřady, ústavy* heading the cutter missed) and Vodňany on 0317.</span>
+<span class="sd">The route&#39;s readers named the symbols in those lines, but the lines sat in a *Části osad* section, so</span>
+<span class="sd">the decoder never read them as offices (and Gemini, the reader of record, skipped the left column&#39;s</span>
+<span class="sd">foot): the Czech register shows no institution for Dvůr Králové&#39;s 15 offices entries or Vodňany&#39;s 2,</span>
+<span class="sd">the volume&#39;s largest blind block. :mod:`offices_reread` re-reads such regions for the German volumes with</span>
+<span class="sd">the German readers; this module does it for the Czech volume with the **Czech** readers, as the</span>
+<span class="sd">frozen run built them (``run_frozen.read_plan``):</span>
+
+<span class="sd">* **the crop** — the Czech page as the pilot renders it (``lexikon_1910.render_page`` at the ALTO</span>
+<span class="sd">  page&#39;s width, strips cut on the page&#39;s ink as under ``--geometry image``), the region&#39;s box taken from the run&#39;s ``sections/index.csv`` (the section image is</span>
+<span class="sd">  the region enlarged by ``enlarge``) from the located heading down, cut into strips 500 px tall and</span>
+<span class="sd">  upscaled (``--notes-max-height 500 --notes-upscale``), with the pilot&#39;s own captions;</span>
+<span class="sd">* **the readers** — built as ``run_lexikon_1910_pilot.build_notes_reader`` builds them from the</span>
+<span class="sd">  run&#39;s flags (its parser is inline in ``main``, so the arguments are restated here, with the</span>
+<span class="sd">  pilot&#39;s defaults: 4,000 output tokens for Gemini, 8,000 for Haiku): Gemini 3.8 Flash once (temperature 0, reasoning off, the key image) and Haiku 5.5</span>
+<span class="sd">  three times (adaptive thinking, effort high, the key image and the run&#39;s contrast sheet), each with</span>
+<span class="sd">  the Czech **offices** prompt (``lexikon_1910_vision.build_system(section=&quot;offices&quot;)``), each label</span>
+<span class="sd">  with a crop cache of its own under ``output/recheck/cz/reread/``;</span>
+<span class="sd">* **the decode** — the Czech decoder (``lexikon_1910_institutions.decode_sections``) on the lines</span>
+<span class="sd">  split at any heading they carry (``offices_resplit.resplit_sections``, a full-stop key mended);</span>
+<span class="sd">* **the claims** — settled as §4 settles the German ones (``offices_reread.settle``): every reader</span>
+<span class="sd">  agrees → added; disputed → Opus (§6); an entry only some readers reached → the reader of record&#39;s.</span>
+
+<span class="sd">Nothing is sent without ``spend``, and then only on the machine of record (D-68).</span>
+
+<span class="sd">    python -m utils.recheck.offices_reread_cz              # cut, price, decode the cache</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;0.1.0&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">csv</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">hashlib</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">collections</span><span class="w"> </span><span class="kn">import</span> <span class="n">defaultdict</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="p">[:</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">),</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;utils&quot;</span> <span class="o">/</span> <span class="s2">&quot;lexikon_1910&quot;</span><span class="p">)]</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">bakeoff</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">bo</span>                                                   <span class="c1"># noqa: E402</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">run_frozen</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">rf</span>                                                <span class="c1"># noqa: E402</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">run_lexikon_1910_pilot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pilot</span>                                 <span class="c1"># noqa: E402</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">run_r5_german_notes</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">gn</span>                                       <span class="c1"># noqa: E402</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910</span> <span class="k">as</span> <span class="n">lx</span>                      <span class="c1"># noqa: E402</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_image</span> <span class="k">as</span> <span class="n">lximg</span>            <span class="c1"># noqa: E402</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_institutions</span> <span class="k">as</span> <span class="n">lxin</span>      <span class="c1"># noqa: E402</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_notes</span> <span class="k">as</span> <span class="n">lxnt</span>             <span class="c1"># noqa: E402</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_vision</span> <span class="k">as</span> <span class="n">lxv</span>             <span class="c1"># noqa: E402</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.recheck</span><span class="w"> </span><span class="kn">import</span> <span class="n">offices_reread</span> <span class="k">as</span> <span class="n">orr</span>                       <span class="c1"># noqa: E402</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.recheck</span><span class="w"> </span><span class="kn">import</span> <span class="n">offices_resplit</span> <span class="k">as</span> <span class="n">rs</span>                       <span class="c1"># noqa: E402</span>
+
+<span class="n">EDITION</span> <span class="o">=</span> <span class="s2">&quot;cz&quot;</span>
+<span class="n">OUT</span> <span class="o">=</span> <span class="n">orr</span><span class="o">.</span><span class="n">OUT</span>
+<span class="n">SUB</span> <span class="o">=</span> <span class="n">orr</span><span class="o">.</span><span class="n">SUB</span>
+<span class="n">ABBREVIATIONS</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;places&quot;</span> <span class="o">/</span> <span class="s2">&quot;institution_abbreviations.csv&quot;</span>
+<span class="n">ATLAS</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;places&quot;</span> <span class="o">/</span> <span class="s2">&quot;symbols&quot;</span> <span class="o">/</span> <span class="s2">&quot;atlas_prompt.png&quot;</span>
+<span class="n">MAX_HEIGHT</span> <span class="o">=</span> <span class="mi">500</span>          <span class="c1"># --notes-max-height of the frozen Czech readers</span>
+<span class="n">GEMINI</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;gemini-3.8-flash&quot;</span><span class="p">,</span> <span class="mi">4000</span><span class="p">)</span>      <span class="c1"># model, --notes-max-tokens (the pilot&#39;s default)</span>
+<span class="n">HAIKU</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;claude-haiku-5-5&quot;</span><span class="p">,</span> <span class="mi">8000</span><span class="p">)</span>       <span class="c1"># model, --max-tokens (the pilot&#39;s default)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_read</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="n">csv</span><span class="o">.</span><span class="n">DictReader</span><span class="p">(</span><span class="n">fh</span><span class="p">))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">abbreviations</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">lxin</span><span class="o">.</span><span class="n">load_abbreviations</span><span class="p">(</span><span class="n">ABBREVIATIONS</span><span class="p">,</span> <span class="n">lang</span><span class="o">=</span><span class="s2">&quot;cs&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">cut</span><span class="p">(</span><span class="n">pages</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;full&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">tuple</span><span class="p">],</span> <span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``(jobs, segments)``: every Czech region of the coverage check cut as the pilot cuts a</span>
+<span class="sd">    section — jobs ``(slot, crop, caption, &quot;offices&quot;)`` in printed order, segments by slot.&quot;&quot;&quot;</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="p">{</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;image&quot;</span><span class="p">]:</span> <span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">_read</span><span class="p">(</span><span class="n">rf</span><span class="o">.</span><span class="n">out_dir</span><span class="p">(</span><span class="n">EDITION</span><span class="p">,</span> <span class="n">pages</span><span class="p">)</span> <span class="o">/</span> <span class="s2">&quot;sections&quot;</span> <span class="o">/</span> <span class="s2">&quot;index.csv&quot;</span><span class="p">)}</span>
+    <span class="n">by_page</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">orr</span><span class="o">.</span><span class="n">regions</span><span class="p">(</span><span class="n">EDITION</span><span class="p">):</span>
+        <span class="n">row</span> <span class="o">=</span> <span class="n">index</span><span class="p">[</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;section&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="s2">&quot;.png&quot;</span><span class="p">]</span>
+        <span class="n">by_page</span><span class="p">[</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">r</span><span class="p">,</span> <span class="n">row</span><span class="p">))</span>
+    <span class="n">jobs</span><span class="p">,</span> <span class="n">segments</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">page</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">by_page</span><span class="p">):</span>
+        <span class="n">alto</span> <span class="o">=</span> <span class="n">lx</span><span class="o">.</span><span class="n">read_alto</span><span class="p">(</span><span class="n">pilot</span><span class="o">.</span><span class="n">CZ_PAGES</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">page</span><span class="si">}</span><span class="s2">.alto.xml&quot;</span><span class="p">)</span>
+        <span class="n">image</span> <span class="o">=</span> <span class="n">lx</span><span class="o">.</span><span class="n">render_page</span><span class="p">(</span><span class="n">pilot</span><span class="o">.</span><span class="n">CZ_PDF</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">page</span><span class="p">),</span> <span class="n">alto</span><span class="o">.</span><span class="n">width</span><span class="p">)</span>
+        <span class="n">geo</span> <span class="o">=</span> <span class="n">lximg</span><span class="o">.</span><span class="n">detect</span><span class="p">(</span><span class="n">image</span><span class="p">)</span>               <span class="c1"># --geometry image: strips cut on the page&#39;s ink</span>
+        <span class="n">ink</span> <span class="o">=</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">page_ink</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">geo</span><span class="p">)</span> <span class="k">if</span> <span class="n">geo</span><span class="o">.</span><span class="n">apparatus</span><span class="p">()</span> <span class="k">else</span> <span class="kc">None</span>
+        <span class="k">for</span> <span class="n">r</span><span class="p">,</span> <span class="n">row</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">by_page</span><span class="p">[</span><span class="n">page</span><span class="p">],</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">pair</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">pair</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="s2">&quot;order&quot;</span><span class="p">])):</span>
+            <span class="n">slot</span> <span class="o">=</span> <span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">],</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;region&quot;</span><span class="p">],</span> <span class="nb">int</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;order&quot;</span><span class="p">]))</span>
+            <span class="n">segment</span> <span class="o">=</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">Segment</span><span class="p">(</span><span class="n">kind</span><span class="o">=</span><span class="s2">&quot;offices&quot;</span><span class="p">,</span> <span class="n">district</span><span class="o">=</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;district&quot;</span><span class="p">],</span> <span class="n">page</span><span class="o">=</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;page&quot;</span><span class="p">],</span>
+                                   <span class="n">region</span><span class="o">=</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;region&quot;</span><span class="p">],</span> <span class="n">box</span><span class="o">=</span><span class="n">orr</span><span class="o">.</span><span class="n">page_box</span><span class="p">(</span><span class="n">row</span><span class="p">,</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;y_from&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;y_to&quot;</span><span class="p">]),</span>
+                                   <span class="n">order</span><span class="o">=</span><span class="nb">int</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s2">&quot;order&quot;</span><span class="p">]))</span>
+            <span class="n">segments</span><span class="p">[</span><span class="n">slot</span><span class="p">]</span> <span class="o">=</span> <span class="n">segment</span>
+            <span class="k">for</span> <span class="n">crop</span><span class="p">,</span> <span class="n">_s</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">crop_segments</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="p">[</span><span class="n">segment</span><span class="p">],</span> <span class="n">alto</span><span class="p">,</span> <span class="n">upscale</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                                                     <span class="n">max_height</span><span class="o">=</span><span class="n">MAX_HEIGHT</span><span class="p">,</span> <span class="n">ink</span><span class="o">=</span><span class="n">ink</span><span class="p">):</span>
+                <span class="n">jobs</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">slot</span><span class="p">,</span> <span class="n">crop</span><span class="p">,</span> <span class="n">orr</span><span class="o">.</span><span class="n">_caption</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">n</span><span class="p">),</span> <span class="s2">&quot;offices&quot;</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">jobs</span><span class="p">,</span> <span class="n">segments</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">readers</span><span class="p">(</span><span class="n">pages</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;full&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;``{label: spec}`` — the frozen run&#39;s four Czech readers with the Czech offices prompt.&quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">PIL</span><span class="w"> </span><span class="kn">import</span> <span class="n">Image</span>
+
+    <span class="n">abbr</span> <span class="o">=</span> <span class="n">abbreviations</span><span class="p">()</span>
+    <span class="n">sheet</span> <span class="o">=</span> <span class="n">rf</span><span class="o">.</span><span class="n">out_dir</span><span class="p">(</span><span class="n">EDITION</span><span class="p">,</span> <span class="n">pages</span><span class="p">)</span> <span class="o">/</span> <span class="s2">&quot;freeze&quot;</span> <span class="o">/</span> <span class="s2">&quot;contrast_sheet.png&quot;</span>
+    <span class="n">contrast</span> <span class="o">=</span> <span class="n">Image</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">sheet</span><span class="p">)</span><span class="o">.</span><span class="n">convert</span><span class="p">(</span><span class="s2">&quot;RGB&quot;</span><span class="p">)</span>
+    <span class="n">digest</span> <span class="o">=</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">sha256</span><span class="p">(</span><span class="n">sheet</span><span class="o">.</span><span class="n">read_bytes</span><span class="p">())</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()[:</span><span class="mi">16</span><span class="p">]</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">with</span> <span class="n">orr</span><span class="o">.</span><span class="n">_placeholder_keys</span><span class="p">((</span><span class="s2">&quot;ANTHROPIC_API_KEY&quot;</span><span class="p">,</span> <span class="n">pilot</span><span class="o">.</span><span class="n">READER_ENDPOINTS</span><span class="p">[</span><span class="s2">&quot;gemini&quot;</span><span class="p">][</span><span class="mi">1</span><span class="p">])):</span>
+        <span class="k">for</span> <span class="n">label</span> <span class="ow">in</span> <span class="n">rs</span><span class="o">.</span><span class="n">readers</span><span class="p">(</span><span class="n">EDITION</span><span class="p">,</span> <span class="n">pages</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">label</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;gemini38&quot;</span><span class="p">):</span>
+                <span class="n">system</span> <span class="o">=</span> <span class="n">lxv</span><span class="o">.</span><span class="n">build_system</span><span class="p">(</span><span class="n">abbr</span><span class="p">,</span> <span class="n">style</span><span class="o">=</span><span class="s2">&quot;annotate&quot;</span><span class="p">,</span> <span class="n">section</span><span class="o">=</span><span class="s2">&quot;offices&quot;</span><span class="p">,</span> <span class="n">atlas</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                <span class="n">url</span><span class="p">,</span> <span class="n">key_env</span> <span class="o">=</span> <span class="n">pilot</span><span class="o">.</span><span class="n">READER_ENDPOINTS</span><span class="p">[</span><span class="s2">&quot;gemini&quot;</span><span class="p">]</span>
+                <span class="n">reader</span> <span class="o">=</span> <span class="n">pilot</span><span class="o">.</span><span class="n">OpenAICompatibleReader</span><span class="p">(</span>
+                    <span class="n">GEMINI</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">url</span><span class="p">,</span> <span class="n">key_env</span><span class="p">,</span> <span class="n">system</span><span class="o">=</span><span class="n">system</span><span class="p">,</span> <span class="n">schema</span><span class="o">=</span><span class="n">lxv</span><span class="o">.</span><span class="n">NOTES_SCHEMA</span><span class="p">,</span> <span class="n">payload_key</span><span class="o">=</span><span class="s2">&quot;lines&quot;</span><span class="p">,</span>
+                    <span class="n">schema_name</span><span class="o">=</span><span class="s2">&quot;notes&quot;</span><span class="p">,</span> <span class="n">max_tokens</span><span class="o">=</span><span class="n">GEMINI</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">temperature</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">reasoning_effort</span><span class="o">=</span><span class="s2">&quot;none&quot;</span><span class="p">)</span>
+                <span class="n">reader</span><span class="o">.</span><span class="n">prompt_style</span> <span class="o">=</span> <span class="s2">&quot;annotate&quot;</span>
+                <span class="n">reader</span><span class="o">.</span><span class="n">shared_parts</span> <span class="o">=</span> <span class="mi">1</span>
+                <span class="n">out</span><span class="p">[</span><span class="n">label</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;arm&quot;</span><span class="p">:</span> <span class="n">gn</span><span class="o">.</span><span class="n">ARMS</span><span class="p">[</span><span class="s2">&quot;gemini38&quot;</span><span class="p">],</span> <span class="s2">&quot;reader&quot;</span><span class="p">:</span> <span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;system&quot;</span><span class="p">:</span> <span class="n">system</span><span class="p">,</span>
+                              <span class="s2">&quot;contrast&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;contrast_digest&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">}</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">system</span> <span class="o">=</span> <span class="n">lxv</span><span class="o">.</span><span class="n">build_system</span><span class="p">(</span><span class="n">abbr</span><span class="p">,</span> <span class="n">style</span><span class="o">=</span><span class="s2">&quot;annotate&quot;</span><span class="p">,</span> <span class="n">section</span><span class="o">=</span><span class="s2">&quot;offices&quot;</span><span class="p">,</span> <span class="n">atlas</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                                          <span class="n">think</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">contrast</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                <span class="n">reader</span> <span class="o">=</span> <span class="n">pilot</span><span class="o">.</span><span class="n">ClaudeReader</span><span class="p">(</span><span class="n">HAIKU</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="s2">&quot;high&quot;</span><span class="p">,</span> <span class="n">thinking</span><span class="o">=</span><span class="s2">&quot;adaptive&quot;</span><span class="p">,</span> <span class="n">max_tokens</span><span class="o">=</span><span class="n">HAIKU</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span>
+                                            <span class="n">system</span><span class="o">=</span><span class="n">system</span><span class="p">,</span> <span class="n">schema</span><span class="o">=</span><span class="n">lxv</span><span class="o">.</span><span class="n">NOTES_SCHEMA</span><span class="p">,</span> <span class="n">payload_key</span><span class="o">=</span><span class="s2">&quot;lines&quot;</span><span class="p">)</span>
+                <span class="n">reader</span><span class="o">.</span><span class="n">prompt_style</span> <span class="o">=</span> <span class="s2">&quot;annotate&quot;</span>
+                <span class="n">reader</span><span class="o">.</span><span class="n">shared_parts</span> <span class="o">=</span> <span class="mi">2</span>
+                <span class="n">out</span><span class="p">[</span><span class="n">label</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;arm&quot;</span><span class="p">:</span> <span class="n">gn</span><span class="o">.</span><span class="n">ARMS</span><span class="p">[</span><span class="s2">&quot;haiku55nh&quot;</span><span class="p">],</span> <span class="s2">&quot;reader&quot;</span><span class="p">:</span> <span class="n">reader</span><span class="p">,</span> <span class="s2">&quot;system&quot;</span><span class="p">:</span> <span class="n">system</span><span class="p">,</span>
+                              <span class="s2">&quot;contrast&quot;</span><span class="p">:</span> <span class="n">contrast</span><span class="p">,</span> <span class="s2">&quot;contrast_digest&quot;</span><span class="p">:</span> <span class="n">digest</span><span class="p">}</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">decode</span><span class="p">(</span><span class="n">label</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">segments</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">by_slot</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">folder</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;One Czech reader&#39;s lines into its inventory, as :func:`offices_reread.decode` does for a</span>
+<span class="sd">    German one: split at any heading the lines carry, a full-stop key mended, decoded by the Czech</span>
+<span class="sd">    decoder. Writes ``notes_&lt;label&gt;.csv``, ``splits_&lt;label&gt;.csv`` and ``inventory_&lt;label&gt;.csv``.&quot;&quot;&quot;</span>
+    <span class="n">read_</span> <span class="o">=</span> <span class="p">[(</span><span class="n">segments</span><span class="p">[</span><span class="n">slot</span><span class="p">],</span> <span class="n">by_slot</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">slot</span><span class="p">,</span> <span class="p">[]))</span> <span class="k">for</span> <span class="n">slot</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">segments</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">s</span><span class="p">:</span> <span class="p">(</span><span class="n">s</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">s</span><span class="p">[</span><span class="mi">2</span><span class="p">]))]</span>
+    <span class="n">sections</span><span class="p">,</span> <span class="n">splits</span> <span class="o">=</span> <span class="n">rs</span><span class="o">.</span><span class="n">resplit_sections</span><span class="p">(</span><span class="n">read_</span><span class="p">,</span> <span class="n">lxnt</span><span class="o">.</span><span class="n">find_heading</span><span class="p">,</span> <span class="n">mend</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">records</span><span class="p">,</span> <span class="n">_entries</span> <span class="o">=</span> <span class="n">lxin</span><span class="o">.</span><span class="n">decode_sections</span><span class="p">(</span><span class="n">sections</span><span class="p">,</span> <span class="n">abbreviations</span><span class="p">())</span>
+    <span class="n">inventory</span> <span class="o">=</span> <span class="n">lxin</span><span class="o">.</span><span class="n">build_inventory</span><span class="p">(</span><span class="n">records</span><span class="p">,</span> <span class="p">[])</span>
+    <span class="n">rs</span><span class="o">.</span><span class="n">_write</span><span class="p">(</span><span class="n">folder</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;notes_</span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">.csv&quot;</span><span class="p">,</span>
+              <span class="p">[{</span><span class="s2">&quot;page&quot;</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">page</span><span class="p">,</span> <span class="s2">&quot;region&quot;</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">region</span><span class="p">,</span> <span class="s2">&quot;order&quot;</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">order</span><span class="p">,</span> <span class="s2">&quot;court_de&quot;</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">district</span><span class="p">,</span>
+                <span class="s2">&quot;line_no&quot;</span><span class="p">:</span> <span class="n">i</span><span class="p">,</span> <span class="s2">&quot;text&quot;</span><span class="p">:</span> <span class="n">line</span><span class="p">}</span> <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">lines</span> <span class="ow">in</span> <span class="n">read_</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">line</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">lines</span><span class="p">)])</span>
+    <span class="n">rs</span><span class="o">.</span><span class="n">_write</span><span class="p">(</span><span class="n">folder</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;splits_</span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">.csv&quot;</span><span class="p">,</span> <span class="n">splits</span><span class="p">)</span>
+    <span class="n">rs</span><span class="o">.</span><span class="n">_write</span><span class="p">(</span><span class="n">folder</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;inventory_</span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">.csv&quot;</span><span class="p">,</span> <span class="n">inventory</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">inventory</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">read</span><span class="p">(</span><span class="n">pages</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;full&quot;</span><span class="p">,</span> <span class="n">spend</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="n">out</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">OUT</span><span class="p">,</span> <span class="n">allow_other_machine</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Cut, price, and read the Czech regions with every Czech reader; decode what is read.</span>
+<span class="sd">    Without ``spend`` nothing is sent. Returns the summary also written to ``summary.json``.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">spend</span> <span class="ow">and</span> <span class="n">bo</span><span class="o">.</span><span class="n">HOST</span> <span class="o">!=</span> <span class="n">orr</span><span class="o">.</span><span class="n">MACHINE_OF_RECORD</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">allow_other_machine</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;the re-read spends on </span><span class="si">{</span><span class="n">orr</span><span class="o">.</span><span class="n">MACHINE_OF_RECORD</span><span class="si">}</span><span class="s2"> only (D-68): this is </span><span class="si">{</span><span class="n">bo</span><span class="o">.</span><span class="n">HOST</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">PIL</span><span class="w"> </span><span class="kn">import</span> <span class="n">Image</span>
+
+    <span class="n">atlas</span> <span class="o">=</span> <span class="n">Image</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">ATLAS</span><span class="p">)</span><span class="o">.</span><span class="n">convert</span><span class="p">(</span><span class="s2">&quot;RGB&quot;</span><span class="p">)</span>
+    <span class="n">jobs</span><span class="p">,</span> <span class="n">segments</span> <span class="o">=</span> <span class="n">cut</span><span class="p">(</span><span class="n">pages</span><span class="p">)</span>
+    <span class="n">folder</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">out</span><span class="p">)</span> <span class="o">/</span> <span class="n">EDITION</span> <span class="o">/</span> <span class="n">SUB</span>
+    <span class="n">folder</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">spend</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">utils.lexikon_1910</span><span class="w"> </span><span class="kn">import</span> <span class="n">lexikon_1910_pages</span> <span class="k">as</span> <span class="n">lxp</span>
+        <span class="n">lxp</span><span class="o">.</span><span class="n">load_credentials</span><span class="p">()</span>
+    <span class="n">summary</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;module&quot;</span><span class="p">:</span> <span class="n">__version__</span><span class="p">,</span> <span class="s2">&quot;edition&quot;</span><span class="p">:</span> <span class="n">EDITION</span><span class="p">,</span> <span class="s2">&quot;pages&quot;</span><span class="p">:</span> <span class="n">pages</span><span class="p">,</span> <span class="s2">&quot;host&quot;</span><span class="p">:</span> <span class="n">bo</span><span class="o">.</span><span class="n">HOST</span><span class="p">,</span>
+               <span class="s2">&quot;run&quot;</span><span class="p">:</span> <span class="n">time</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s2">&quot;%Y-%m-</span><span class="si">%d</span><span class="s2"> %H:%M:%S&quot;</span><span class="p">),</span> <span class="s2">&quot;regions&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">segments</span><span class="p">),</span>
+               <span class="s2">&quot;crops&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">jobs</span><span class="p">),</span> <span class="s2">&quot;readers&quot;</span><span class="p">:</span> <span class="p">{}}</span>
+    <span class="k">for</span> <span class="n">label</span><span class="p">,</span> <span class="n">spec</span> <span class="ow">in</span> <span class="n">readers</span><span class="p">(</span><span class="n">pages</span><span class="p">)</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">cache</span> <span class="o">=</span> <span class="n">pilot</span><span class="o">.</span><span class="n">key_image_cache</span><span class="p">(</span><span class="n">folder</span> <span class="o">/</span> <span class="s2">&quot;crop_cache&quot;</span> <span class="o">/</span> <span class="n">label</span><span class="p">,</span> <span class="n">pilot</span><span class="o">.</span><span class="n">key_image_digest</span><span class="p">(</span><span class="n">atlas</span><span class="p">))</span>
+        <span class="n">missing</span> <span class="o">=</span> <span class="p">[</span><span class="n">j</span> <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="n">jobs</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">orr</span><span class="o">.</span><span class="n">_cached</span><span class="p">(</span><span class="n">j</span><span class="p">,</span> <span class="n">spec</span><span class="p">,</span> <span class="n">cache</span><span class="p">)]</span>
+        <span class="n">usd</span> <span class="o">=</span> <span class="n">orr</span><span class="o">.</span><span class="n">price</span><span class="p">(</span><span class="n">missing</span><span class="p">,</span> <span class="n">spec</span><span class="p">,</span> <span class="n">atlas</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">spec</span><span class="p">[</span><span class="s2">&quot;system&quot;</span><span class="p">]))</span>
+        <span class="n">entry</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;cached&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">jobs</span><span class="p">)</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">missing</span><span class="p">),</span> <span class="s2">&quot;to_read&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">missing</span><span class="p">),</span> <span class="s2">&quot;usd_live&quot;</span><span class="p">:</span> <span class="nb">round</span><span class="p">(</span><span class="n">usd</span><span class="p">,</span> <span class="mi">2</span><span class="p">)}</span>
+        <span class="k">if</span> <span class="n">missing</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">spend</span><span class="p">:</span>
+            <span class="n">entry</span><span class="p">[</span><span class="s2">&quot;state&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;not read (spend is off)&quot;</span>
+            <span class="n">summary</span><span class="p">[</span><span class="s2">&quot;readers&quot;</span><span class="p">][</span><span class="n">label</span><span class="p">]</span> <span class="o">=</span> <span class="n">entry</span>
+            <span class="k">continue</span>
+        <span class="n">results</span><span class="p">,</span> <span class="n">parked</span> <span class="o">=</span> <span class="n">gn</span><span class="o">.</span><span class="n">read_crops</span><span class="p">(</span><span class="n">jobs</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;offices&quot;</span><span class="p">:</span> <span class="n">spec</span><span class="p">[</span><span class="s2">&quot;reader&quot;</span><span class="p">]},</span> <span class="n">atlas</span><span class="p">,</span> <span class="n">cache</span><span class="p">,</span>
+                                        <span class="n">contrast</span><span class="o">=</span><span class="n">spec</span><span class="p">[</span><span class="s2">&quot;contrast&quot;</span><span class="p">],</span> <span class="n">contrast_digest</span><span class="o">=</span><span class="n">spec</span><span class="p">[</span><span class="s2">&quot;contrast_digest&quot;</span><span class="p">])</span>
+        <span class="n">by_slot</span><span class="p">,</span> <span class="n">counts</span> <span class="o">=</span> <span class="n">gn</span><span class="o">.</span><span class="n">clean_lines</span><span class="p">(</span><span class="n">results</span><span class="p">,</span> <span class="n">lxv</span><span class="o">.</span><span class="n">vocabulary</span><span class="p">(</span><span class="n">abbreviations</span><span class="p">()))</span>
+        <span class="n">entry</span><span class="o">.</span><span class="n">update</span><span class="p">({</span><span class="n">k</span><span class="p">:</span> <span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;failed&quot;</span><span class="p">,</span> <span class="s2">&quot;empty&quot;</span><span class="p">,</span> <span class="s2">&quot;rejected&quot;</span><span class="p">,</span> <span class="s2">&quot;input&quot;</span><span class="p">,</span> <span class="s2">&quot;output&quot;</span><span class="p">)})</span>
+        <span class="n">entry</span><span class="p">[</span><span class="s2">&quot;state&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;incomplete: run again to finish (the cache keeps what was read)&quot;</span>
+                          <span class="k">if</span> <span class="n">parked</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;at&quot;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;failed&quot;</span><span class="p">)</span> <span class="k">else</span> <span class="s2">&quot;read&quot;</span><span class="p">)</span>
+        <span class="n">entry</span><span class="p">[</span><span class="s2">&quot;rows&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">decode</span><span class="p">(</span><span class="n">label</span><span class="p">,</span> <span class="n">segments</span><span class="p">,</span> <span class="n">by_slot</span><span class="p">,</span> <span class="n">folder</span><span class="p">))</span>
+        <span class="n">summary</span><span class="p">[</span><span class="s2">&quot;readers&quot;</span><span class="p">][</span><span class="n">label</span><span class="p">]</span> <span class="o">=</span> <span class="n">entry</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">entry</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="p">(</span><span class="n">folder</span> <span class="o">/</span> <span class="s2">&quot;summary.json&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">summary</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">summary</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">argv</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">stdout</span><span class="p">,</span> <span class="s2">&quot;reconfigure&quot;</span><span class="p">):</span>
+        <span class="n">sys</span><span class="o">.</span><span class="n">stdout</span><span class="o">.</span><span class="n">reconfigure</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="n">summary</span> <span class="o">=</span> <span class="n">read</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">orr</span><span class="o">.</span><span class="n">report</span><span class="p">(</span><span class="n">summary</span><span class="p">))</span>
+    <span class="k">if</span> <span class="nb">all</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;state&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;read&quot;</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">summary</span><span class="p">[</span><span class="s2">&quot;readers&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">()):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  consensus:&quot;</span><span class="p">,</span> <span class="n">orr</span><span class="o">.</span><span class="n">consensus</span><span class="p">(</span><span class="n">EDITION</span><span class="p">,</span> <span class="s2">&quot;full&quot;</span><span class="p">,</span> <span class="n">OUT</span><span class="p">))</span>
+    <span class="k">return</span> <span class="mi">0</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</pre></div></td></tr></table></div>
+</details>
