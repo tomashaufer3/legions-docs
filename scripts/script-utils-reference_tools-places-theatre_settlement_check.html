@@ -1,0 +1,869 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>The settlement check: the author's reading of whole settlements, decade by decade, against the
+theatre measure (D-212).</p><p class="tldr-facts"><b>Reference tools</b> · v0.1.0 · 234 lines · 9 public functions · 12 constants · used by nothing else · <code>utils/reference_tools/places/theatre_settlement_check.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-reference_tools-places-theatre_settlement_check-settlement_ties">settlement_ties</a><a class="chip" href="#fn-utils-reference_tools-places-theatre_settlement_check-decade_measure">decade_measure</a><a class="chip" href="#fn-utils-reference_tools-places-theatre_settlement_check-population">population</a><a class="chip" href="#fn-utils-reference_tools-places-theatre_settlement_check-draw">draw</a><a class="chip" href="#fn-utils-reference_tools-places-theatre_settlement_check-write_sheet">write_sheet</a><a class="chip" href="#fn-utils-reference_tools-places-theatre_settlement_check-settlement_texts">settlement_texts</a><a class="chip" href="#fn-utils-reference_tools-places-theatre_settlement_check-build_page">build_page</a><a class="chip" href="#fn-utils-reference_tools-places-theatre_settlement_check-fill_sheet">fill_sheet</a><a class="chip" href="#fn-utils-reference_tools-places-theatre_settlement_check-score">score</a><a class="chip const" href="#c-utils-reference_tools-places-theatre_settlement_check-ROOT">ROOT</a><a class="chip const" href="#c-utils-reference_tools-places-theatre_settlement_check-SHEET">SHEET</a><a class="chip const" href="#c-utils-reference_tools-places-theatre_settlement_check-TEMPLATE">TEMPLATE</a><a class="chip const" href="#c-utils-reference_tools-places-theatre_settlement_check-PLACEHOLDER">PLACEHOLDER</a><a class="chip const" href="#c-utils-reference_tools-places-theatre_settlement_check-FINAL">FINAL</a><a class="chip const" href="#c-utils-reference_tools-places-theatre_settlement_check-RAW">RAW</a><a class="chip const" href="#c-utils-reference_tools-places-theatre_settlement_check-INTERIM">INTERIM</a><a class="chip const" href="#c-utils-reference_tools-places-theatre_settlement_check-SEED">SEED</a><a class="chip const" href="#c-utils-reference_tools-places-theatre_settlement_check-TAKE">TAKE</a><a class="chip const" href="#c-utils-reference_tools-places-theatre_settlement_check-DECADES">DECADES</a><a class="chip const" href="#c-utils-reference_tools-places-theatre_settlement_check-ANSWERS">ANSWERS</a><a class="chip const" href="#c-utils-reference_tools-places-theatre_settlement_check-RULES_FROZEN">RULES_FROZEN</a></div>
+<h2>How it works</h2><p>The clause check (<code>theatre_rule_audit</code>) asks whether each clause was read right.  It cannot
+see what goes wrong only when clauses are put together: a company counted twice across the
+place chronicle and an ensemble page, a lineage split into two companies, a place tied to the
+wrong 1910 settlement, a decade left empty between two listed decades.  And the corrections
+for a text-built variable in a regression (Egami et al. 2023; Ludwig, Mullainathan &amp; Rambachan
+2026) need the expert value <strong>at the level of the variable that enters the regression</strong>: here,
+a 1910 settlement in a decade.  This is that sample.</p>
+<p><strong>Population</strong>: every 1910 settlement of the Czech lands tied to at least one database place
+(6,668 on the build of 2026-11-03).  A settlement tied to none is a zero of the measure with
+no text to read; a place the tie missed is outside this check.</p>
+<p><strong>Strata</strong> by what the measure says of 1850–1913: <code>certain</code> (Czech activity certain in some
+year), <code>possible</code> (possible only) and <code>none</code>.  <code>TAKE</code> per stratum, alternated into a
+calibration and a certification half; <code>weight</code> = stratum size / drawn.</p>
+<p><strong>The question</strong>, for each decade 1850s … 1910s (1910–1913): <em>was Czech amateur theatre
+active in this place at some time in the decade?</em>  <code>yes</code> / <code>possible</code> (the text allows it
+but does not pin it) / <code>no</code> / <code>unsure</code>.  The measure's answer is filled in (<code>certain</code>
+in some year of the decade → yes, <code>possible</code> → possible, else no), and the author corrects it.</p>
+<p>Usage::</p>
+<pre><code>python utils/reference_tools/places/theatre_settlement_check.py draw
+python utils/reference_tools/places/theatre_settlement_check.py page OUT.html
+</code></pre>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-reference_tools-places-theatre_settlement_check-settlement_ties">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">settlement_ties</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Every database place tied to a 1910 settlement: <code>geo_id</code>, <code>settlement_id</code>, name, okres.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 63–72 (10 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">63</span>
+<span class="normal">64</span>
+<span class="normal">65</span>
+<span class="normal">66</span>
+<span class="normal">67</span>
+<span class="normal">68</span>
+<span class="normal">69</span>
+<span class="normal">70</span>
+<span class="normal">71</span>
+<span class="normal">72</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">settlement_ties</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Every database place tied to a 1910 settlement: ``geo_id``, ``settlement_id``, name, okres.&quot;&quot;&quot;</span>
+    <span class="n">places</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">RAW</span> <span class="o">/</span> <span class="s2">&quot;places.csv&quot;</span><span class="p">,</span> <span class="n">usecols</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;geo_id&quot;</span><span class="p">,</span> <span class="s2">&quot;name&quot;</span><span class="p">,</span> <span class="s2">&quot;type&quot;</span><span class="p">,</span> <span class="s2">&quot;lat&quot;</span><span class="p">,</span> <span class="s2">&quot;lon&quot;</span><span class="p">,</span> <span class="s2">&quot;okres&quot;</span><span class="p">])</span>
+    <span class="n">frame</span> <span class="o">=</span> <span class="n">at</span><span class="o">.</span><span class="n">settlement_frame</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">FINAL</span> <span class="o">/</span> <span class="s2">&quot;geo&quot;</span> <span class="o">/</span> <span class="s2">&quot;settlements_1910.parquet&quot;</span><span class="p">),</span>
+                                <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">FINAL</span> <span class="o">/</span> <span class="s2">&quot;geo&quot;</span> <span class="o">/</span> <span class="s2">&quot;districts_1910.parquet&quot;</span><span class="p">))</span>
+    <span class="n">tie</span> <span class="o">=</span> <span class="n">at</span><span class="o">.</span><span class="n">join_places_to_settlements</span><span class="p">(</span><span class="n">places</span><span class="p">,</span> <span class="n">frame</span><span class="p">)</span>
+    <span class="n">tie</span> <span class="o">=</span> <span class="n">tie</span><span class="p">[</span><span class="n">tie</span><span class="p">[</span><span class="s2">&quot;settlement_row&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()]</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span>
+        <span class="n">frame</span><span class="p">[[</span><span class="s2">&quot;settlement_row&quot;</span><span class="p">,</span> <span class="s2">&quot;settlement_id&quot;</span><span class="p">,</span> <span class="s2">&quot;cs_name&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_1910_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;land&quot;</span><span class="p">]],</span>
+        <span class="n">on</span><span class="o">=</span><span class="s2">&quot;settlement_row&quot;</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;left&quot;</span><span class="p">,</span> <span class="n">validate</span><span class="o">=</span><span class="s2">&quot;m:1&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">tie</span><span class="p">[[</span><span class="s2">&quot;geo_id&quot;</span><span class="p">,</span> <span class="s2">&quot;settlement_id&quot;</span><span class="p">,</span> <span class="s2">&quot;cs_name&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_1910_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;land&quot;</span><span class="p">]]</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-theatre_settlement_check-decade_measure">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">decade_measure</span><span class="p">(</span><span class="n">panel</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span> <span class="o">|</span> <span class="kc">None</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Per settlement and decade 1850–1913: the measure's answer (<code>yes</code> / <code>possible</code> / <code>no</code>).</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 75–83 (9 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">75</span>
+<span class="normal">76</span>
+<span class="normal">77</span>
+<span class="normal">78</span>
+<span class="normal">79</span>
+<span class="normal">80</span>
+<span class="normal">81</span>
+<span class="normal">82</span>
+<span class="normal">83</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">decade_measure</span><span class="p">(</span><span class="n">panel</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Per settlement and decade 1850–1913: the measure&#39;s answer (``yes`` / ``possible`` / ``no``).&quot;&quot;&quot;</span>
+    <span class="n">panel</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">INTERIM</span> <span class="o">/</span> <span class="s2">&quot;settlement_year_panel.parquet&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">panel</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">panel</span>
+    <span class="n">p</span> <span class="o">=</span> <span class="n">panel</span><span class="p">[</span><span class="n">panel</span><span class="p">[</span><span class="s2">&quot;year&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">between</span><span class="p">(</span><span class="n">DECADES</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="mi">1913</span><span class="p">)]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">p</span><span class="p">[</span><span class="s2">&quot;decade&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">p</span><span class="p">[</span><span class="s2">&quot;year&quot;</span><span class="p">]</span> <span class="o">//</span> <span class="mi">10</span> <span class="o">*</span> <span class="mi">10</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">groupby</span><span class="p">([</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">,</span> <span class="s2">&quot;decade&quot;</span><span class="p">])[[</span><span class="s2">&quot;any_activity_certain&quot;</span><span class="p">,</span> <span class="s2">&quot;any_activity_possible&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">max</span><span class="p">()</span>
+    <span class="n">word</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">d</span><span class="p">[</span><span class="s2">&quot;any_activity_certain&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">),</span> <span class="s2">&quot;yes&quot;</span><span class="p">,</span>
+                    <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">d</span><span class="p">[</span><span class="s2">&quot;any_activity_possible&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">),</span> <span class="s2">&quot;possible&quot;</span><span class="p">,</span> <span class="s2">&quot;no&quot;</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">(</span><span class="n">word</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="n">d</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;measure&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">unstack</span><span class="p">(</span><span class="s2">&quot;decade&quot;</span><span class="p">)[</span><span class="n">DECADES</span><span class="p">]</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-theatre_settlement_check-population">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">population</span><span class="p">(</span><span class="n">ties</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">measure</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Settlements tied to a database place and carried by the measure (a 1910 settlement with
+a resolved okres and status), with <code>stratum</code> from the measure 1850–1913.  A place tied
+to a settlement the measure does not carry is outside the check (a coverage gap).</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code> <code>utils/lexikon_1910/score_certification.py</code> <code>utils/reference_tools/places/theatre_rule_audit.py</code></p>
+<details><summary>source · lines 86–95 (10 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">86</span>
+<span class="normal">87</span>
+<span class="normal">88</span>
+<span class="normal">89</span>
+<span class="normal">90</span>
+<span class="normal">91</span>
+<span class="normal">92</span>
+<span class="normal">93</span>
+<span class="normal">94</span>
+<span class="normal">95</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">population</span><span class="p">(</span><span class="n">ties</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">measure</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Settlements tied to a database place and carried by the measure (a 1910 settlement with</span>
+<span class="sd">    a resolved okres and status), with ``stratum`` from the measure 1850–1913.  A place tied</span>
+<span class="sd">    to a settlement the measure does not carry is outside the check (a coverage gap).&quot;&quot;&quot;</span>
+    <span class="n">ids</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Index</span><span class="p">(</span><span class="n">ties</span><span class="p">[</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">dropna</span><span class="p">()</span><span class="o">.</span><span class="n">unique</span><span class="p">())</span><span class="o">.</span><span class="n">intersection</span><span class="p">(</span><span class="n">measure</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">measure</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">ids</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;no&quot;</span><span class="p">)</span>
+    <span class="n">stratum</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">((</span><span class="n">m</span> <span class="o">==</span> <span class="s2">&quot;yes&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span> <span class="s2">&quot;certain&quot;</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">((</span><span class="n">m</span> <span class="o">==</span> <span class="s2">&quot;possible&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span> <span class="s2">&quot;possible&quot;</span><span class="p">,</span> <span class="s2">&quot;none&quot;</span><span class="p">))</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">ties</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">ids</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;cs_name&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_1910_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;land&quot;</span><span class="p">]]</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;stratum&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">stratum</span>
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">out</span><span class="p">,</span> <span class="n">m</span><span class="o">.</span><span class="n">add_prefix</span><span class="p">(</span><span class="s2">&quot;measure_&quot;</span><span class="p">)],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">reset_index</span><span class="p">()</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;index&quot;</span><span class="p">:</span> <span class="s2">&quot;settlement_id&quot;</span><span class="p">})</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-theatre_settlement_check-draw">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">draw</span><span class="p">(</span><span class="n">pop</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span><span class="o">=</span><span class="n">SEED</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<p class="calls"><b>Called by</b> <code>utils/docs/build_docs.py</code> <code>utils/lexikon_1910/draw_gold_sample.py</code> <code>utils/lexikon_1910/locate_glyphs.py</code> <code>utils/recheck/blind_sample.py</code> <code>utils/reference_tools/places/map_intensities.py</code> <code>utils/reference_tools/places/theatre_ab_check.py</code> <code>utils/reference_tools/places/theatre_rule_audit.py</code></p>
+<details><summary>source · lines 98–109 (12 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">draw</span><span class="p">(</span><span class="n">pop</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">SEED</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+    <span class="n">rng</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">default_rng</span><span class="p">(</span><span class="n">seed</span><span class="p">)</span>
+    <span class="n">parts</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">stratum</span><span class="p">,</span> <span class="n">group</span> <span class="ow">in</span> <span class="n">pop</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;stratum&quot;</span><span class="p">):</span>
+        <span class="n">n</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">TAKE</span><span class="p">[</span><span class="n">stratum</span><span class="p">],</span> <span class="nb">len</span><span class="p">(</span><span class="n">group</span><span class="p">))</span>
+        <span class="n">drawn</span> <span class="o">=</span> <span class="n">group</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">rng</span><span class="o">.</span><span class="n">permutation</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">group</span><span class="p">))[:</span><span class="n">n</span><span class="p">])]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="n">drawn</span><span class="p">[</span><span class="s2">&quot;half&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;calibration&quot;</span> <span class="k">if</span> <span class="n">i</span> <span class="o">%</span> <span class="mi">2</span> <span class="o">==</span> <span class="mi">0</span> <span class="k">else</span> <span class="s2">&quot;certification&quot;</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">)]</span>
+        <span class="n">drawn</span><span class="p">[</span><span class="s2">&quot;stratum_N&quot;</span><span class="p">],</span> <span class="n">drawn</span><span class="p">[</span><span class="s2">&quot;stratum_n&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">group</span><span class="p">),</span> <span class="n">n</span>
+        <span class="n">drawn</span><span class="p">[</span><span class="s2">&quot;weight&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">group</span><span class="p">)</span> <span class="o">/</span> <span class="n">n</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>
+        <span class="n">parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">drawn</span><span class="p">)</span>
+    <span class="n">sample</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">(</span><span class="n">parts</span><span class="p">,</span> <span class="n">ignore_index</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">sample</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="n">rng</span><span class="o">.</span><span class="n">permutation</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">sample</span><span class="p">))]</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-theatre_settlement_check-write_sheet">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">write_sheet</span><span class="p">(</span><span class="n">sample</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="o">=</span><span class="n">SHEET</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span></pre>
+<div class="fndoc"><p>The worksheet: the measure's answer per decade and an empty verdict column per decade.
+Refuses to overwrite a sheet that holds any verdict.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/reference_tools/places/theatre_ab_check.py</code> <code>utils/reference_tools/places/theatre_rule_audit.py</code></p>
+<details><summary>source · lines 112–125 (14 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">write_sheet</span><span class="p">(</span><span class="n">sample</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">path</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">SHEET</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The worksheet: the measure&#39;s answer per decade and an empty verdict column per decade.</span>
+<span class="sd">    Refuses to overwrite a sheet that holds any verdict.&quot;&quot;&quot;</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="n">verdicts</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;v_</span><span class="si">{</span><span class="n">d</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">DECADES</span><span class="p">]</span> <span class="o">+</span> <span class="p">[</span><span class="s2">&quot;v_note&quot;</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="n">old</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">old</span><span class="p">[[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">verdicts</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">old</span><span class="p">]]</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">()</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+            <span class="k">raise</span> <span class="ne">FileExistsError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">path</span><span class="si">}</span><span class="s2"> already holds verdicts; it is not redrawn&quot;</span><span class="p">)</span>
+    <span class="n">sheet</span> <span class="o">=</span> <span class="n">sample</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">column</span> <span class="ow">in</span> <span class="n">verdicts</span><span class="p">:</span>
+        <span class="n">sheet</span><span class="p">[</span><span class="n">column</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">sheet</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">path</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-theatre_settlement_check-settlement_texts">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">settlement_texts</span><span class="p">(</span><span class="n">sheet</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">ties</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]</span></pre>
+<div class="fndoc"><p>For each settlement: its database places, each with the first report, the chronicle,
+the ensemble list and the ensemble pages of companies starting before 1914.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 132–158 (27 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">settlement_texts</span><span class="p">(</span><span class="n">sheet</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">ties</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;For each settlement: its database places, each with the first report, the chronicle,</span>
+<span class="sd">    the ensemble list and the ensemble pages of companies starting before 1914.&quot;&quot;&quot;</span>
+    <span class="n">places</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">RAW</span> <span class="o">/</span> <span class="s2">&quot;places.csv&quot;</span><span class="p">,</span> <span class="n">low_memory</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                         <span class="n">usecols</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;geo_id&quot;</span><span class="p">,</span> <span class="s2">&quot;name&quot;</span><span class="p">,</span> <span class="s2">&quot;type&quot;</span><span class="p">,</span> <span class="s2">&quot;first_record_raw&quot;</span><span class="p">,</span> <span class="s2">&quot;chronicle_text&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;geo_id&quot;</span><span class="p">)</span>
+    <span class="n">ensembles</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">RAW</span> <span class="o">/</span> <span class="s2">&quot;ensembles.csv&quot;</span><span class="p">,</span> <span class="n">usecols</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;ensemble_id&quot;</span><span class="p">,</span> <span class="s2">&quot;geo_id&quot;</span><span class="p">,</span> <span class="s2">&quot;name&quot;</span><span class="p">,</span> <span class="s2">&quot;span_raw&quot;</span><span class="p">,</span> <span class="s2">&quot;year_from&quot;</span><span class="p">])</span>
+    <span class="n">pages</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">RAW</span> <span class="o">/</span> <span class="s2">&quot;ensemble_pages.csv&quot;</span><span class="p">,</span> <span class="n">usecols</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;ensemble_id&quot;</span><span class="p">,</span> <span class="s2">&quot;active_raw&quot;</span><span class="p">,</span> <span class="s2">&quot;chronicle_text&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;ensemble_id&quot;</span><span class="p">)</span>
+    <span class="n">wanted</span> <span class="o">=</span> <span class="n">ties</span><span class="p">[</span><span class="n">ties</span><span class="p">[</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">sheet</span><span class="p">[</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">])]</span>
+    <span class="n">out</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">sid</span><span class="p">,</span> <span class="n">group</span> <span class="ow">in</span> <span class="n">wanted</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">):</span>
+        <span class="n">entries</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">geo</span> <span class="ow">in</span> <span class="n">group</span><span class="p">[</span><span class="s2">&quot;geo_id&quot;</span><span class="p">]:</span>
+            <span class="n">p</span> <span class="o">=</span> <span class="n">places</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">geo</span><span class="p">]</span>
+            <span class="n">ens</span> <span class="o">=</span> <span class="n">ensembles</span><span class="p">[</span><span class="n">ensembles</span><span class="p">[</span><span class="s2">&quot;geo_id&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">geo</span><span class="p">]</span><span class="o">.</span><span class="n">sort_values</span><span class="p">(</span><span class="s2">&quot;year_from&quot;</span><span class="p">)</span>
+            <span class="n">listed</span><span class="p">,</span> <span class="n">own</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">ens</span><span class="o">.</span><span class="n">itertuples</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+                <span class="n">listed</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="n">_clean</span><span class="p">(</span><span class="n">e</span><span class="o">.</span><span class="n">name</span><span class="p">),</span> <span class="s2">&quot;span&quot;</span><span class="p">:</span> <span class="n">_clean</span><span class="p">(</span><span class="n">e</span><span class="o">.</span><span class="n">span_raw</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s2">&quot;()&quot;</span><span class="p">)})</span>
+                <span class="k">if</span> <span class="n">e</span><span class="o">.</span><span class="n">ensemble_id</span> <span class="ow">in</span> <span class="n">pages</span><span class="o">.</span><span class="n">index</span> <span class="ow">and</span> <span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">e</span><span class="o">.</span><span class="n">year_from</span><span class="p">)</span> <span class="ow">or</span> <span class="n">e</span><span class="o">.</span><span class="n">year_from</span> <span class="o">&lt;</span> <span class="mi">1914</span><span class="p">):</span>
+                    <span class="n">pg</span> <span class="o">=</span> <span class="n">pages</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">e</span><span class="o">.</span><span class="n">ensemble_id</span><span class="p">]</span>
+                    <span class="k">if</span> <span class="n">_clean</span><span class="p">(</span><span class="n">pg</span><span class="p">[</span><span class="s2">&quot;chronicle_text&quot;</span><span class="p">])</span> <span class="ow">or</span> <span class="n">_clean</span><span class="p">(</span><span class="n">pg</span><span class="p">[</span><span class="s2">&quot;active_raw&quot;</span><span class="p">]):</span>
+                        <span class="n">own</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="n">_clean</span><span class="p">(</span><span class="n">e</span><span class="o">.</span><span class="n">name</span><span class="p">),</span> <span class="s2">&quot;span&quot;</span><span class="p">:</span> <span class="n">_clean</span><span class="p">(</span><span class="n">e</span><span class="o">.</span><span class="n">span_raw</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s2">&quot;()&quot;</span><span class="p">),</span>
+                                    <span class="s2">&quot;active&quot;</span><span class="p">:</span> <span class="n">_clean</span><span class="p">(</span><span class="n">pg</span><span class="p">[</span><span class="s2">&quot;active_raw&quot;</span><span class="p">]),</span> <span class="s2">&quot;chronicle&quot;</span><span class="p">:</span> <span class="n">_clean</span><span class="p">(</span><span class="n">pg</span><span class="p">[</span><span class="s2">&quot;chronicle_text&quot;</span><span class="p">])})</span>
+            <span class="n">entries</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="n">_clean</span><span class="p">(</span><span class="n">p</span><span class="p">[</span><span class="s2">&quot;name&quot;</span><span class="p">]),</span> <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="n">_clean</span><span class="p">(</span><span class="n">p</span><span class="p">[</span><span class="s2">&quot;type&quot;</span><span class="p">]),</span>
+                            <span class="s2">&quot;first&quot;</span><span class="p">:</span> <span class="n">_clean</span><span class="p">(</span><span class="n">p</span><span class="p">[</span><span class="s2">&quot;first_record_raw&quot;</span><span class="p">]),</span> <span class="s2">&quot;chronicle&quot;</span><span class="p">:</span> <span class="n">_clean</span><span class="p">(</span><span class="n">p</span><span class="p">[</span><span class="s2">&quot;chronicle_text&quot;</span><span class="p">]),</span>
+                            <span class="s2">&quot;ensembles&quot;</span><span class="p">:</span> <span class="n">listed</span><span class="p">,</span> <span class="s2">&quot;pages&quot;</span><span class="p">:</span> <span class="n">own</span><span class="p">})</span>
+        <span class="n">out</span><span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">sid</span><span class="p">)]</span> <span class="o">=</span> <span class="n">entries</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-theatre_settlement_check-build_page">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">build_page</span><span class="p">(</span><span class="n">out</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">sheet_path</span><span class="p">:</span> <span class="n">Path</span><span class="o">=</span><span class="n">SHEET</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span></pre>
+<p class="calls"><b>Called by</b> <code>utils/reference_tools/places/theatre_ab_check.py</code> <code>utils/reference_tools/places/theatre_rule_audit.py</code></p>
+<details><summary>source · lines 161–173 (13 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">build_page</span><span class="p">(</span><span class="n">out</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">sheet_path</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">SHEET</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+    <span class="n">sheet</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">sheet_path</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">texts</span> <span class="o">=</span> <span class="n">settlement_texts</span><span class="p">(</span><span class="n">sheet</span><span class="p">,</span> <span class="n">settlement_ties</span><span class="p">())</span>
+    <span class="n">sheet</span> <span class="o">=</span> <span class="n">sheet</span><span class="o">.</span><span class="n">sort_values</span><span class="p">(</span><span class="s2">&quot;half&quot;</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">h</span><span class="p">:</span> <span class="n">h</span> <span class="o">!=</span> <span class="s2">&quot;calibration&quot;</span><span class="p">,</span> <span class="n">kind</span><span class="o">=</span><span class="s2">&quot;stable&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="p">[{</span><span class="s2">&quot;i&quot;</span><span class="p">:</span> <span class="n">i</span><span class="p">,</span> <span class="s2">&quot;key&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">settlement_id</span><span class="p">),</span> <span class="s2">&quot;half&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">half</span><span class="p">,</span> <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">cs_name</span><span class="o">.</span><span class="n">title</span><span class="p">(),</span> <span class="s2">&quot;okres&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">okres_1910_cs</span><span class="p">,</span>
+             <span class="s2">&quot;land&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">land</span><span class="p">,</span> <span class="s2">&quot;measure&quot;</span><span class="p">:</span> <span class="p">{</span><span class="nb">str</span><span class="p">(</span><span class="n">d</span><span class="p">):</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;measure_</span><span class="si">{</span><span class="n">d</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">DECADES</span><span class="p">},</span>
+             <span class="s2">&quot;places&quot;</span><span class="p">:</span> <span class="n">texts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">settlement_id</span><span class="p">),</span> <span class="p">[])}</span>
+            <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">sheet</span><span class="o">.</span><span class="n">itertuples</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">))]</span>
+    <span class="n">payload</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">ensure_ascii</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;&lt;/&quot;</span><span class="p">,</span> <span class="s2">&quot;&lt;</span><span class="se">\\</span><span class="s2">/&quot;</span><span class="p">)</span>
+    <span class="n">template</span> <span class="o">=</span> <span class="n">TEMPLATE</span><span class="o">.</span><span class="n">read_text</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">template</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="n">PLACEHOLDER</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;template: one data placeholder&quot;</span>
+    <span class="n">Path</span><span class="p">(</span><span class="n">out</span><span class="p">)</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">template</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="n">PLACEHOLDER</span><span class="p">,</span> <span class="n">payload</span><span class="p">),</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">Path</span><span class="p">(</span><span class="n">out</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-theatre_settlement_check-fill_sheet">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">fill_sheet</span><span class="p">(</span><span class="n">documents</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">],</span> <span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="o">=</span><span class="n">SHEET</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span></pre>
+<div class="fndoc"><p>Write the page's documents (<code>verdicts/&amp;lt;settlement_id&amp;gt;</code>) into the sheet.</p></div>
+<p class="calls warn">No call site found in the notebooks or <code>utils/</code> — possibly superseded or reserved for interactive use.</p>
+<details><summary>source · lines 176–193 (18 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">fill_sheet</span><span class="p">(</span><span class="n">documents</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">],</span> <span class="n">path</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">SHEET</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Write the page&#39;s documents (``verdicts/&lt;settlement_id&gt;``) into the sheet.&quot;&quot;&quot;</span>
+    <span class="n">sheet</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">sheet</span><span class="p">[</span><span class="s2">&quot;_key&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">sheet</span><span class="p">[</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">str</span><span class="p">)</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">i</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">sheet</span><span class="p">[</span><span class="s2">&quot;_key&quot;</span><span class="p">])}</span>
+    <span class="n">unknown</span> <span class="o">=</span> <span class="p">[</span><span class="n">d</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">documents</span> <span class="k">if</span> <span class="nb">str</span><span class="p">(</span><span class="n">d</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">))</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">index</span><span class="p">]</span>
+    <span class="k">assert</span> <span class="ow">not</span> <span class="n">unknown</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;verdicts for settlements not in the sheet: </span><span class="si">{</span><span class="n">unknown</span><span class="p">[:</span><span class="mi">5</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="n">columns</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;v_</span><span class="si">{</span><span class="n">d</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">DECADES</span><span class="p">]</span> <span class="o">+</span> <span class="p">[</span><span class="s2">&quot;v_note&quot;</span><span class="p">]</span>
+    <span class="n">sheet</span><span class="p">[</span><span class="n">columns</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">written</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">documents</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">d</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;ruled&quot;</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="n">answers</span> <span class="o">=</span> <span class="n">d</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;decades&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="p">{}</span>
+        <span class="n">sheet</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">index</span><span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">d</span><span class="p">[</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">])],</span> <span class="n">columns</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">answers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">x</span><span class="p">),</span> <span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">DECADES</span><span class="p">]</span> <span class="o">+</span> <span class="p">[</span><span class="n">d</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;note&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">]</span>
+        <span class="n">written</span> <span class="o">+=</span> <span class="mi">1</span>
+    <span class="n">sheet</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="s2">&quot;_key&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;documents&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">documents</span><span class="p">),</span> <span class="s2">&quot;ruled&quot;</span><span class="p">:</span> <span class="n">written</span><span class="p">,</span> <span class="s2">&quot;rows&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">sheet</span><span class="p">)}</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-theatre_settlement_check-score">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">score</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="o">=</span><span class="n">SHEET</span><span class="p">,</span> <span class="n">half</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;calibration&#39;</span><span class="p">,</span> <span class="n">measure</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span> <span class="o">|</span> <span class="kc">None</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>The measure against the author per settlement-decade, weighted: for <code>certain</code> (the
+measure's yes against the author's yes) and <code>possible</code> (the measure's yes or possible
+against the author's yes or possible), precision, recall and agreement over the cells
+the author could tell.  <code>measure</code> (from <code>decade_measure</code>) scores a later build;
+without it, the measure as drawn (the answers the page showed).</p></div>
+<p class="calls"><b>Called by</b> <code>16_theatre_model_pass.ipynb</code> <code>tests/test_amateur_theatre_model.py</code> <code>tests/test_blind_sample.py</code> <code>tests/test_opus_pass_merge.py</code> <code>tests/test_sealed_scorer.py</code> <code>utils/lexikon_1910/locate_glyphs.py</code> <code>utils/lexikon_1910/run_e1_gemini_version.py</code> <code>utils/lexikon_1910/run_e1b_second_reader.py</code> <code>utils/lexikon_1910/run_e3_pages.py</code> <code>utils/lexikon_1910/run_glyph_e3.py</code> <code>utils/lexikon_1910/run_verify_test_b.py</code> <code>utils/lexikon_1910/score_certification.py</code> <code>utils/parsing/amateur_theatre_model.py</code> <code>utils/recheck/blind_sample.py</code> <code>utils/recheck/unasked.py</code> <code>utils/reference_tools/places/german_click_recall.py</code> <code>utils/reference_tools/places/german_locator_trial.py</code> <code>utils/reference_tools/places/german_supervised_placement.py</code> <code>utils/reference_tools/places/theatre_rule_audit.py</code></p>
+<details><summary>source · lines 196–220 (25 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">score</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">SHEET</span><span class="p">,</span> <span class="n">half</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;calibration&quot;</span><span class="p">,</span> <span class="n">measure</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The measure against the author per settlement-decade, weighted: for ``certain`` (the</span>
+<span class="sd">    measure&#39;s yes against the author&#39;s yes) and ``possible`` (the measure&#39;s yes or possible</span>
+<span class="sd">    against the author&#39;s yes or possible), precision, recall and agreement over the cells</span>
+<span class="sd">    the author could tell.  ``measure`` (from :func:`decade_measure`) scores a later build;</span>
+<span class="sd">    without it, the measure as drawn (the answers the page showed).&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">half</span> <span class="o">==</span> <span class="s2">&quot;certification&quot;</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">RULES_FROZEN</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">PermissionError</span><span class="p">(</span><span class="s2">&quot;the certification half is sealed until RULES_FROZEN is True&quot;</span><span class="p">)</span>
+    <span class="n">sheet</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">sheet</span> <span class="o">=</span> <span class="n">sheet</span><span class="p">[(</span><span class="n">sheet</span><span class="p">[</span><span class="s2">&quot;half&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">half</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">sheet</span><span class="p">[[</span><span class="sa">f</span><span class="s2">&quot;v_</span><span class="si">{</span><span class="n">d</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">DECADES</span><span class="p">]]</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)]</span>
+    <span class="n">cells</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">sheet</span><span class="o">.</span><span class="n">itertuples</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">DECADES</span><span class="p">:</span>
+            <span class="n">said</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;measure_</span><span class="si">{</span><span class="n">d</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">measure</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="p">(</span>
+                <span class="n">measure</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">r</span><span class="o">.</span><span class="n">settlement_id</span><span class="p">,</span> <span class="n">d</span><span class="p">]</span> <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">settlement_id</span> <span class="ow">in</span> <span class="n">measure</span><span class="o">.</span><span class="n">index</span> <span class="k">else</span> <span class="s2">&quot;no&quot;</span><span class="p">)</span>
+            <span class="n">cells</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;weight&quot;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">weight</span><span class="p">),</span> <span class="s2">&quot;measure&quot;</span><span class="p">:</span> <span class="n">said</span><span class="p">,</span> <span class="s2">&quot;author&quot;</span><span class="p">:</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;v_</span><span class="si">{</span><span class="n">d</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)})</span>
+    <span class="n">c</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">cells</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;weight&quot;</span><span class="p">,</span> <span class="s2">&quot;measure&quot;</span><span class="p">,</span> <span class="s2">&quot;author&quot;</span><span class="p">])</span>
+    <span class="n">c</span> <span class="o">=</span> <span class="n">c</span><span class="p">[</span><span class="n">c</span><span class="p">[</span><span class="s2">&quot;author&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;unsure&quot;</span><span class="p">]</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">levels</span> <span class="ow">in</span> <span class="p">((</span><span class="s2">&quot;certain&quot;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;yes&quot;</span><span class="p">}),</span> <span class="p">(</span><span class="s2">&quot;possible&quot;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;yes&quot;</span><span class="p">,</span> <span class="s2">&quot;possible&quot;</span><span class="p">})):</span>
+        <span class="n">m</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">w</span> <span class="o">=</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;measure&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">levels</span><span class="p">),</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;author&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">levels</span><span class="p">),</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;weight&quot;</span><span class="p">]</span>
+        <span class="n">share</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">mask</span><span class="p">,</span> <span class="n">hit</span><span class="p">:</span> <span class="nb">float</span><span class="p">((</span><span class="n">w</span><span class="p">[</span><span class="n">mask</span><span class="p">]</span> <span class="o">*</span> <span class="n">hit</span><span class="p">[</span><span class="n">mask</span><span class="p">])</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="o">/</span> <span class="n">w</span><span class="p">[</span><span class="n">mask</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span> <span class="k">if</span> <span class="n">w</span><span class="p">[</span><span class="n">mask</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="k">else</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;level&quot;</span><span class="p">:</span> <span class="n">name</span><span class="p">,</span> <span class="s2">&quot;cells&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">c</span><span class="p">),</span> <span class="s2">&quot;precision&quot;</span><span class="p">:</span> <span class="n">share</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">a</span><span class="p">),</span> <span class="s2">&quot;recall&quot;</span><span class="p">:</span> <span class="n">share</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">m</span><span class="p">),</span>
+                    <span class="s2">&quot;agreement&quot;</span><span class="p">:</span> <span class="n">share</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="n">c</span><span class="o">.</span><span class="n">index</span><span class="p">),</span> <span class="n">m</span> <span class="o">==</span> <span class="n">a</span><span class="p">)})</span>
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">out</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;level&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-reference_tools-places-theatre_settlement_check-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-theatre_settlement_check-SHEET"><pre class="sig">SHEET<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;reference&#39;</span> <span class="o">/</span> <span class="s1">&#39;places&#39;</span> <span class="o">/</span> <span class="s1">&#39;theatre_settlement_check.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-theatre_settlement_check-TEMPLATE"><pre class="sig">TEMPLATE<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="s1">&#39;theatre_settlement_check_page.html&#39;</span><span class="p">)</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-theatre_settlement_check-PLACEHOLDER"><pre class="sig">PLACEHOLDER<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;/*__DATA__*/&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-theatre_settlement_check-FINAL"><pre class="sig">FINAL<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;data&#39;</span> <span class="o">/</span> <span class="s1">&#39;final&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-theatre_settlement_check-RAW"><pre class="sig">RAW<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;data&#39;</span> <span class="o">/</span> <span class="s1">&#39;raw&#39;</span> <span class="o">/</span> <span class="s1">&#39;theatre&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-theatre_settlement_check-INTERIM"><pre class="sig">INTERIM<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;data&#39;</span> <span class="o">/</span> <span class="s1">&#39;interim&#39;</span> <span class="o">/</span> <span class="s1">&#39;theatre&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-theatre_settlement_check-SEED"><pre class="sig">SEED<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">20261112</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-theatre_settlement_check-TAKE"><pre class="sig">TAKE<span class="kind">dict · 3 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;certain&#39;</span><span class="p">:</span> <span class="mi">30</span><span class="p">,</span> <span class="s1">&#39;possible&#39;</span><span class="p">:</span> <span class="mi">15</span><span class="p">,</span> <span class="s1">&#39;none&#39;</span><span class="p">:</span> <span class="mi">15</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-theatre_settlement_check-DECADES"><pre class="sig">DECADES<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="mi">1850</span><span class="p">,</span> <span class="mi">1920</span><span class="p">,</span> <span class="mi">10</span><span class="p">))</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-theatre_settlement_check-ANSWERS"><pre class="sig">ANSWERS<span class="kind">list · 4 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">[</span><span class="s1">&#39;yes&#39;</span><span class="p">,</span> <span class="s1">&#39;possible&#39;</span><span class="p">,</span> <span class="s1">&#39;no&#39;</span><span class="p">,</span> <span class="s1">&#39;unsure&#39;</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-theatre_settlement_check-RULES_FROZEN"><pre class="sig">RULES_FROZEN<span class="kind">bool</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="kc">False</span>
+</pre></div>
+</details></div>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/reference_tools/places/theatre_settlement_check.py · 234 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span></pre></div></td><td class="code"><div><pre><span></span><span class="ch">#!/usr/bin/env python3</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">The settlement check: the author&#39;s reading of whole settlements, decade by decade, against the</span>
+<span class="sd">theatre measure (D-212).</span>
+
+<span class="sd">The clause check (``theatre_rule_audit``) asks whether each clause was read right.  It cannot</span>
+<span class="sd">see what goes wrong only when clauses are put together: a company counted twice across the</span>
+<span class="sd">place chronicle and an ensemble page, a lineage split into two companies, a place tied to the</span>
+<span class="sd">wrong 1910 settlement, a decade left empty between two listed decades.  And the corrections</span>
+<span class="sd">for a text-built variable in a regression (Egami et al. 2023; Ludwig, Mullainathan &amp; Rambachan</span>
+<span class="sd">2026) need the expert value **at the level of the variable that enters the regression**: here,</span>
+<span class="sd">a 1910 settlement in a decade.  This is that sample.</span>
+
+<span class="sd">**Population**: every 1910 settlement of the Czech lands tied to at least one database place</span>
+<span class="sd">(6,668 on the build of 2026-11-03).  A settlement tied to none is a zero of the measure with</span>
+<span class="sd">no text to read; a place the tie missed is outside this check.</span>
+
+<span class="sd">**Strata** by what the measure says of 1850–1913: ``certain`` (Czech activity certain in some</span>
+<span class="sd">year), ``possible`` (possible only) and ``none``.  :data:`TAKE` per stratum, alternated into a</span>
+<span class="sd">calibration and a certification half; ``weight`` = stratum size / drawn.</span>
+
+<span class="sd">**The question**, for each decade 1850s … 1910s (1910–1913): *was Czech amateur theatre</span>
+<span class="sd">active in this place at some time in the decade?*  ``yes`` / ``possible`` (the text allows it</span>
+<span class="sd">but does not pin it) / ``no`` / ``unsure``.  The measure&#39;s answer is filled in (``certain``</span>
+<span class="sd">in some year of the decade → yes, ``possible`` → possible, else no), and the author corrects it.</span>
+
+<span class="sd">Usage::</span>
+
+<span class="sd">    python utils/reference_tools/places/theatre_settlement_check.py draw</span>
+<span class="sd">    python utils/reference_tools/places/theatre_settlement_check.py page OUT.html</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;0.1.0&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">))</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing</span><span class="w"> </span><span class="kn">import</span> <span class="n">amateur_theatre</span> <span class="k">as</span> <span class="n">at</span>                      <span class="c1"># noqa: E402</span>
+
+<span class="n">SHEET</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;places&quot;</span> <span class="o">/</span> <span class="s2">&quot;theatre_settlement_check.csv&quot;</span>
+<span class="n">TEMPLATE</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="s2">&quot;theatre_settlement_check_page.html&quot;</span><span class="p">)</span>
+<span class="n">PLACEHOLDER</span> <span class="o">=</span> <span class="s2">&quot;/*__DATA__*/&quot;</span>
+<span class="n">FINAL</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;data&quot;</span> <span class="o">/</span> <span class="s2">&quot;final&quot;</span>
+<span class="n">RAW</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;data&quot;</span> <span class="o">/</span> <span class="s2">&quot;raw&quot;</span> <span class="o">/</span> <span class="s2">&quot;theatre&quot;</span>
+<span class="n">INTERIM</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;data&quot;</span> <span class="o">/</span> <span class="s2">&quot;interim&quot;</span> <span class="o">/</span> <span class="s2">&quot;theatre&quot;</span>
+
+<span class="n">SEED</span> <span class="o">=</span> <span class="mi">20261112</span>
+<span class="n">TAKE</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;certain&quot;</span><span class="p">:</span> <span class="mi">30</span><span class="p">,</span> <span class="s2">&quot;possible&quot;</span><span class="p">:</span> <span class="mi">15</span><span class="p">,</span> <span class="s2">&quot;none&quot;</span><span class="p">:</span> <span class="mi">15</span><span class="p">}</span>
+<span class="n">DECADES</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="mi">1850</span><span class="p">,</span> <span class="mi">1920</span><span class="p">,</span> <span class="mi">10</span><span class="p">))</span>          <span class="c1"># 1910 stands for 1910–1913 (the panel ends in 1913)</span>
+<span class="n">ANSWERS</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;yes&quot;</span><span class="p">,</span> <span class="s2">&quot;possible&quot;</span><span class="p">,</span> <span class="s2">&quot;no&quot;</span><span class="p">,</span> <span class="s2">&quot;unsure&quot;</span><span class="p">]</span>
+<span class="n">RULES_FROZEN</span> <span class="o">=</span> <span class="kc">False</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">settlement_ties</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Every database place tied to a 1910 settlement: ``geo_id``, ``settlement_id``, name, okres.&quot;&quot;&quot;</span>
+    <span class="n">places</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">RAW</span> <span class="o">/</span> <span class="s2">&quot;places.csv&quot;</span><span class="p">,</span> <span class="n">usecols</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;geo_id&quot;</span><span class="p">,</span> <span class="s2">&quot;name&quot;</span><span class="p">,</span> <span class="s2">&quot;type&quot;</span><span class="p">,</span> <span class="s2">&quot;lat&quot;</span><span class="p">,</span> <span class="s2">&quot;lon&quot;</span><span class="p">,</span> <span class="s2">&quot;okres&quot;</span><span class="p">])</span>
+    <span class="n">frame</span> <span class="o">=</span> <span class="n">at</span><span class="o">.</span><span class="n">settlement_frame</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">FINAL</span> <span class="o">/</span> <span class="s2">&quot;geo&quot;</span> <span class="o">/</span> <span class="s2">&quot;settlements_1910.parquet&quot;</span><span class="p">),</span>
+                                <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">FINAL</span> <span class="o">/</span> <span class="s2">&quot;geo&quot;</span> <span class="o">/</span> <span class="s2">&quot;districts_1910.parquet&quot;</span><span class="p">))</span>
+    <span class="n">tie</span> <span class="o">=</span> <span class="n">at</span><span class="o">.</span><span class="n">join_places_to_settlements</span><span class="p">(</span><span class="n">places</span><span class="p">,</span> <span class="n">frame</span><span class="p">)</span>
+    <span class="n">tie</span> <span class="o">=</span> <span class="n">tie</span><span class="p">[</span><span class="n">tie</span><span class="p">[</span><span class="s2">&quot;settlement_row&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">notna</span><span class="p">()]</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span>
+        <span class="n">frame</span><span class="p">[[</span><span class="s2">&quot;settlement_row&quot;</span><span class="p">,</span> <span class="s2">&quot;settlement_id&quot;</span><span class="p">,</span> <span class="s2">&quot;cs_name&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_1910_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;land&quot;</span><span class="p">]],</span>
+        <span class="n">on</span><span class="o">=</span><span class="s2">&quot;settlement_row&quot;</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;left&quot;</span><span class="p">,</span> <span class="n">validate</span><span class="o">=</span><span class="s2">&quot;m:1&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">tie</span><span class="p">[[</span><span class="s2">&quot;geo_id&quot;</span><span class="p">,</span> <span class="s2">&quot;settlement_id&quot;</span><span class="p">,</span> <span class="s2">&quot;cs_name&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_1910_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;land&quot;</span><span class="p">]]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">decade_measure</span><span class="p">(</span><span class="n">panel</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Per settlement and decade 1850–1913: the measure&#39;s answer (``yes`` / ``possible`` / ``no``).&quot;&quot;&quot;</span>
+    <span class="n">panel</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">INTERIM</span> <span class="o">/</span> <span class="s2">&quot;settlement_year_panel.parquet&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">panel</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">panel</span>
+    <span class="n">p</span> <span class="o">=</span> <span class="n">panel</span><span class="p">[</span><span class="n">panel</span><span class="p">[</span><span class="s2">&quot;year&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">between</span><span class="p">(</span><span class="n">DECADES</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="mi">1913</span><span class="p">)]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">p</span><span class="p">[</span><span class="s2">&quot;decade&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">p</span><span class="p">[</span><span class="s2">&quot;year&quot;</span><span class="p">]</span> <span class="o">//</span> <span class="mi">10</span> <span class="o">*</span> <span class="mi">10</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">groupby</span><span class="p">([</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">,</span> <span class="s2">&quot;decade&quot;</span><span class="p">])[[</span><span class="s2">&quot;any_activity_certain&quot;</span><span class="p">,</span> <span class="s2">&quot;any_activity_possible&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">max</span><span class="p">()</span>
+    <span class="n">word</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">d</span><span class="p">[</span><span class="s2">&quot;any_activity_certain&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">),</span> <span class="s2">&quot;yes&quot;</span><span class="p">,</span>
+                    <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">d</span><span class="p">[</span><span class="s2">&quot;any_activity_possible&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">),</span> <span class="s2">&quot;possible&quot;</span><span class="p">,</span> <span class="s2">&quot;no&quot;</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">(</span><span class="n">word</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="n">d</span><span class="o">.</span><span class="n">index</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;measure&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">unstack</span><span class="p">(</span><span class="s2">&quot;decade&quot;</span><span class="p">)[</span><span class="n">DECADES</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">population</span><span class="p">(</span><span class="n">ties</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">measure</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Settlements tied to a database place and carried by the measure (a 1910 settlement with</span>
+<span class="sd">    a resolved okres and status), with ``stratum`` from the measure 1850–1913.  A place tied</span>
+<span class="sd">    to a settlement the measure does not carry is outside the check (a coverage gap).&quot;&quot;&quot;</span>
+    <span class="n">ids</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Index</span><span class="p">(</span><span class="n">ties</span><span class="p">[</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">dropna</span><span class="p">()</span><span class="o">.</span><span class="n">unique</span><span class="p">())</span><span class="o">.</span><span class="n">intersection</span><span class="p">(</span><span class="n">measure</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">measure</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">ids</span><span class="p">)</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="s2">&quot;no&quot;</span><span class="p">)</span>
+    <span class="n">stratum</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">((</span><span class="n">m</span> <span class="o">==</span> <span class="s2">&quot;yes&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span> <span class="s2">&quot;certain&quot;</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">((</span><span class="n">m</span> <span class="o">==</span> <span class="s2">&quot;possible&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span> <span class="s2">&quot;possible&quot;</span><span class="p">,</span> <span class="s2">&quot;none&quot;</span><span class="p">))</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">ties</span><span class="o">.</span><span class="n">drop_duplicates</span><span class="p">(</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">ids</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;cs_name&quot;</span><span class="p">,</span> <span class="s2">&quot;okres_1910_cs&quot;</span><span class="p">,</span> <span class="s2">&quot;land&quot;</span><span class="p">]]</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;stratum&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">stratum</span>
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">out</span><span class="p">,</span> <span class="n">m</span><span class="o">.</span><span class="n">add_prefix</span><span class="p">(</span><span class="s2">&quot;measure_&quot;</span><span class="p">)],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">reset_index</span><span class="p">()</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;index&quot;</span><span class="p">:</span> <span class="s2">&quot;settlement_id&quot;</span><span class="p">})</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">draw</span><span class="p">(</span><span class="n">pop</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">SEED</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+    <span class="n">rng</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">default_rng</span><span class="p">(</span><span class="n">seed</span><span class="p">)</span>
+    <span class="n">parts</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">stratum</span><span class="p">,</span> <span class="n">group</span> <span class="ow">in</span> <span class="n">pop</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;stratum&quot;</span><span class="p">):</span>
+        <span class="n">n</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">TAKE</span><span class="p">[</span><span class="n">stratum</span><span class="p">],</span> <span class="nb">len</span><span class="p">(</span><span class="n">group</span><span class="p">))</span>
+        <span class="n">drawn</span> <span class="o">=</span> <span class="n">group</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">rng</span><span class="o">.</span><span class="n">permutation</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">group</span><span class="p">))[:</span><span class="n">n</span><span class="p">])]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="n">drawn</span><span class="p">[</span><span class="s2">&quot;half&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;calibration&quot;</span> <span class="k">if</span> <span class="n">i</span> <span class="o">%</span> <span class="mi">2</span> <span class="o">==</span> <span class="mi">0</span> <span class="k">else</span> <span class="s2">&quot;certification&quot;</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">)]</span>
+        <span class="n">drawn</span><span class="p">[</span><span class="s2">&quot;stratum_N&quot;</span><span class="p">],</span> <span class="n">drawn</span><span class="p">[</span><span class="s2">&quot;stratum_n&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">group</span><span class="p">),</span> <span class="n">n</span>
+        <span class="n">drawn</span><span class="p">[</span><span class="s2">&quot;weight&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">group</span><span class="p">)</span> <span class="o">/</span> <span class="n">n</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>
+        <span class="n">parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">drawn</span><span class="p">)</span>
+    <span class="n">sample</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">(</span><span class="n">parts</span><span class="p">,</span> <span class="n">ignore_index</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">sample</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="n">rng</span><span class="o">.</span><span class="n">permutation</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">sample</span><span class="p">))]</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">write_sheet</span><span class="p">(</span><span class="n">sample</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">path</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">SHEET</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The worksheet: the measure&#39;s answer per decade and an empty verdict column per decade.</span>
+<span class="sd">    Refuses to overwrite a sheet that holds any verdict.&quot;&quot;&quot;</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+    <span class="n">verdicts</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;v_</span><span class="si">{</span><span class="n">d</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">DECADES</span><span class="p">]</span> <span class="o">+</span> <span class="p">[</span><span class="s2">&quot;v_note&quot;</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="n">old</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">old</span><span class="p">[[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">verdicts</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">old</span><span class="p">]]</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">any</span><span class="p">()</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+            <span class="k">raise</span> <span class="ne">FileExistsError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">path</span><span class="si">}</span><span class="s2"> already holds verdicts; it is not redrawn&quot;</span><span class="p">)</span>
+    <span class="n">sheet</span> <span class="o">=</span> <span class="n">sample</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">column</span> <span class="ow">in</span> <span class="n">verdicts</span><span class="p">:</span>
+        <span class="n">sheet</span><span class="p">[</span><span class="n">column</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">sheet</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">path</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_clean</span><span class="p">(</span><span class="n">value</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">value</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="nb">str</span><span class="p">)</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">settlement_texts</span><span class="p">(</span><span class="n">sheet</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">ties</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;For each settlement: its database places, each with the first report, the chronicle,</span>
+<span class="sd">    the ensemble list and the ensemble pages of companies starting before 1914.&quot;&quot;&quot;</span>
+    <span class="n">places</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">RAW</span> <span class="o">/</span> <span class="s2">&quot;places.csv&quot;</span><span class="p">,</span> <span class="n">low_memory</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                         <span class="n">usecols</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;geo_id&quot;</span><span class="p">,</span> <span class="s2">&quot;name&quot;</span><span class="p">,</span> <span class="s2">&quot;type&quot;</span><span class="p">,</span> <span class="s2">&quot;first_record_raw&quot;</span><span class="p">,</span> <span class="s2">&quot;chronicle_text&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;geo_id&quot;</span><span class="p">)</span>
+    <span class="n">ensembles</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">RAW</span> <span class="o">/</span> <span class="s2">&quot;ensembles.csv&quot;</span><span class="p">,</span> <span class="n">usecols</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;ensemble_id&quot;</span><span class="p">,</span> <span class="s2">&quot;geo_id&quot;</span><span class="p">,</span> <span class="s2">&quot;name&quot;</span><span class="p">,</span> <span class="s2">&quot;span_raw&quot;</span><span class="p">,</span> <span class="s2">&quot;year_from&quot;</span><span class="p">])</span>
+    <span class="n">pages</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">RAW</span> <span class="o">/</span> <span class="s2">&quot;ensemble_pages.csv&quot;</span><span class="p">,</span> <span class="n">usecols</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;ensemble_id&quot;</span><span class="p">,</span> <span class="s2">&quot;active_raw&quot;</span><span class="p">,</span> <span class="s2">&quot;chronicle_text&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;ensemble_id&quot;</span><span class="p">)</span>
+    <span class="n">wanted</span> <span class="o">=</span> <span class="n">ties</span><span class="p">[</span><span class="n">ties</span><span class="p">[</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">sheet</span><span class="p">[</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">])]</span>
+    <span class="n">out</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">sid</span><span class="p">,</span> <span class="n">group</span> <span class="ow">in</span> <span class="n">wanted</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">):</span>
+        <span class="n">entries</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">geo</span> <span class="ow">in</span> <span class="n">group</span><span class="p">[</span><span class="s2">&quot;geo_id&quot;</span><span class="p">]:</span>
+            <span class="n">p</span> <span class="o">=</span> <span class="n">places</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">geo</span><span class="p">]</span>
+            <span class="n">ens</span> <span class="o">=</span> <span class="n">ensembles</span><span class="p">[</span><span class="n">ensembles</span><span class="p">[</span><span class="s2">&quot;geo_id&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">geo</span><span class="p">]</span><span class="o">.</span><span class="n">sort_values</span><span class="p">(</span><span class="s2">&quot;year_from&quot;</span><span class="p">)</span>
+            <span class="n">listed</span><span class="p">,</span> <span class="n">own</span> <span class="o">=</span> <span class="p">[],</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">ens</span><span class="o">.</span><span class="n">itertuples</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+                <span class="n">listed</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="n">_clean</span><span class="p">(</span><span class="n">e</span><span class="o">.</span><span class="n">name</span><span class="p">),</span> <span class="s2">&quot;span&quot;</span><span class="p">:</span> <span class="n">_clean</span><span class="p">(</span><span class="n">e</span><span class="o">.</span><span class="n">span_raw</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s2">&quot;()&quot;</span><span class="p">)})</span>
+                <span class="k">if</span> <span class="n">e</span><span class="o">.</span><span class="n">ensemble_id</span> <span class="ow">in</span> <span class="n">pages</span><span class="o">.</span><span class="n">index</span> <span class="ow">and</span> <span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">e</span><span class="o">.</span><span class="n">year_from</span><span class="p">)</span> <span class="ow">or</span> <span class="n">e</span><span class="o">.</span><span class="n">year_from</span> <span class="o">&lt;</span> <span class="mi">1914</span><span class="p">):</span>
+                    <span class="n">pg</span> <span class="o">=</span> <span class="n">pages</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">e</span><span class="o">.</span><span class="n">ensemble_id</span><span class="p">]</span>
+                    <span class="k">if</span> <span class="n">_clean</span><span class="p">(</span><span class="n">pg</span><span class="p">[</span><span class="s2">&quot;chronicle_text&quot;</span><span class="p">])</span> <span class="ow">or</span> <span class="n">_clean</span><span class="p">(</span><span class="n">pg</span><span class="p">[</span><span class="s2">&quot;active_raw&quot;</span><span class="p">]):</span>
+                        <span class="n">own</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="n">_clean</span><span class="p">(</span><span class="n">e</span><span class="o">.</span><span class="n">name</span><span class="p">),</span> <span class="s2">&quot;span&quot;</span><span class="p">:</span> <span class="n">_clean</span><span class="p">(</span><span class="n">e</span><span class="o">.</span><span class="n">span_raw</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">(</span><span class="s2">&quot;()&quot;</span><span class="p">),</span>
+                                    <span class="s2">&quot;active&quot;</span><span class="p">:</span> <span class="n">_clean</span><span class="p">(</span><span class="n">pg</span><span class="p">[</span><span class="s2">&quot;active_raw&quot;</span><span class="p">]),</span> <span class="s2">&quot;chronicle&quot;</span><span class="p">:</span> <span class="n">_clean</span><span class="p">(</span><span class="n">pg</span><span class="p">[</span><span class="s2">&quot;chronicle_text&quot;</span><span class="p">])})</span>
+            <span class="n">entries</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="n">_clean</span><span class="p">(</span><span class="n">p</span><span class="p">[</span><span class="s2">&quot;name&quot;</span><span class="p">]),</span> <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="n">_clean</span><span class="p">(</span><span class="n">p</span><span class="p">[</span><span class="s2">&quot;type&quot;</span><span class="p">]),</span>
+                            <span class="s2">&quot;first&quot;</span><span class="p">:</span> <span class="n">_clean</span><span class="p">(</span><span class="n">p</span><span class="p">[</span><span class="s2">&quot;first_record_raw&quot;</span><span class="p">]),</span> <span class="s2">&quot;chronicle&quot;</span><span class="p">:</span> <span class="n">_clean</span><span class="p">(</span><span class="n">p</span><span class="p">[</span><span class="s2">&quot;chronicle_text&quot;</span><span class="p">]),</span>
+                            <span class="s2">&quot;ensembles&quot;</span><span class="p">:</span> <span class="n">listed</span><span class="p">,</span> <span class="s2">&quot;pages&quot;</span><span class="p">:</span> <span class="n">own</span><span class="p">})</span>
+        <span class="n">out</span><span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">sid</span><span class="p">)]</span> <span class="o">=</span> <span class="n">entries</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">build_page</span><span class="p">(</span><span class="n">out</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">sheet_path</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">SHEET</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+    <span class="n">sheet</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">sheet_path</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">texts</span> <span class="o">=</span> <span class="n">settlement_texts</span><span class="p">(</span><span class="n">sheet</span><span class="p">,</span> <span class="n">settlement_ties</span><span class="p">())</span>
+    <span class="n">sheet</span> <span class="o">=</span> <span class="n">sheet</span><span class="o">.</span><span class="n">sort_values</span><span class="p">(</span><span class="s2">&quot;half&quot;</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">h</span><span class="p">:</span> <span class="n">h</span> <span class="o">!=</span> <span class="s2">&quot;calibration&quot;</span><span class="p">,</span> <span class="n">kind</span><span class="o">=</span><span class="s2">&quot;stable&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">reset_index</span><span class="p">(</span><span class="n">drop</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="p">[{</span><span class="s2">&quot;i&quot;</span><span class="p">:</span> <span class="n">i</span><span class="p">,</span> <span class="s2">&quot;key&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">settlement_id</span><span class="p">),</span> <span class="s2">&quot;half&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">half</span><span class="p">,</span> <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">cs_name</span><span class="o">.</span><span class="n">title</span><span class="p">(),</span> <span class="s2">&quot;okres&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">okres_1910_cs</span><span class="p">,</span>
+             <span class="s2">&quot;land&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">land</span><span class="p">,</span> <span class="s2">&quot;measure&quot;</span><span class="p">:</span> <span class="p">{</span><span class="nb">str</span><span class="p">(</span><span class="n">d</span><span class="p">):</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;measure_</span><span class="si">{</span><span class="n">d</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">DECADES</span><span class="p">},</span>
+             <span class="s2">&quot;places&quot;</span><span class="p">:</span> <span class="n">texts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">settlement_id</span><span class="p">),</span> <span class="p">[])}</span>
+            <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">sheet</span><span class="o">.</span><span class="n">itertuples</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">))]</span>
+    <span class="n">payload</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">ensure_ascii</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;&lt;/&quot;</span><span class="p">,</span> <span class="s2">&quot;&lt;</span><span class="se">\\</span><span class="s2">/&quot;</span><span class="p">)</span>
+    <span class="n">template</span> <span class="o">=</span> <span class="n">TEMPLATE</span><span class="o">.</span><span class="n">read_text</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">template</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="n">PLACEHOLDER</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;template: one data placeholder&quot;</span>
+    <span class="n">Path</span><span class="p">(</span><span class="n">out</span><span class="p">)</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">template</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="n">PLACEHOLDER</span><span class="p">,</span> <span class="n">payload</span><span class="p">),</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">Path</span><span class="p">(</span><span class="n">out</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">fill_sheet</span><span class="p">(</span><span class="n">documents</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">],</span> <span class="n">path</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">SHEET</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Write the page&#39;s documents (``verdicts/&lt;settlement_id&gt;``) into the sheet.&quot;&quot;&quot;</span>
+    <span class="n">sheet</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">sheet</span><span class="p">[</span><span class="s2">&quot;_key&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">sheet</span><span class="p">[</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">str</span><span class="p">)</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">i</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">sheet</span><span class="p">[</span><span class="s2">&quot;_key&quot;</span><span class="p">])}</span>
+    <span class="n">unknown</span> <span class="o">=</span> <span class="p">[</span><span class="n">d</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">documents</span> <span class="k">if</span> <span class="nb">str</span><span class="p">(</span><span class="n">d</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">))</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">index</span><span class="p">]</span>
+    <span class="k">assert</span> <span class="ow">not</span> <span class="n">unknown</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;verdicts for settlements not in the sheet: </span><span class="si">{</span><span class="n">unknown</span><span class="p">[:</span><span class="mi">5</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="n">columns</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;v_</span><span class="si">{</span><span class="n">d</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">DECADES</span><span class="p">]</span> <span class="o">+</span> <span class="p">[</span><span class="s2">&quot;v_note&quot;</span><span class="p">]</span>
+    <span class="n">sheet</span><span class="p">[</span><span class="n">columns</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">written</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">documents</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">d</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;ruled&quot;</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="n">answers</span> <span class="o">=</span> <span class="n">d</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;decades&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="p">{}</span>
+        <span class="n">sheet</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">index</span><span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">d</span><span class="p">[</span><span class="s2">&quot;settlement_id&quot;</span><span class="p">])],</span> <span class="n">columns</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">answers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">x</span><span class="p">),</span> <span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">DECADES</span><span class="p">]</span> <span class="o">+</span> <span class="p">[</span><span class="n">d</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;note&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">]</span>
+        <span class="n">written</span> <span class="o">+=</span> <span class="mi">1</span>
+    <span class="n">sheet</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="s2">&quot;_key&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;documents&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">documents</span><span class="p">),</span> <span class="s2">&quot;ruled&quot;</span><span class="p">:</span> <span class="n">written</span><span class="p">,</span> <span class="s2">&quot;rows&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">sheet</span><span class="p">)}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">score</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">SHEET</span><span class="p">,</span> <span class="n">half</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;calibration&quot;</span><span class="p">,</span> <span class="n">measure</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The measure against the author per settlement-decade, weighted: for ``certain`` (the</span>
+<span class="sd">    measure&#39;s yes against the author&#39;s yes) and ``possible`` (the measure&#39;s yes or possible</span>
+<span class="sd">    against the author&#39;s yes or possible), precision, recall and agreement over the cells</span>
+<span class="sd">    the author could tell.  ``measure`` (from :func:`decade_measure`) scores a later build;</span>
+<span class="sd">    without it, the measure as drawn (the answers the page showed).&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">half</span> <span class="o">==</span> <span class="s2">&quot;certification&quot;</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">RULES_FROZEN</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">PermissionError</span><span class="p">(</span><span class="s2">&quot;the certification half is sealed until RULES_FROZEN is True&quot;</span><span class="p">)</span>
+    <span class="n">sheet</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">sheet</span> <span class="o">=</span> <span class="n">sheet</span><span class="p">[(</span><span class="n">sheet</span><span class="p">[</span><span class="s2">&quot;half&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">half</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">sheet</span><span class="p">[[</span><span class="sa">f</span><span class="s2">&quot;v_</span><span class="si">{</span><span class="n">d</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">DECADES</span><span class="p">]]</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)]</span>
+    <span class="n">cells</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">sheet</span><span class="o">.</span><span class="n">itertuples</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">DECADES</span><span class="p">:</span>
+            <span class="n">said</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;measure_</span><span class="si">{</span><span class="n">d</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">measure</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="p">(</span>
+                <span class="n">measure</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">r</span><span class="o">.</span><span class="n">settlement_id</span><span class="p">,</span> <span class="n">d</span><span class="p">]</span> <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">settlement_id</span> <span class="ow">in</span> <span class="n">measure</span><span class="o">.</span><span class="n">index</span> <span class="k">else</span> <span class="s2">&quot;no&quot;</span><span class="p">)</span>
+            <span class="n">cells</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;weight&quot;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">weight</span><span class="p">),</span> <span class="s2">&quot;measure&quot;</span><span class="p">:</span> <span class="n">said</span><span class="p">,</span> <span class="s2">&quot;author&quot;</span><span class="p">:</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;v_</span><span class="si">{</span><span class="n">d</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)})</span>
+    <span class="n">c</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">cells</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;weight&quot;</span><span class="p">,</span> <span class="s2">&quot;measure&quot;</span><span class="p">,</span> <span class="s2">&quot;author&quot;</span><span class="p">])</span>
+    <span class="n">c</span> <span class="o">=</span> <span class="n">c</span><span class="p">[</span><span class="n">c</span><span class="p">[</span><span class="s2">&quot;author&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;unsure&quot;</span><span class="p">]</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">levels</span> <span class="ow">in</span> <span class="p">((</span><span class="s2">&quot;certain&quot;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;yes&quot;</span><span class="p">}),</span> <span class="p">(</span><span class="s2">&quot;possible&quot;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;yes&quot;</span><span class="p">,</span> <span class="s2">&quot;possible&quot;</span><span class="p">})):</span>
+        <span class="n">m</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">w</span> <span class="o">=</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;measure&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">levels</span><span class="p">),</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;author&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">levels</span><span class="p">),</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;weight&quot;</span><span class="p">]</span>
+        <span class="n">share</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">mask</span><span class="p">,</span> <span class="n">hit</span><span class="p">:</span> <span class="nb">float</span><span class="p">((</span><span class="n">w</span><span class="p">[</span><span class="n">mask</span><span class="p">]</span> <span class="o">*</span> <span class="n">hit</span><span class="p">[</span><span class="n">mask</span><span class="p">])</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="o">/</span> <span class="n">w</span><span class="p">[</span><span class="n">mask</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span> <span class="k">if</span> <span class="n">w</span><span class="p">[</span><span class="n">mask</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="k">else</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;level&quot;</span><span class="p">:</span> <span class="n">name</span><span class="p">,</span> <span class="s2">&quot;cells&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">c</span><span class="p">),</span> <span class="s2">&quot;precision&quot;</span><span class="p">:</span> <span class="n">share</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">a</span><span class="p">),</span> <span class="s2">&quot;recall&quot;</span><span class="p">:</span> <span class="n">share</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">m</span><span class="p">),</span>
+                    <span class="s2">&quot;agreement&quot;</span><span class="p">:</span> <span class="n">share</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="n">c</span><span class="o">.</span><span class="n">index</span><span class="p">),</span> <span class="n">m</span> <span class="o">==</span> <span class="n">a</span><span class="p">)})</span>
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">out</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;level&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">2</span> <span class="ow">and</span> <span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;draw&quot;</span><span class="p">:</span>
+        <span class="n">ties</span> <span class="o">=</span> <span class="n">settlement_ties</span><span class="p">()</span>
+        <span class="n">pop</span> <span class="o">=</span> <span class="n">population</span><span class="p">(</span><span class="n">ties</span><span class="p">,</span> <span class="n">decade_measure</span><span class="p">())</span>
+        <span class="n">sample</span> <span class="o">=</span> <span class="n">draw</span><span class="p">(</span><span class="n">pop</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;population </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">pop</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> settlements tied to a database place; strata </span><span class="si">{</span><span class="n">pop</span><span class="p">[</span><span class="s1">&#39;stratum&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">sample</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;stratum&quot;</span><span class="p">)[[</span><span class="s2">&quot;stratum_N&quot;</span><span class="p">,</span> <span class="s2">&quot;stratum_n&quot;</span><span class="p">,</span> <span class="s2">&quot;weight&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">first</span><span class="p">())</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;wrote&quot;</span><span class="p">,</span> <span class="n">write_sheet</span><span class="p">(</span><span class="n">sample</span><span class="p">))</span>
+    <span class="k">elif</span> <span class="nb">len</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">)</span> <span class="o">==</span> <span class="mi">3</span> <span class="ow">and</span> <span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;page&quot;</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;wrote&quot;</span><span class="p">,</span> <span class="n">build_page</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">2</span><span class="p">])))</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="vm">__doc__</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>

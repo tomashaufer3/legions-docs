@@ -1,0 +1,882 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>The clause check as a choice: <em>which reading is right?</em> (D-218).</p><p class="tldr-facts"><b>Reference tools</b> · v0.1.0 · 261 lines · 7 public functions · 8 constants · used by nothing else · <code>utils/reference_tools/places/theatre_ab_check.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-reference_tools-places-theatre_ab_check-reader_answers">reader_answers</a><a class="chip" href="#fn-utils-reference_tools-places-theatre_ab_check-candidates">candidates</a><a class="chip" href="#fn-utils-reference_tools-places-theatre_ab_check-draw">draw</a><a class="chip" href="#fn-utils-reference_tools-places-theatre_ab_check-write_sheet">write_sheet</a><a class="chip" href="#fn-utils-reference_tools-places-theatre_ab_check-page_items">page_items</a><a class="chip" href="#fn-utils-reference_tools-places-theatre_ab_check-build_page">build_page</a><a class="chip" href="#fn-utils-reference_tools-places-theatre_ab_check-fill_sheets">fill_sheets</a><a class="chip const" href="#c-utils-reference_tools-places-theatre_ab_check-ROOT">ROOT</a><a class="chip const" href="#c-utils-reference_tools-places-theatre_ab_check-SHEET">SHEET</a><a class="chip const" href="#c-utils-reference_tools-places-theatre_ab_check-TEMPLATE">TEMPLATE</a><a class="chip const" href="#c-utils-reference_tools-places-theatre_ab_check-PLACEHOLDER">PLACEHOLDER</a><a class="chip const" href="#c-utils-reference_tools-places-theatre_ab_check-SEED">SEED</a><a class="chip const" href="#c-utils-reference_tools-places-theatre_ab_check-N_AGREED">N_AGREED</a><a class="chip const" href="#c-utils-reference_tools-places-theatre_ab_check-MODEL_READERS">MODEL_READERS</a><a class="chip const" href="#c-utils-reference_tools-places-theatre_ab_check-READER_NAMES">READER_NAMES</a></div>
+<h2>How it works</h2><p>The four-question page (<code>theatre_rule_audit</code>, D-212) asks the author to answer every clause
+from scratch.  Once the rules and the models have read the clauses, most of that is wasted
+on clauses where every reader already agrees.  This page asks only:</p>
+<ul>
+<li>on a clause where the readers <strong>disagree</strong> — about the four questions, Czech activity
+  (yes / hedged / German / no), a company, a performance, and an undated clause's date —
+  which of their readings is right: one click, or <em>neither</em> (the four questions open) or
+  <em>can't tell</em>;</li>
+<li>on a random <code>N_AGREED</code> of the clauses where <strong>every reader agrees</strong>: is that reading
+  right?  This measures the pipeline's blind spot, all readers wrong alike.</li>
+</ul>
+<p><strong>Readers</strong> (from the cached replies, read-only): the rules (on a coded clause), Haiku,
+Gemini, Opus alone and the judge where it has read the clause.  A reader's answer is its
+reading run through <code>amateur_theatre.code_clauses</code>, as everywhere in the pipeline.
+The page hides which reader gave which reading until the author has chosen.</p>
+<p><strong>Weights.</strong>  Every disagreement of the half is shown, and the agreed clauses with a known
+probability (<code>N_AGREED</code> / agreed clauses in the half), so each answer carries
+<code>ab_prob</code> and <code>theatre_rule_audit.verdict_rows</code> divides the clause's weight by it and
+stratifies the bootstrap by <code>ab_group</code>: a two-phase sample, still weighted back to the
+populations.  The answers fill the same <code>v_*</code> columns as the four-question page.</p>
+<p><strong>What it costs in rigour:</strong> the author chooses among the readers' readings; <em>neither</em> exists,
+but a reading nobody proposed is less likely to be given than when ruling from scratch.  A
+dated clause's leading date is not asked (the readers do not re-date it).</p>
+<p>Usage::</p>
+<pre><code>python utils/reference_tools/places/theatre_ab_check.py draw [calibration|certification]
+python utils/reference_tools/places/theatre_ab_check.py page OUT.html
+</code></pre>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-reference_tools-places-theatre_ab_check-reader_answers">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">reader_answers</span><span class="p">(</span><span class="n">rows</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]</span></pre>
+<div class="fndoc"><p>Each reader's answers on <code>rows</code> (coded clause rows of both samples), from the cache.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 88–109 (22 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">reader_answers</span><span class="p">(</span><span class="n">rows</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Each reader&#39;s answers on ``rows`` (coded clause rows of both samples), from the cache.&quot;&quot;&quot;</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="n">rows</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">_undated</span><span class="o">=</span><span class="n">rows</span><span class="p">[</span><span class="s2">&quot;date_source&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">eq</span><span class="p">(</span><span class="s2">&quot;none&quot;</span><span class="p">))</span>
+    <span class="n">stage</span> <span class="o">=</span> <span class="n">atm</span><span class="o">.</span><span class="n">add_context</span><span class="p">(</span><span class="n">rows</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">open_kind</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">rows</span><span class="p">[</span><span class="s2">&quot;needs_model&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">),</span> <span class="s2">&quot;open&quot;</span><span class="p">,</span> <span class="s2">&quot;coded&quot;</span><span class="p">)))</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;rules&quot;</span><span class="p">:</span> <span class="n">_answers</span><span class="p">(</span><span class="n">rows</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="o">~</span><span class="n">rows</span><span class="p">[</span><span class="s2">&quot;needs_model&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">)</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">()])}</span>
+    <span class="n">readings</span> <span class="o">=</span> <span class="p">{</span><span class="n">r</span><span class="p">:</span> <span class="n">atm</span><span class="o">.</span><span class="n">readings_table</span><span class="p">(</span><span class="n">stage</span><span class="p">,</span> <span class="n">atm</span><span class="o">.</span><span class="n">build_queue</span><span class="p">(</span><span class="n">stage</span><span class="p">,</span> <span class="n">r</span><span class="p">))</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">cons</span><span class="o">.</span><span class="n">PIPELINE</span><span class="p">}</span>
+    <span class="n">readings</span><span class="p">[</span><span class="s2">&quot;opus&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">atm</span><span class="o">.</span><span class="n">readings_table</span><span class="p">(</span><span class="n">stage</span><span class="p">,</span> <span class="n">atm</span><span class="o">.</span><span class="n">build_queue</span><span class="p">(</span><span class="n">stage</span><span class="p">,</span> <span class="s2">&quot;opus&quot;</span><span class="p">))</span>
+    <span class="n">table</span> <span class="o">=</span> <span class="n">cons</span><span class="o">.</span><span class="n">disputes</span><span class="p">(</span><span class="n">stage</span><span class="p">,</span> <span class="p">{</span><span class="n">r</span><span class="p">:</span> <span class="n">readings</span><span class="p">[</span><span class="n">r</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">cons</span><span class="o">.</span><span class="n">PIPELINE</span><span class="p">})</span>
+    <span class="n">disputed</span> <span class="o">=</span> <span class="n">table</span><span class="o">.</span><span class="n">index</span><span class="p">[</span><span class="n">table</span><span class="p">[</span><span class="s2">&quot;disputed&quot;</span><span class="p">]]</span>
+    <span class="n">others</span> <span class="o">=</span> <span class="n">cons</span><span class="o">.</span><span class="n">judge_others</span><span class="p">(</span><span class="n">disputed</span><span class="p">,</span> <span class="p">{</span><span class="n">r</span><span class="p">:</span> <span class="n">readings</span><span class="p">[</span><span class="n">r</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">cons</span><span class="o">.</span><span class="n">PIPELINE</span><span class="p">},</span> <span class="n">stage</span><span class="p">)</span>
+    <span class="n">judge_q</span> <span class="o">=</span> <span class="n">atm</span><span class="o">.</span><span class="n">build_queue</span><span class="p">(</span><span class="n">stage</span><span class="p">[</span><span class="n">stage</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">disputed</span><span class="p">)],</span> <span class="n">cons</span><span class="o">.</span><span class="n">JUDGE</span><span class="p">,</span> <span class="n">others</span><span class="o">=</span><span class="n">others</span><span class="p">)</span>
+    <span class="n">readings</span><span class="p">[</span><span class="n">cons</span><span class="o">.</span><span class="n">JUDGE</span><span class="p">]</span> <span class="o">=</span> <span class="n">atm</span><span class="o">.</span><span class="n">readings_table</span><span class="p">(</span><span class="n">stage</span><span class="p">,</span> <span class="n">judge_q</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">MODEL_READERS</span><span class="p">:</span>
+        <span class="n">valid</span> <span class="o">=</span> <span class="n">readings</span><span class="p">[</span><span class="n">name</span><span class="p">][</span><span class="n">readings</span><span class="p">[</span><span class="n">name</span><span class="p">][</span><span class="s2">&quot;valid&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">)]</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">readings</span><span class="p">[</span><span class="n">name</span><span class="p">])</span> <span class="k">else</span> <span class="n">readings</span><span class="p">[</span><span class="n">name</span><span class="p">]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">len</span><span class="p">(</span><span class="n">valid</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="n">read</span> <span class="o">=</span> <span class="n">rows</span><span class="p">[</span><span class="n">rows</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">valid</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">])]</span>
+        <span class="n">coded</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">atm</span><span class="o">.</span><span class="n">apply_readings</span><span class="p">(</span><span class="n">g</span><span class="p">,</span> <span class="n">valid</span><span class="p">,</span> <span class="n">s</span><span class="p">)</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">clause_key</span><span class="o">=</span><span class="n">g</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">,</span>
+                                                                   <span class="n">_undated</span><span class="o">=</span><span class="n">g</span><span class="p">[</span><span class="s2">&quot;_undated&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">)</span>
+                           <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">read</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;source&quot;</span><span class="p">)])</span>
+        <span class="n">out</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">_answers</span><span class="p">(</span><span class="n">coded</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">,</span> <span class="n">drop</span><span class="o">=</span><span class="kc">False</span><span class="p">),</span> <span class="n">valid</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="n">coded</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-theatre_ab_check-candidates">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">candidates</span><span class="p">(</span><span class="n">answers</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Per clause: the distinct readings (<code>candidates</code>, each with the readers that gave it).</p></div>
+<p class="calls"><b>Called by</b> <code>utils/lexikon_1910/build_token_review.py</code> <code>utils/reference_tools/occupations/build_conflict_workbook.py</code> <code>utils/reference_tools/occupations/run_czisco_check.py</code> <code>utils/reference_tools/places/german_supervised_placement.py</code> <code>utils/validation/check_offices_coverage.py</code></p>
+<details><summary>source · lines 112–126 (15 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">candidates</span><span class="p">(</span><span class="n">answers</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Per clause: the distinct readings (``candidates``, each with the readers that gave it).&quot;&quot;&quot;</span>
+    <span class="n">keys</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">set</span><span class="p">()</span><span class="o">.</span><span class="n">union</span><span class="p">(</span><span class="o">*</span><span class="p">[</span><span class="n">a</span><span class="o">.</span><span class="n">index</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">answers</span><span class="o">.</span><span class="n">values</span><span class="p">()]))</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">keys</span><span class="p">:</span>
+        <span class="n">found</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">tuple</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">answers</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">a</span><span class="o">.</span><span class="n">index</span><span class="p">:</span>
+                <span class="n">r</span> <span class="o">=</span> <span class="n">a</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+                <span class="n">found</span><span class="o">.</span><span class="n">setdefault</span><span class="p">((</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;activity&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;company&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;performance&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;date&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;years&quot;</span><span class="p">]),</span> <span class="p">[])</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+        <span class="n">cands</span> <span class="o">=</span> <span class="p">[{</span><span class="s2">&quot;activity&quot;</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="s2">&quot;company&quot;</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="s2">&quot;performance&quot;</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="s2">&quot;date&quot;</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="mi">3</span><span class="p">],</span> <span class="s2">&quot;years&quot;</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="mi">4</span><span class="p">],</span> <span class="s2">&quot;readers&quot;</span><span class="p">:</span> <span class="n">rs</span><span class="p">}</span>
+                 <span class="k">for</span> <span class="n">t</span><span class="p">,</span> <span class="n">rs</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">found</span><span class="o">.</span><span class="n">items</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">kv</span><span class="p">:</span> <span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">kv</span><span class="p">[</span><span class="mi">1</span><span class="p">]))]</span>
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;clause_key&quot;</span><span class="p">:</span> <span class="n">key</span><span class="p">,</span> <span class="s2">&quot;n_readings&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">cands</span><span class="p">),</span> <span class="s2">&quot;candidates&quot;</span><span class="p">:</span> <span class="n">cands</span><span class="p">,</span>
+                     <span class="s2">&quot;readers&quot;</span><span class="p">:</span> <span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">c</span><span class="p">[</span><span class="s2">&quot;readers&quot;</span><span class="p">])</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cands</span><span class="p">)})</span>
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-theatre_ab_check-draw">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">draw</span><span class="p">(</span><span class="n">half</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;calibration&#39;</span><span class="p">,</span> <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span><span class="o">=</span><span class="n">SEED</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Every disagreement of <code>half</code> and <code>N_AGREED</code> agreed clauses, drawn at random, with
+<code>ab_group</code> and <code>ab_prob</code>; shuffled.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/docs/build_docs.py</code> <code>utils/lexikon_1910/draw_gold_sample.py</code> <code>utils/lexikon_1910/locate_glyphs.py</code> <code>utils/recheck/blind_sample.py</code> <code>utils/reference_tools/places/map_intensities.py</code> <code>utils/reference_tools/places/theatre_rule_audit.py</code> <code>utils/reference_tools/places/theatre_settlement_check.py</code></p>
+<details><summary>source · lines 129–148 (20 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">draw</span><span class="p">(</span><span class="n">half</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;calibration&quot;</span><span class="p">,</span> <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">SEED</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Every disagreement of ``half`` and :data:`N_AGREED` agreed clauses, drawn at random, with</span>
+<span class="sd">    ``ab_group`` and ``ab_prob``; shuffled.&quot;&quot;&quot;</span>
+    <span class="n">samples</span> <span class="o">=</span> <span class="n">ra</span><span class="o">.</span><span class="n">load_samples</span><span class="p">()</span>
+    <span class="n">sample_of</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">s</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">s</span><span class="p">[</span><span class="s2">&quot;half&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">half</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">sample</span><span class="o">=</span><span class="n">n</span><span class="p">)</span> <span class="k">for</span> <span class="n">n</span><span class="p">,</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">samples</span><span class="o">.</span><span class="n">items</span><span class="p">()])</span>
+    <span class="n">clauses</span> <span class="o">=</span> <span class="n">atm</span><span class="o">.</span><span class="n">load_clauses</span><span class="p">()</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="n">clauses</span><span class="p">[</span><span class="n">clauses</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">sample_of</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">])]</span>
+    <span class="n">c</span> <span class="o">=</span> <span class="n">candidates</span><span class="p">(</span><span class="n">reader_answers</span><span class="p">(</span><span class="n">rows</span><span class="p">))</span>
+    <span class="n">c</span><span class="p">[</span><span class="s2">&quot;sample&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">sample_of</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)[</span><span class="s2">&quot;sample&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+    <span class="n">c</span> <span class="o">=</span> <span class="n">c</span><span class="p">[</span><span class="n">c</span><span class="p">[</span><span class="s2">&quot;readers&quot;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="mi">2</span><span class="p">]</span>                         <span class="c1"># a clause with one reader has nothing to compare</span>
+    <span class="n">disputed</span> <span class="o">=</span> <span class="n">c</span><span class="p">[</span><span class="n">c</span><span class="p">[</span><span class="s2">&quot;n_readings&quot;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">ab_group</span><span class="o">=</span><span class="s2">&quot;disputed&quot;</span><span class="p">,</span> <span class="n">ab_prob</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
+    <span class="n">agreed_all</span> <span class="o">=</span> <span class="n">c</span><span class="p">[</span><span class="n">c</span><span class="p">[</span><span class="s2">&quot;n_readings&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="mi">1</span><span class="p">]</span>
+    <span class="n">rng</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">default_rng</span><span class="p">(</span><span class="n">seed</span><span class="p">)</span>
+    <span class="n">take</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">N_AGREED</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">agreed_all</span><span class="p">))</span>
+    <span class="n">agreed</span> <span class="o">=</span> <span class="n">agreed_all</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">rng</span><span class="o">.</span><span class="n">permutation</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">agreed_all</span><span class="p">))[:</span><span class="n">take</span><span class="p">])]</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span>
+        <span class="n">ab_group</span><span class="o">=</span><span class="s2">&quot;agreed&quot;</span><span class="p">,</span> <span class="n">ab_prob</span><span class="o">=</span><span class="n">take</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">agreed_all</span><span class="p">))</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">disputed</span><span class="p">,</span> <span class="n">agreed</span><span class="p">])</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="n">rng</span><span class="o">.</span><span class="n">permutation</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">out</span><span class="p">))]</span>
+    <span class="n">out</span><span class="o">.</span><span class="n">attrs</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">disputed</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">disputed</span><span class="p">),</span> <span class="n">agreed</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">agreed_all</span><span class="p">),</span> <span class="n">drawn_agreed</span><span class="o">=</span><span class="n">take</span><span class="p">,</span> <span class="n">half</span><span class="o">=</span><span class="n">half</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span><span class="o">.</span><span class="n">reset_index</span><span class="p">()</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-theatre_ab_check-write_sheet">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">write_sheet</span><span class="p">(</span><span class="n">drawn</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="o">=</span><span class="n">SHEET</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span></pre>
+<div class="fndoc"><p>The draw, frozen: each clause's candidate readings as drawn (JSON), group and probability.
+Refuses to replace a sheet whose half already has answers in the sample sheets.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/reference_tools/places/theatre_rule_audit.py</code> <code>utils/reference_tools/places/theatre_settlement_check.py</code></p>
+<details><summary>source · lines 151–165 (15 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">write_sheet</span><span class="p">(</span><span class="n">drawn</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">path</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">SHEET</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The draw, frozen: each clause&#39;s candidate readings as drawn (JSON), group and probability.</span>
+<span class="sd">    Refuses to replace a sheet whose half already has answers in the sample sheets.&quot;&quot;&quot;</span>
+    <span class="n">sheet</span> <span class="o">=</span> <span class="n">drawn</span><span class="p">[[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">,</span> <span class="s2">&quot;sample&quot;</span><span class="p">,</span> <span class="s2">&quot;ab_group&quot;</span><span class="p">,</span> <span class="s2">&quot;ab_prob&quot;</span><span class="p">,</span> <span class="s2">&quot;n_readings&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">sheet</span><span class="p">[</span><span class="s2">&quot;half&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">drawn</span><span class="o">.</span><span class="n">attrs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;half&quot;</span><span class="p">,</span> <span class="s2">&quot;calibration&quot;</span><span class="p">)</span>
+    <span class="n">sheet</span><span class="p">[</span><span class="s2">&quot;candidates&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">drawn</span><span class="p">[</span><span class="s2">&quot;candidates&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">c</span><span class="p">:</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">ensure_ascii</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="n">old</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="n">answered</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span><span class="o">.</span><span class="n">union</span><span class="p">(</span><span class="o">*</span><span class="p">[</span><span class="nb">set</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">s</span><span class="p">[</span><span class="s2">&quot;v_source&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">eq</span><span class="p">(</span><span class="s2">&quot;ab&quot;</span><span class="p">),</span> <span class="s2">&quot;clause_key&quot;</span><span class="p">])</span> <span class="k">if</span> <span class="s2">&quot;v_source&quot;</span> <span class="ow">in</span> <span class="n">s</span> <span class="k">else</span> <span class="nb">set</span><span class="p">()</span>
+                                 <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">ra</span><span class="o">.</span><span class="n">load_samples</span><span class="p">()</span><span class="o">.</span><span class="n">values</span><span class="p">()])</span>
+        <span class="k">if</span> <span class="n">answered</span> <span class="o">&amp;</span> <span class="nb">set</span><span class="p">(</span><span class="n">old</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">]):</span>
+            <span class="k">raise</span> <span class="ne">FileExistsError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">path</span><span class="si">}</span><span class="s2">: some of its clauses are answered; it is not redrawn&quot;</span><span class="p">)</span>
+        <span class="n">sheet</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">old</span><span class="p">[</span><span class="n">old</span><span class="p">[</span><span class="s2">&quot;half&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="n">sheet</span><span class="p">[</span><span class="s2">&quot;half&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">iat</span><span class="p">[</span><span class="mi">0</span><span class="p">]],</span> <span class="n">sheet</span><span class="p">],</span> <span class="n">ignore_index</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">sheet</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-theatre_ab_check-page_items">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">page_items</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="o">=</span><span class="n">SHEET</span><span class="p">,</span> <span class="n">half</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;calibration&#39;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 187–208 (22 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">page_items</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">SHEET</span><span class="p">,</span> <span class="n">half</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;calibration&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+    <span class="n">sheet</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">sheet</span> <span class="o">=</span> <span class="n">sheet</span><span class="p">[</span><span class="n">sheet</span><span class="p">[</span><span class="s2">&quot;half&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">half</span><span class="p">]</span>
+    <span class="n">clauses</span> <span class="o">=</span> <span class="n">atm</span><span class="o">.</span><span class="n">load_clauses</span><span class="p">()</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="n">clauses</span><span class="p">[</span><span class="n">clauses</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">sheet</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">])]</span>
+    <span class="n">ctx</span> <span class="o">=</span> <span class="n">atm</span><span class="o">.</span><span class="n">add_context</span><span class="p">(</span><span class="n">rows</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">open_kind</span><span class="o">=</span><span class="s2">&quot;x&quot;</span><span class="p">))</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)</span>
+    <span class="n">items</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">rng</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">default_rng</span><span class="p">(</span><span class="n">SEED</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">sheet</span><span class="o">.</span><span class="n">itertuples</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">)):</span>
+        <span class="n">c</span> <span class="o">=</span> <span class="n">ctx</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">r</span><span class="o">.</span><span class="n">clause_key</span><span class="p">]</span>
+        <span class="n">cands</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">candidates</span><span class="p">)</span>
+        <span class="c1"># in a fixed random order, so the first choice is not the majority&#39;s reading</span>
+        <span class="n">cands</span> <span class="o">=</span> <span class="p">[</span><span class="n">cands</span><span class="p">[</span><span class="n">j</span><span class="p">]</span> <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="n">rng</span><span class="o">.</span><span class="n">permutation</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">cands</span><span class="p">))]</span>
+        <span class="n">items</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;i&quot;</span><span class="p">:</span> <span class="n">i</span><span class="p">,</span> <span class="s2">&quot;key&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">clause_key</span><span class="p">,</span> <span class="s2">&quot;sample&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">sample</span><span class="p">,</span> <span class="s2">&quot;group&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">ab_group</span><span class="p">,</span>
+                      <span class="s2">&quot;place&quot;</span><span class="p">:</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;place&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">c</span><span class="p">[</span><span class="s2">&quot;place&quot;</span><span class="p">],</span> <span class="nb">str</span><span class="p">)</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+                      <span class="s2">&quot;ensemble&quot;</span><span class="p">:</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;ensemble&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">c</span><span class="p">[</span><span class="s2">&quot;ensemble&quot;</span><span class="p">],</span> <span class="nb">str</span><span class="p">)</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+                      <span class="s2">&quot;context&quot;</span><span class="p">:</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;context&quot;</span><span class="p">],</span> <span class="s2">&quot;clause&quot;</span><span class="p">:</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;text&quot;</span><span class="p">],</span> <span class="s2">&quot;glossary&quot;</span><span class="p">:</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;glossary&quot;</span><span class="p">]</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+                      <span class="s2">&quot;date_raw&quot;</span><span class="p">:</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;date_raw&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">c</span><span class="p">[</span><span class="s2">&quot;date_raw&quot;</span><span class="p">],</span> <span class="nb">str</span><span class="p">)</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+                      <span class="s2">&quot;years_inside&quot;</span><span class="p">:</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;years_inside&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">c</span><span class="p">[</span><span class="s2">&quot;years_inside&quot;</span><span class="p">],</span> <span class="nb">str</span><span class="p">)</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+                      <span class="s2">&quot;candidates&quot;</span><span class="p">:</span> <span class="p">[{</span><span class="o">**</span><span class="n">x</span><span class="p">,</span> <span class="s2">&quot;text&quot;</span><span class="p">:</span> <span class="n">_sentence</span><span class="p">(</span><span class="n">x</span><span class="p">),</span>
+                                      <span class="s2">&quot;who&quot;</span><span class="p">:</span> <span class="s2">&quot;, &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">READER_NAMES</span><span class="p">[</span><span class="n">n</span><span class="p">]</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">x</span><span class="p">[</span><span class="s2">&quot;readers&quot;</span><span class="p">])}</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">cands</span><span class="p">]})</span>
+    <span class="k">return</span> <span class="n">items</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-theatre_ab_check-build_page">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">build_page</span><span class="p">(</span><span class="n">out</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">half</span><span class="p">:</span> <span class="nb">str</span><span class="o">=</span><span class="s1">&#39;calibration&#39;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span></pre>
+<p class="calls"><b>Called by</b> <code>utils/reference_tools/places/theatre_rule_audit.py</code> <code>utils/reference_tools/places/theatre_settlement_check.py</code></p>
+<details><summary>source · lines 211–216 (6 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">build_page</span><span class="p">(</span><span class="n">out</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">half</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;calibration&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">page_items</span><span class="p">(</span><span class="n">half</span><span class="o">=</span><span class="n">half</span><span class="p">),</span> <span class="n">ensure_ascii</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;&lt;/&quot;</span><span class="p">,</span> <span class="s2">&quot;&lt;</span><span class="se">\\</span><span class="s2">/&quot;</span><span class="p">)</span>
+    <span class="n">template</span> <span class="o">=</span> <span class="n">TEMPLATE</span><span class="o">.</span><span class="n">read_text</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">template</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="n">PLACEHOLDER</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;template: one data placeholder&quot;</span>
+    <span class="n">Path</span><span class="p">(</span><span class="n">out</span><span class="p">)</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">template</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="n">PLACEHOLDER</span><span class="p">,</span> <span class="n">data</span><span class="p">),</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">Path</span><span class="p">(</span><span class="n">out</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-theatre_ab_check-fill_sheets">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">fill_sheets</span><span class="p">(</span><span class="n">documents</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">],</span> <span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="o">=</span><span class="n">SHEET</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span></pre>
+<div class="fndoc"><p>Write the page's answers (<code>choices/&amp;lt;clause_key&amp;gt;</code>) into the sample sheets' <code>v_*</code>
+columns, with <code>v_source = "ab"</code>, <code>ab_group</code> and <code>ab_prob</code>.  Only documents marked
+<code>ruled</code>; an answer is the four questions as the page resolved the choice.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/reference_tools/places/theatre_rule_audit.py</code></p>
+<details><summary>source · lines 219–247 (29 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">fill_sheets</span><span class="p">(</span><span class="n">documents</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">],</span> <span class="n">path</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">SHEET</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Write the page&#39;s answers (``choices/&lt;clause_key&gt;``) into the sample sheets&#39; ``v_*``</span>
+<span class="sd">    columns, with ``v_source = &quot;ab&quot;``, ``ab_group`` and ``ab_prob``.  Only documents marked</span>
+<span class="sd">    ``ruled``; an answer is the four questions as the page resolved the choice.&quot;&quot;&quot;</span>
+    <span class="n">drawn</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)</span>
+    <span class="n">counts</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">sheet_path</span> <span class="ow">in</span> <span class="n">ra</span><span class="o">.</span><span class="n">SAMPLES</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">sheet</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">sheet_path</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">column</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;v_source&quot;</span><span class="p">,</span> <span class="s2">&quot;ab_group&quot;</span><span class="p">,</span> <span class="s2">&quot;ab_prob&quot;</span><span class="p">,</span> <span class="s2">&quot;v_choice&quot;</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">column</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">sheet</span><span class="p">:</span>
+                <span class="n">sheet</span><span class="p">[</span><span class="n">column</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+        <span class="n">index</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">i</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">sheet</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">])}</span>
+        <span class="n">written</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">documents</span><span class="p">:</span>
+            <span class="n">key</span> <span class="o">=</span> <span class="n">d</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">d</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;ruled&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="n">key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">index</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">a</span> <span class="o">=</span> <span class="n">d</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;answer&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="p">{}</span>
+            <span class="n">i</span> <span class="o">=</span> <span class="n">index</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+            <span class="n">sheet</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="n">ra</span><span class="o">.</span><span class="n">VERDICT_COLUMNS</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span>
+                <span class="n">a</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;activity&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span> <span class="n">a</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;company&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span> <span class="n">a</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;performance&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span> <span class="n">a</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;date&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span>
+                <span class="o">*</span><span class="p">((</span><span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">a</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="ow">in</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">else</span> <span class="nb">str</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">a</span><span class="p">[</span><span class="n">k</span><span class="p">])))</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;start_lo&quot;</span><span class="p">,</span> <span class="s2">&quot;start_hi&quot;</span><span class="p">,</span> <span class="s2">&quot;end_lo&quot;</span><span class="p">,</span> <span class="s2">&quot;end_hi&quot;</span><span class="p">)),</span>
+                <span class="n">d</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;note&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">]</span>
+            <span class="n">sheet</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;v_source&quot;</span><span class="p">,</span> <span class="s2">&quot;ab_group&quot;</span><span class="p">,</span> <span class="s2">&quot;ab_prob&quot;</span><span class="p">,</span> <span class="s2">&quot;v_choice&quot;</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[</span>
+                <span class="s2">&quot;ab&quot;</span><span class="p">,</span> <span class="n">drawn</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">key</span><span class="p">,</span> <span class="s2">&quot;ab_group&quot;</span><span class="p">],</span> <span class="n">drawn</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">key</span><span class="p">,</span> <span class="s2">&quot;ab_prob&quot;</span><span class="p">],</span> <span class="n">d</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;choice&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)]</span>
+            <span class="n">written</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">sheet</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">sheet_path</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">)</span>
+        <span class="n">counts</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">written</span>
+    <span class="k">return</span> <span class="n">counts</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-reference_tools-places-theatre_ab_check-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-theatre_ab_check-SHEET"><pre class="sig">SHEET<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">&#39;reference&#39;</span> <span class="o">/</span> <span class="s1">&#39;places&#39;</span> <span class="o">/</span> <span class="s1">&#39;theatre_ab_check.csv&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-theatre_ab_check-TEMPLATE"><pre class="sig">TEMPLATE<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="s1">&#39;theatre_ab_check_page.html&#39;</span><span class="p">)</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-theatre_ab_check-PLACEHOLDER"><pre class="sig">PLACEHOLDER<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;/*__DATA__*/&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-theatre_ab_check-SEED"><pre class="sig">SEED<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">20261111</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-theatre_ab_check-N_AGREED"><pre class="sig">N_AGREED<span class="kind">int</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="mi">30</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-theatre_ab_check-MODEL_READERS"><pre class="sig">MODEL_READERS<span class="kind">list · 4 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">[</span><span class="s1">&#39;haiku&#39;</span><span class="p">,</span> <span class="s1">&#39;gemini&#39;</span><span class="p">,</span> <span class="s1">&#39;opus&#39;</span><span class="p">,</span> <span class="n">cons</span><span class="o">.</span><span class="n">JUDGE</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-theatre_ab_check-READER_NAMES"><pre class="sig">READER_NAMES<span class="kind">dict · 5 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">&#39;rules&#39;</span><span class="p">:</span> <span class="s1">&#39;the rules&#39;</span><span class="p">,</span> <span class="s1">&#39;haiku&#39;</span><span class="p">:</span> <span class="s1">&#39;Haiku&#39;</span><span class="p">,</span> <span class="s1">&#39;gemini&#39;</span><span class="p">:</span> <span class="s1">&#39;Gemini&#39;</span><span class="p">,</span> <span class="s1">&#39;opus&#39;</span><span class="p">:</span> <span class="s1">&#39;Opus (alone)&#39;</span><span class="p">,</span> <span class="n">cons</span><span class="o">.</span><span class="n">JUDGE</span><span class="p">:</span> <span class="s1">&#39;Opus (judge)&#39;</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/reference_tools/places/theatre_ab_check.py · 261 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span></pre></div></td><td class="code"><div><pre><span></span><span class="ch">#!/usr/bin/env python3</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">The clause check as a choice: *which reading is right?* (D-218).</span>
+
+<span class="sd">The four-question page (``theatre_rule_audit``, D-212) asks the author to answer every clause</span>
+<span class="sd">from scratch.  Once the rules and the models have read the clauses, most of that is wasted</span>
+<span class="sd">on clauses where every reader already agrees.  This page asks only:</span>
+
+<span class="sd">- on a clause where the readers **disagree** — about the four questions, Czech activity</span>
+<span class="sd">  (yes / hedged / German / no), a company, a performance, and an undated clause&#39;s date —</span>
+<span class="sd">  which of their readings is right: one click, or *neither* (the four questions open) or</span>
+<span class="sd">  *can&#39;t tell*;</span>
+<span class="sd">- on a random :data:`N_AGREED` of the clauses where **every reader agrees**: is that reading</span>
+<span class="sd">  right?  This measures the pipeline&#39;s blind spot, all readers wrong alike.</span>
+
+<span class="sd">**Readers** (from the cached replies, read-only): the rules (on a coded clause), Haiku,</span>
+<span class="sd">Gemini, Opus alone and the judge where it has read the clause.  A reader&#39;s answer is its</span>
+<span class="sd">reading run through :func:`amateur_theatre.code_clauses`, as everywhere in the pipeline.</span>
+<span class="sd">The page hides which reader gave which reading until the author has chosen.</span>
+
+<span class="sd">**Weights.**  Every disagreement of the half is shown, and the agreed clauses with a known</span>
+<span class="sd">probability (:data:`N_AGREED` / agreed clauses in the half), so each answer carries</span>
+<span class="sd">``ab_prob`` and :func:`theatre_rule_audit.verdict_rows` divides the clause&#39;s weight by it and</span>
+<span class="sd">stratifies the bootstrap by ``ab_group``: a two-phase sample, still weighted back to the</span>
+<span class="sd">populations.  The answers fill the same ``v_*`` columns as the four-question page.</span>
+
+<span class="sd">**What it costs in rigour:** the author chooses among the readers&#39; readings; *neither* exists,</span>
+<span class="sd">but a reading nobody proposed is less likely to be given than when ruling from scratch.  A</span>
+<span class="sd">dated clause&#39;s leading date is not asked (the readers do not re-date it).</span>
+
+<span class="sd">Usage::</span>
+
+<span class="sd">    python utils/reference_tools/places/theatre_ab_check.py draw [calibration|certification]</span>
+<span class="sd">    python utils/reference_tools/places/theatre_ab_check.py page OUT.html</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;0.1.0&quot;</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">))</span>
+<span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">parent</span><span class="p">))</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing</span><span class="w"> </span><span class="kn">import</span> <span class="n">amateur_theatre_consensus</span> <span class="k">as</span> <span class="n">cons</span>         <span class="c1"># noqa: E402</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing</span><span class="w"> </span><span class="kn">import</span> <span class="n">amateur_theatre_model</span> <span class="k">as</span> <span class="n">atm</span>              <span class="c1"># noqa: E402</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">theatre_rule_audit</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">ra</span>                                     <span class="c1"># noqa: E402</span>
+
+<span class="n">SHEET</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">&quot;reference&quot;</span> <span class="o">/</span> <span class="s2">&quot;places&quot;</span> <span class="o">/</span> <span class="s2">&quot;theatre_ab_check.csv&quot;</span>
+<span class="n">TEMPLATE</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">with_name</span><span class="p">(</span><span class="s2">&quot;theatre_ab_check_page.html&quot;</span><span class="p">)</span>
+<span class="n">PLACEHOLDER</span> <span class="o">=</span> <span class="s2">&quot;/*__DATA__*/&quot;</span>
+<span class="n">SEED</span> <span class="o">=</span> <span class="mi">20261111</span>
+<span class="n">N_AGREED</span> <span class="o">=</span> <span class="mi">30</span>
+<span class="n">MODEL_READERS</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;haiku&quot;</span><span class="p">,</span> <span class="s2">&quot;gemini&quot;</span><span class="p">,</span> <span class="s2">&quot;opus&quot;</span><span class="p">,</span> <span class="n">cons</span><span class="o">.</span><span class="n">JUDGE</span><span class="p">]</span>
+<span class="n">READER_NAMES</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;rules&quot;</span><span class="p">:</span> <span class="s2">&quot;the rules&quot;</span><span class="p">,</span> <span class="s2">&quot;haiku&quot;</span><span class="p">:</span> <span class="s2">&quot;Haiku&quot;</span><span class="p">,</span> <span class="s2">&quot;gemini&quot;</span><span class="p">:</span> <span class="s2">&quot;Gemini&quot;</span><span class="p">,</span> <span class="s2">&quot;opus&quot;</span><span class="p">:</span> <span class="s2">&quot;Opus (alone)&quot;</span><span class="p">,</span>
+                <span class="n">cons</span><span class="o">.</span><span class="n">JUDGE</span><span class="p">:</span> <span class="s2">&quot;Opus (judge)&quot;</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_answers</span><span class="p">(</span><span class="n">coded</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">readings</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The four questions&#39; answers from coded clause rows (index ``clause_key``); with</span>
+<span class="sd">    ``readings``, the date of an undated clause is the reading&#39;s.&quot;&quot;&quot;</span>
+    <span class="n">act</span> <span class="o">=</span> <span class="p">[</span><span class="n">ra</span><span class="o">.</span><span class="n">_activity_word</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">h</span><span class="p">,</span> <span class="n">g</span><span class="p">)</span> <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">h</span><span class="p">,</span> <span class="n">g</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">coded</span><span class="p">[</span><span class="s2">&quot;czech_activity&quot;</span><span class="p">],</span> <span class="n">coded</span><span class="p">[</span><span class="s2">&quot;hedged&quot;</span><span class="p">],</span> <span class="n">coded</span><span class="p">[</span><span class="s2">&quot;german&quot;</span><span class="p">])]</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">({</span><span class="s2">&quot;activity&quot;</span><span class="p">:</span> <span class="n">act</span><span class="p">,</span>
+                        <span class="s2">&quot;company&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">coded</span><span class="p">[</span><span class="s2">&quot;company&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">),</span> <span class="s2">&quot;yes&quot;</span><span class="p">,</span> <span class="s2">&quot;no&quot;</span><span class="p">),</span>
+                        <span class="s2">&quot;performance&quot;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">coded</span><span class="p">[</span><span class="s2">&quot;performance&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">),</span> <span class="s2">&quot;yes&quot;</span><span class="p">,</span> <span class="s2">&quot;no&quot;</span><span class="p">)},</span> <span class="n">index</span><span class="o">=</span><span class="n">coded</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;date&quot;</span><span class="p">],</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;years&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">undated</span> <span class="o">=</span> <span class="n">coded</span><span class="p">[</span><span class="s2">&quot;date_source&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">eq</span><span class="p">(</span><span class="s2">&quot;none&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">readings</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">coded</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">([])</span>
+    <span class="k">if</span> <span class="n">readings</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="n">readings</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">coded</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+        <span class="n">und</span> <span class="o">=</span> <span class="n">coded</span><span class="p">[</span><span class="s2">&quot;_undated&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">()</span>
+        <span class="n">form</span> <span class="o">=</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;date_form&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">und</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="n">given</span> <span class="o">=</span> <span class="n">form</span><span class="o">.</span><span class="n">notna</span><span class="p">()</span> <span class="o">&amp;</span> <span class="o">~</span><span class="n">form</span><span class="o">.</span><span class="n">isin</span><span class="p">([</span><span class="s2">&quot;none&quot;</span><span class="p">,</span> <span class="s2">&quot;leading&quot;</span><span class="p">])</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">und</span> <span class="o">&amp;</span> <span class="o">~</span><span class="n">given</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span> <span class="s2">&quot;date&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;none&quot;</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">given</span><span class="p">,</span> <span class="s2">&quot;date&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;given&quot;</span>
+        <span class="n">years</span> <span class="o">=</span> <span class="n">r</span><span class="p">[[</span><span class="s2">&quot;start_lo&quot;</span><span class="p">,</span> <span class="s2">&quot;start_hi&quot;</span><span class="p">,</span> <span class="s2">&quot;end_lo&quot;</span><span class="p">,</span> <span class="s2">&quot;end_hi&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span>
+            <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="s2">&quot;/&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">else</span> <span class="nb">str</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">v</span><span class="p">))</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">x</span><span class="p">),</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">out</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">given</span><span class="p">,</span> <span class="s2">&quot;years&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">years</span><span class="p">[</span><span class="n">given</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">reader_answers</span><span class="p">(</span><span class="n">rows</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Each reader&#39;s answers on ``rows`` (coded clause rows of both samples), from the cache.&quot;&quot;&quot;</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="n">rows</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">_undated</span><span class="o">=</span><span class="n">rows</span><span class="p">[</span><span class="s2">&quot;date_source&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">eq</span><span class="p">(</span><span class="s2">&quot;none&quot;</span><span class="p">))</span>
+    <span class="n">stage</span> <span class="o">=</span> <span class="n">atm</span><span class="o">.</span><span class="n">add_context</span><span class="p">(</span><span class="n">rows</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">open_kind</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">rows</span><span class="p">[</span><span class="s2">&quot;needs_model&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">),</span> <span class="s2">&quot;open&quot;</span><span class="p">,</span> <span class="s2">&quot;coded&quot;</span><span class="p">)))</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;rules&quot;</span><span class="p">:</span> <span class="n">_answers</span><span class="p">(</span><span class="n">rows</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="o">~</span><span class="n">rows</span><span class="p">[</span><span class="s2">&quot;needs_model&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">)</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">()])}</span>
+    <span class="n">readings</span> <span class="o">=</span> <span class="p">{</span><span class="n">r</span><span class="p">:</span> <span class="n">atm</span><span class="o">.</span><span class="n">readings_table</span><span class="p">(</span><span class="n">stage</span><span class="p">,</span> <span class="n">atm</span><span class="o">.</span><span class="n">build_queue</span><span class="p">(</span><span class="n">stage</span><span class="p">,</span> <span class="n">r</span><span class="p">))</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">cons</span><span class="o">.</span><span class="n">PIPELINE</span><span class="p">}</span>
+    <span class="n">readings</span><span class="p">[</span><span class="s2">&quot;opus&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">atm</span><span class="o">.</span><span class="n">readings_table</span><span class="p">(</span><span class="n">stage</span><span class="p">,</span> <span class="n">atm</span><span class="o">.</span><span class="n">build_queue</span><span class="p">(</span><span class="n">stage</span><span class="p">,</span> <span class="s2">&quot;opus&quot;</span><span class="p">))</span>
+    <span class="n">table</span> <span class="o">=</span> <span class="n">cons</span><span class="o">.</span><span class="n">disputes</span><span class="p">(</span><span class="n">stage</span><span class="p">,</span> <span class="p">{</span><span class="n">r</span><span class="p">:</span> <span class="n">readings</span><span class="p">[</span><span class="n">r</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">cons</span><span class="o">.</span><span class="n">PIPELINE</span><span class="p">})</span>
+    <span class="n">disputed</span> <span class="o">=</span> <span class="n">table</span><span class="o">.</span><span class="n">index</span><span class="p">[</span><span class="n">table</span><span class="p">[</span><span class="s2">&quot;disputed&quot;</span><span class="p">]]</span>
+    <span class="n">others</span> <span class="o">=</span> <span class="n">cons</span><span class="o">.</span><span class="n">judge_others</span><span class="p">(</span><span class="n">disputed</span><span class="p">,</span> <span class="p">{</span><span class="n">r</span><span class="p">:</span> <span class="n">readings</span><span class="p">[</span><span class="n">r</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">cons</span><span class="o">.</span><span class="n">PIPELINE</span><span class="p">},</span> <span class="n">stage</span><span class="p">)</span>
+    <span class="n">judge_q</span> <span class="o">=</span> <span class="n">atm</span><span class="o">.</span><span class="n">build_queue</span><span class="p">(</span><span class="n">stage</span><span class="p">[</span><span class="n">stage</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">disputed</span><span class="p">)],</span> <span class="n">cons</span><span class="o">.</span><span class="n">JUDGE</span><span class="p">,</span> <span class="n">others</span><span class="o">=</span><span class="n">others</span><span class="p">)</span>
+    <span class="n">readings</span><span class="p">[</span><span class="n">cons</span><span class="o">.</span><span class="n">JUDGE</span><span class="p">]</span> <span class="o">=</span> <span class="n">atm</span><span class="o">.</span><span class="n">readings_table</span><span class="p">(</span><span class="n">stage</span><span class="p">,</span> <span class="n">judge_q</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">MODEL_READERS</span><span class="p">:</span>
+        <span class="n">valid</span> <span class="o">=</span> <span class="n">readings</span><span class="p">[</span><span class="n">name</span><span class="p">][</span><span class="n">readings</span><span class="p">[</span><span class="n">name</span><span class="p">][</span><span class="s2">&quot;valid&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">)]</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">readings</span><span class="p">[</span><span class="n">name</span><span class="p">])</span> <span class="k">else</span> <span class="n">readings</span><span class="p">[</span><span class="n">name</span><span class="p">]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">len</span><span class="p">(</span><span class="n">valid</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="n">read</span> <span class="o">=</span> <span class="n">rows</span><span class="p">[</span><span class="n">rows</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">valid</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">])]</span>
+        <span class="n">coded</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">atm</span><span class="o">.</span><span class="n">apply_readings</span><span class="p">(</span><span class="n">g</span><span class="p">,</span> <span class="n">valid</span><span class="p">,</span> <span class="n">s</span><span class="p">)</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">clause_key</span><span class="o">=</span><span class="n">g</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">,</span>
+                                                                   <span class="n">_undated</span><span class="o">=</span><span class="n">g</span><span class="p">[</span><span class="s2">&quot;_undated&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">)</span>
+                           <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">read</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;source&quot;</span><span class="p">)])</span>
+        <span class="n">out</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">_answers</span><span class="p">(</span><span class="n">coded</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">,</span> <span class="n">drop</span><span class="o">=</span><span class="kc">False</span><span class="p">),</span> <span class="n">valid</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="n">coded</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">candidates</span><span class="p">(</span><span class="n">answers</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Per clause: the distinct readings (``candidates``, each with the readers that gave it).&quot;&quot;&quot;</span>
+    <span class="n">keys</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="nb">set</span><span class="p">()</span><span class="o">.</span><span class="n">union</span><span class="p">(</span><span class="o">*</span><span class="p">[</span><span class="n">a</span><span class="o">.</span><span class="n">index</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">answers</span><span class="o">.</span><span class="n">values</span><span class="p">()]))</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">keys</span><span class="p">:</span>
+        <span class="n">found</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">tuple</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">answers</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">a</span><span class="o">.</span><span class="n">index</span><span class="p">:</span>
+                <span class="n">r</span> <span class="o">=</span> <span class="n">a</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+                <span class="n">found</span><span class="o">.</span><span class="n">setdefault</span><span class="p">((</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;activity&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;company&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;performance&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;date&quot;</span><span class="p">],</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;years&quot;</span><span class="p">]),</span> <span class="p">[])</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+        <span class="n">cands</span> <span class="o">=</span> <span class="p">[{</span><span class="s2">&quot;activity&quot;</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="s2">&quot;company&quot;</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="s2">&quot;performance&quot;</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="s2">&quot;date&quot;</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="mi">3</span><span class="p">],</span> <span class="s2">&quot;years&quot;</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="mi">4</span><span class="p">],</span> <span class="s2">&quot;readers&quot;</span><span class="p">:</span> <span class="n">rs</span><span class="p">}</span>
+                 <span class="k">for</span> <span class="n">t</span><span class="p">,</span> <span class="n">rs</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">found</span><span class="o">.</span><span class="n">items</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">kv</span><span class="p">:</span> <span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">kv</span><span class="p">[</span><span class="mi">1</span><span class="p">]))]</span>
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;clause_key&quot;</span><span class="p">:</span> <span class="n">key</span><span class="p">,</span> <span class="s2">&quot;n_readings&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">cands</span><span class="p">),</span> <span class="s2">&quot;candidates&quot;</span><span class="p">:</span> <span class="n">cands</span><span class="p">,</span>
+                     <span class="s2">&quot;readers&quot;</span><span class="p">:</span> <span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">c</span><span class="p">[</span><span class="s2">&quot;readers&quot;</span><span class="p">])</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cands</span><span class="p">)})</span>
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">draw</span><span class="p">(</span><span class="n">half</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;calibration&quot;</span><span class="p">,</span> <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">SEED</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Every disagreement of ``half`` and :data:`N_AGREED` agreed clauses, drawn at random, with</span>
+<span class="sd">    ``ab_group`` and ``ab_prob``; shuffled.&quot;&quot;&quot;</span>
+    <span class="n">samples</span> <span class="o">=</span> <span class="n">ra</span><span class="o">.</span><span class="n">load_samples</span><span class="p">()</span>
+    <span class="n">sample_of</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">s</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">s</span><span class="p">[</span><span class="s2">&quot;half&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">half</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">sample</span><span class="o">=</span><span class="n">n</span><span class="p">)</span> <span class="k">for</span> <span class="n">n</span><span class="p">,</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">samples</span><span class="o">.</span><span class="n">items</span><span class="p">()])</span>
+    <span class="n">clauses</span> <span class="o">=</span> <span class="n">atm</span><span class="o">.</span><span class="n">load_clauses</span><span class="p">()</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="n">clauses</span><span class="p">[</span><span class="n">clauses</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">sample_of</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">])]</span>
+    <span class="n">c</span> <span class="o">=</span> <span class="n">candidates</span><span class="p">(</span><span class="n">reader_answers</span><span class="p">(</span><span class="n">rows</span><span class="p">))</span>
+    <span class="n">c</span><span class="p">[</span><span class="s2">&quot;sample&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">sample_of</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)[</span><span class="s2">&quot;sample&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+    <span class="n">c</span> <span class="o">=</span> <span class="n">c</span><span class="p">[</span><span class="n">c</span><span class="p">[</span><span class="s2">&quot;readers&quot;</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="mi">2</span><span class="p">]</span>                         <span class="c1"># a clause with one reader has nothing to compare</span>
+    <span class="n">disputed</span> <span class="o">=</span> <span class="n">c</span><span class="p">[</span><span class="n">c</span><span class="p">[</span><span class="s2">&quot;n_readings&quot;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">ab_group</span><span class="o">=</span><span class="s2">&quot;disputed&quot;</span><span class="p">,</span> <span class="n">ab_prob</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
+    <span class="n">agreed_all</span> <span class="o">=</span> <span class="n">c</span><span class="p">[</span><span class="n">c</span><span class="p">[</span><span class="s2">&quot;n_readings&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="mi">1</span><span class="p">]</span>
+    <span class="n">rng</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">default_rng</span><span class="p">(</span><span class="n">seed</span><span class="p">)</span>
+    <span class="n">take</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">N_AGREED</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">agreed_all</span><span class="p">))</span>
+    <span class="n">agreed</span> <span class="o">=</span> <span class="n">agreed_all</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">rng</span><span class="o">.</span><span class="n">permutation</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">agreed_all</span><span class="p">))[:</span><span class="n">take</span><span class="p">])]</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span>
+        <span class="n">ab_group</span><span class="o">=</span><span class="s2">&quot;agreed&quot;</span><span class="p">,</span> <span class="n">ab_prob</span><span class="o">=</span><span class="n">take</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">agreed_all</span><span class="p">))</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">disputed</span><span class="p">,</span> <span class="n">agreed</span><span class="p">])</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="n">rng</span><span class="o">.</span><span class="n">permutation</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">out</span><span class="p">))]</span>
+    <span class="n">out</span><span class="o">.</span><span class="n">attrs</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">disputed</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">disputed</span><span class="p">),</span> <span class="n">agreed</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">agreed_all</span><span class="p">),</span> <span class="n">drawn_agreed</span><span class="o">=</span><span class="n">take</span><span class="p">,</span> <span class="n">half</span><span class="o">=</span><span class="n">half</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span><span class="o">.</span><span class="n">reset_index</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">write_sheet</span><span class="p">(</span><span class="n">drawn</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">path</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">SHEET</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The draw, frozen: each clause&#39;s candidate readings as drawn (JSON), group and probability.</span>
+<span class="sd">    Refuses to replace a sheet whose half already has answers in the sample sheets.&quot;&quot;&quot;</span>
+    <span class="n">sheet</span> <span class="o">=</span> <span class="n">drawn</span><span class="p">[[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">,</span> <span class="s2">&quot;sample&quot;</span><span class="p">,</span> <span class="s2">&quot;ab_group&quot;</span><span class="p">,</span> <span class="s2">&quot;ab_prob&quot;</span><span class="p">,</span> <span class="s2">&quot;n_readings&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="n">sheet</span><span class="p">[</span><span class="s2">&quot;half&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">drawn</span><span class="o">.</span><span class="n">attrs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;half&quot;</span><span class="p">,</span> <span class="s2">&quot;calibration&quot;</span><span class="p">)</span>
+    <span class="n">sheet</span><span class="p">[</span><span class="s2">&quot;candidates&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">drawn</span><span class="p">[</span><span class="s2">&quot;candidates&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">c</span><span class="p">:</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">ensure_ascii</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+        <span class="n">old</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="n">answered</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span><span class="o">.</span><span class="n">union</span><span class="p">(</span><span class="o">*</span><span class="p">[</span><span class="nb">set</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">s</span><span class="p">[</span><span class="s2">&quot;v_source&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">eq</span><span class="p">(</span><span class="s2">&quot;ab&quot;</span><span class="p">),</span> <span class="s2">&quot;clause_key&quot;</span><span class="p">])</span> <span class="k">if</span> <span class="s2">&quot;v_source&quot;</span> <span class="ow">in</span> <span class="n">s</span> <span class="k">else</span> <span class="nb">set</span><span class="p">()</span>
+                                 <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">ra</span><span class="o">.</span><span class="n">load_samples</span><span class="p">()</span><span class="o">.</span><span class="n">values</span><span class="p">()])</span>
+        <span class="k">if</span> <span class="n">answered</span> <span class="o">&amp;</span> <span class="nb">set</span><span class="p">(</span><span class="n">old</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">]):</span>
+            <span class="k">raise</span> <span class="ne">FileExistsError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">path</span><span class="si">}</span><span class="s2">: some of its clauses are answered; it is not redrawn&quot;</span><span class="p">)</span>
+        <span class="n">sheet</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">old</span><span class="p">[</span><span class="n">old</span><span class="p">[</span><span class="s2">&quot;half&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="n">sheet</span><span class="p">[</span><span class="s2">&quot;half&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">iat</span><span class="p">[</span><span class="mi">0</span><span class="p">]],</span> <span class="n">sheet</span><span class="p">],</span> <span class="n">ignore_index</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">sheet</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_sentence</span><span class="p">(</span><span class="n">c</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">act</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;yes&quot;</span><span class="p">:</span> <span class="s2">&quot;Czech theatre here&quot;</span><span class="p">,</span> <span class="s2">&quot;hedged&quot;</span><span class="p">:</span> <span class="s2">&quot;Czech theatre here, hedged (patrně, snad, ?)&quot;</span><span class="p">,</span>
+           <span class="s2">&quot;german&quot;</span><span class="p">:</span> <span class="s2">&quot;German theatre, not Czech&quot;</span><span class="p">,</span> <span class="s2">&quot;no&quot;</span><span class="p">:</span> <span class="s2">&quot;No Czech theatre&quot;</span><span class="p">}[</span><span class="n">c</span><span class="p">[</span><span class="s2">&quot;activity&quot;</span><span class="p">]]</span>
+    <span class="n">parts</span> <span class="o">=</span> <span class="p">[</span><span class="n">act</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;activity&quot;</span><span class="p">]</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;yes&quot;</span><span class="p">,</span> <span class="s2">&quot;hedged&quot;</span><span class="p">,</span> <span class="s2">&quot;german&quot;</span><span class="p">):</span>
+        <span class="n">parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;a company existing over time&quot;</span> <span class="k">if</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;company&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;yes&quot;</span> <span class="k">else</span> <span class="s2">&quot;no company&quot;</span><span class="p">)</span>
+        <span class="n">parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;a performance or a number of plays&quot;</span> <span class="k">if</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;performance&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;yes&quot;</span> <span class="k">else</span> <span class="s2">&quot;no performance&quot;</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;company&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;yes&quot;</span> <span class="ow">or</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;performance&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;yes&quot;</span><span class="p">:</span>
+        <span class="n">parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot; and &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">p</span> <span class="k">for</span> <span class="n">p</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="p">((</span><span class="s2">&quot;a company&quot;</span><span class="p">,</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;company&quot;</span><span class="p">]),</span> <span class="p">(</span><span class="s2">&quot;a performance&quot;</span><span class="p">,</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;performance&quot;</span><span class="p">]))</span> <span class="k">if</span> <span class="n">v</span> <span class="o">==</span> <span class="s2">&quot;yes&quot;</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;date&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;none&quot;</span><span class="p">:</span>
+        <span class="n">parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;no usable date&quot;</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;date&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;given&quot;</span><span class="p">:</span>
+        <span class="n">s_lo</span><span class="p">,</span> <span class="n">s_hi</span><span class="p">,</span> <span class="n">e_lo</span><span class="p">,</span> <span class="n">e_hi</span> <span class="o">=</span> <span class="p">(</span><span class="n">c</span><span class="p">[</span><span class="s2">&quot;years&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">)</span> <span class="o">+</span> <span class="p">[</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">])[:</span><span class="mi">4</span><span class="p">]</span>
+        <span class="n">span</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">:</span> <span class="n">a</span> <span class="k">if</span> <span class="n">a</span> <span class="o">==</span> <span class="n">b</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">b</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">a</span><span class="si">}</span><span class="s2">–</span><span class="si">{</span><span class="n">b</span><span class="si">}</span><span class="s2">&quot;</span>            <span class="c1"># noqa: E731</span>
+        <span class="n">when</span> <span class="o">=</span> <span class="s2">&quot; to &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">x</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="p">(</span><span class="n">span</span><span class="p">(</span><span class="n">s_lo</span><span class="p">,</span> <span class="n">s_hi</span><span class="p">)</span> <span class="ow">and</span> <span class="sa">f</span><span class="s2">&quot;from </span><span class="si">{</span><span class="n">span</span><span class="p">(</span><span class="n">s_lo</span><span class="p">,</span><span class="w"> </span><span class="n">s_hi</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">span</span><span class="p">(</span><span class="n">e_lo</span><span class="p">,</span> <span class="n">e_hi</span><span class="p">)</span> <span class="ow">and</span> <span class="sa">f</span><span class="s2">&quot;until </span><span class="si">{</span><span class="n">span</span><span class="p">(</span><span class="n">e_lo</span><span class="p">,</span><span class="w"> </span><span class="n">e_hi</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">x</span><span class="p">)</span>
+        <span class="n">parts</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;dated </span><span class="si">{</span><span class="n">when</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">if</span> <span class="n">when</span> <span class="k">else</span> <span class="s2">&quot;dated&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="s2">&quot; · &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">page_items</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">SHEET</span><span class="p">,</span> <span class="n">half</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;calibration&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+    <span class="n">sheet</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">sheet</span> <span class="o">=</span> <span class="n">sheet</span><span class="p">[</span><span class="n">sheet</span><span class="p">[</span><span class="s2">&quot;half&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">half</span><span class="p">]</span>
+    <span class="n">clauses</span> <span class="o">=</span> <span class="n">atm</span><span class="o">.</span><span class="n">load_clauses</span><span class="p">()</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="n">clauses</span><span class="p">[</span><span class="n">clauses</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">sheet</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">])]</span>
+    <span class="n">ctx</span> <span class="o">=</span> <span class="n">atm</span><span class="o">.</span><span class="n">add_context</span><span class="p">(</span><span class="n">rows</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">open_kind</span><span class="o">=</span><span class="s2">&quot;x&quot;</span><span class="p">))</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)</span>
+    <span class="n">items</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">rng</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">default_rng</span><span class="p">(</span><span class="n">SEED</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">sheet</span><span class="o">.</span><span class="n">itertuples</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">)):</span>
+        <span class="n">c</span> <span class="o">=</span> <span class="n">ctx</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">r</span><span class="o">.</span><span class="n">clause_key</span><span class="p">]</span>
+        <span class="n">cands</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">candidates</span><span class="p">)</span>
+        <span class="c1"># in a fixed random order, so the first choice is not the majority&#39;s reading</span>
+        <span class="n">cands</span> <span class="o">=</span> <span class="p">[</span><span class="n">cands</span><span class="p">[</span><span class="n">j</span><span class="p">]</span> <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="n">rng</span><span class="o">.</span><span class="n">permutation</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">cands</span><span class="p">))]</span>
+        <span class="n">items</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;i&quot;</span><span class="p">:</span> <span class="n">i</span><span class="p">,</span> <span class="s2">&quot;key&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">clause_key</span><span class="p">,</span> <span class="s2">&quot;sample&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">sample</span><span class="p">,</span> <span class="s2">&quot;group&quot;</span><span class="p">:</span> <span class="n">r</span><span class="o">.</span><span class="n">ab_group</span><span class="p">,</span>
+                      <span class="s2">&quot;place&quot;</span><span class="p">:</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;place&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">c</span><span class="p">[</span><span class="s2">&quot;place&quot;</span><span class="p">],</span> <span class="nb">str</span><span class="p">)</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+                      <span class="s2">&quot;ensemble&quot;</span><span class="p">:</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;ensemble&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">c</span><span class="p">[</span><span class="s2">&quot;ensemble&quot;</span><span class="p">],</span> <span class="nb">str</span><span class="p">)</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+                      <span class="s2">&quot;context&quot;</span><span class="p">:</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;context&quot;</span><span class="p">],</span> <span class="s2">&quot;clause&quot;</span><span class="p">:</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;text&quot;</span><span class="p">],</span> <span class="s2">&quot;glossary&quot;</span><span class="p">:</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;glossary&quot;</span><span class="p">]</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+                      <span class="s2">&quot;date_raw&quot;</span><span class="p">:</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;date_raw&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">c</span><span class="p">[</span><span class="s2">&quot;date_raw&quot;</span><span class="p">],</span> <span class="nb">str</span><span class="p">)</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+                      <span class="s2">&quot;years_inside&quot;</span><span class="p">:</span> <span class="n">c</span><span class="p">[</span><span class="s2">&quot;years_inside&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">c</span><span class="p">[</span><span class="s2">&quot;years_inside&quot;</span><span class="p">],</span> <span class="nb">str</span><span class="p">)</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+                      <span class="s2">&quot;candidates&quot;</span><span class="p">:</span> <span class="p">[{</span><span class="o">**</span><span class="n">x</span><span class="p">,</span> <span class="s2">&quot;text&quot;</span><span class="p">:</span> <span class="n">_sentence</span><span class="p">(</span><span class="n">x</span><span class="p">),</span>
+                                      <span class="s2">&quot;who&quot;</span><span class="p">:</span> <span class="s2">&quot;, &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">READER_NAMES</span><span class="p">[</span><span class="n">n</span><span class="p">]</span> <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">x</span><span class="p">[</span><span class="s2">&quot;readers&quot;</span><span class="p">])}</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">cands</span><span class="p">]})</span>
+    <span class="k">return</span> <span class="n">items</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">build_page</span><span class="p">(</span><span class="n">out</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">half</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;calibration&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">page_items</span><span class="p">(</span><span class="n">half</span><span class="o">=</span><span class="n">half</span><span class="p">),</span> <span class="n">ensure_ascii</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;&lt;/&quot;</span><span class="p">,</span> <span class="s2">&quot;&lt;</span><span class="se">\\</span><span class="s2">/&quot;</span><span class="p">)</span>
+    <span class="n">template</span> <span class="o">=</span> <span class="n">TEMPLATE</span><span class="o">.</span><span class="n">read_text</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">template</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="n">PLACEHOLDER</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;template: one data placeholder&quot;</span>
+    <span class="n">Path</span><span class="p">(</span><span class="n">out</span><span class="p">)</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">template</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="n">PLACEHOLDER</span><span class="p">,</span> <span class="n">data</span><span class="p">),</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">Path</span><span class="p">(</span><span class="n">out</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">fill_sheets</span><span class="p">(</span><span class="n">documents</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">],</span> <span class="n">path</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">SHEET</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Write the page&#39;s answers (``choices/&lt;clause_key&gt;``) into the sample sheets&#39; ``v_*``</span>
+<span class="sd">    columns, with ``v_source = &quot;ab&quot;``, ``ab_group`` and ``ab_prob``.  Only documents marked</span>
+<span class="sd">    ``ruled``; an answer is the four questions as the page resolved the choice.&quot;&quot;&quot;</span>
+    <span class="n">drawn</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)</span>
+    <span class="n">counts</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">sheet_path</span> <span class="ow">in</span> <span class="n">ra</span><span class="o">.</span><span class="n">SAMPLES</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">sheet</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">sheet_path</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">column</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;v_source&quot;</span><span class="p">,</span> <span class="s2">&quot;ab_group&quot;</span><span class="p">,</span> <span class="s2">&quot;ab_prob&quot;</span><span class="p">,</span> <span class="s2">&quot;v_choice&quot;</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">column</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">sheet</span><span class="p">:</span>
+                <span class="n">sheet</span><span class="p">[</span><span class="n">column</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+        <span class="n">index</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">i</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">sheet</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">])}</span>
+        <span class="n">written</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="n">documents</span><span class="p">:</span>
+            <span class="n">key</span> <span class="o">=</span> <span class="n">d</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">d</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;ruled&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="n">key</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">index</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="n">a</span> <span class="o">=</span> <span class="n">d</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;answer&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="p">{}</span>
+            <span class="n">i</span> <span class="o">=</span> <span class="n">index</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+            <span class="n">sheet</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="n">ra</span><span class="o">.</span><span class="n">VERDICT_COLUMNS</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span>
+                <span class="n">a</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;activity&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span> <span class="n">a</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;company&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span> <span class="n">a</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;performance&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span> <span class="n">a</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;date&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">),</span>
+                <span class="o">*</span><span class="p">((</span><span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">a</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="ow">in</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">else</span> <span class="nb">str</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">a</span><span class="p">[</span><span class="n">k</span><span class="p">])))</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;start_lo&quot;</span><span class="p">,</span> <span class="s2">&quot;start_hi&quot;</span><span class="p">,</span> <span class="s2">&quot;end_lo&quot;</span><span class="p">,</span> <span class="s2">&quot;end_hi&quot;</span><span class="p">)),</span>
+                <span class="n">d</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;note&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">]</span>
+            <span class="n">sheet</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="p">[</span><span class="s2">&quot;v_source&quot;</span><span class="p">,</span> <span class="s2">&quot;ab_group&quot;</span><span class="p">,</span> <span class="s2">&quot;ab_prob&quot;</span><span class="p">,</span> <span class="s2">&quot;v_choice&quot;</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[</span>
+                <span class="s2">&quot;ab&quot;</span><span class="p">,</span> <span class="n">drawn</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">key</span><span class="p">,</span> <span class="s2">&quot;ab_group&quot;</span><span class="p">],</span> <span class="n">drawn</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">key</span><span class="p">,</span> <span class="s2">&quot;ab_prob&quot;</span><span class="p">],</span> <span class="n">d</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;choice&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)]</span>
+            <span class="n">written</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="n">sheet</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">sheet_path</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">)</span>
+        <span class="n">counts</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">written</span>
+    <span class="k">return</span> <span class="n">counts</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">2</span> <span class="ow">and</span> <span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;draw&quot;</span><span class="p">:</span>
+        <span class="n">half</span> <span class="o">=</span> <span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">2</span> <span class="k">else</span> <span class="s2">&quot;calibration&quot;</span>
+        <span class="n">d</span> <span class="o">=</span> <span class="n">draw</span><span class="p">(</span><span class="n">half</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">half</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">d</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s1">&#39;disputed&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> clauses where readers disagree, all shown; &quot;</span>
+              <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">d</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s1">&#39;agreed&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> agreed, </span><span class="si">{</span><span class="n">d</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s1">&#39;drawn_agreed&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> drawn&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">d</span><span class="o">.</span><span class="n">groupby</span><span class="p">([</span><span class="s2">&quot;sample&quot;</span><span class="p">,</span> <span class="s2">&quot;ab_group&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">size</span><span class="p">())</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;wrote&quot;</span><span class="p">,</span> <span class="n">write_sheet</span><span class="p">(</span><span class="n">d</span><span class="p">))</span>
+    <span class="k">elif</span> <span class="nb">len</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">)</span> <span class="o">==</span> <span class="mi">3</span> <span class="ow">and</span> <span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;page&quot;</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;wrote&quot;</span><span class="p">,</span> <span class="n">build_page</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">2</span><span class="p">])))</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">SystemExit</span><span class="p">(</span><span class="vm">__doc__</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>

@@ -1,0 +1,711 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Two readers, the rules, and a judge: the theatre model pass as a pipeline (D-217).</p><p class="tldr-facts"><b>Output &amp; support</b> · v0.2.0 · 189 lines · 6 public functions · 4 constants · used by <code>16_theatre_model_pass.ipynb</code>, <code>utils/reference_tools/places/theatre_ab_check.py</code> · <code>utils/parsing/amateur_theatre_consensus.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-parsing-amateur_theatre_consensus-reading_flags">reading_flags</a><a class="chip" href="#fn-utils-parsing-amateur_theatre_consensus-rules_flags">rules_flags</a><a class="chip" href="#fn-utils-parsing-amateur_theatre_consensus-disputes">disputes</a><a class="chip" href="#fn-utils-parsing-amateur_theatre_consensus-judge_others">judge_others</a><a class="chip" href="#fn-utils-parsing-amateur_theatre_consensus-consensus">consensus</a><a class="chip" href="#fn-utils-parsing-amateur_theatre_consensus-save_tables">save_tables</a><a class="chip const" href="#c-utils-parsing-amateur_theatre_consensus-PIPELINE">PIPELINE</a><a class="chip const" href="#c-utils-parsing-amateur_theatre_consensus-JUDGE">JUDGE</a><a class="chip const" href="#c-utils-parsing-amateur_theatre_consensus-FLAGS">FLAGS</a><a class="chip const" href="#c-utils-parsing-amateur_theatre_consensus-DATE_FIELDS">DATE_FIELDS</a></div>
+<h2>How it works</h2><p>The register's route reads every crop twice and lets Opus settle what the readers dispute;
+this does the same for the chronicle clauses:</p>
+<ol>
+<li><strong>read</strong> — every clause is read by two models independently (<code>PIPELINE</code>: Haiku 5.5 and
+   Gemini 3.8 Flash, <code>utils.parsing.amateur_theatre_model</code>), batched, the codebook cached;</li>
+<li><strong>compare</strong> (<code>disputes</code>) — on what reaches the measure only, never on the 22 event
+   types: Czech activity, whether it is certain (not hedged), a company, a performance, and
+   for an undated clause the interval it dates.  Each reading is put through
+   <code>amateur_theatre.code_clauses</code> exactly as the rules' cues are, so the codebook (D-141)
+   decides the flags.  On a clause the rules already coded, the rules are a third voter, at
+   no cost.  A reader with no valid reading makes the clause disputed;</li>
+<li><strong>judge</strong> (<code>judge_others</code>) — Opus 5.5 at high effort reads each disputed clause with
+   every reading in front of it, the readers anonymised (<code>Reader 1</code>, <code>Reader 2</code>, <code>Rules</code>),
+   and gives its own reading in the same schema;</li>
+<li><strong>settle</strong> (<code>consensus</code>) — an agreed clause takes the first reader's reading, a
+   disputed one the judge's; a disputed clause the judge has not read stays open.</li>
+</ol>
+<p>What the pipeline cannot see is two readers agreeing and both being wrong: the check
+samples (<code>theatre_rule_audit</code>) measure how often that happens.</p>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-parsing-amateur_theatre_consensus-reading_flags">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">reading_flags</span><span class="p">(</span><span class="n">rows</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">readings</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>One reader's flags on <code>rows</code> (coded clauses, keyed <code>clause_key</code>), its readings run
+through the codebook; NaN where it has no valid reading.  Index <code>clause_key</code>.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 50–58 (9 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">50</span>
+<span class="normal">51</span>
+<span class="normal">52</span>
+<span class="normal">53</span>
+<span class="normal">54</span>
+<span class="normal">55</span>
+<span class="normal">56</span>
+<span class="normal">57</span>
+<span class="normal">58</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">reading_flags</span><span class="p">(</span><span class="n">rows</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">readings</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;One reader&#39;s flags on ``rows`` (coded clauses, keyed ``clause_key``), its readings run</span>
+<span class="sd">    through the codebook; NaN where it has no valid reading.  Index ``clause_key``.&quot;&quot;&quot;</span>
+    <span class="n">valid</span> <span class="o">=</span> <span class="n">readings</span><span class="p">[</span><span class="n">readings</span><span class="p">[</span><span class="s2">&quot;valid&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">)]</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">readings</span><span class="p">)</span> <span class="k">else</span> <span class="n">readings</span>
+    <span class="n">read</span> <span class="o">=</span> <span class="n">rows</span><span class="p">[</span><span class="n">rows</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">valid</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">])]</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">valid</span><span class="p">)</span> <span class="k">else</span> <span class="n">rows</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">parts</span> <span class="o">=</span> <span class="p">[</span><span class="n">atm</span><span class="o">.</span><span class="n">apply_readings</span><span class="p">(</span><span class="n">g</span><span class="p">,</span> <span class="n">valid</span><span class="p">,</span> <span class="n">s</span><span class="p">)</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">clause_key</span><span class="o">=</span><span class="n">g</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">)</span>
+             <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">read</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;source&quot;</span><span class="p">)]</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">_flags</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">))</span> <span class="k">if</span> <span class="n">parts</span> <span class="k">else</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="n">FLAGS</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">rows</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;float&quot;</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-amateur_theatre_consensus-rules_flags">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">rules_flags</span><span class="p">(</span><span class="n">rows</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>The rules' flags on <code>rows</code>; NaN on a clause the rules left to the model.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 61–65 (5 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">61</span>
+<span class="normal">62</span>
+<span class="normal">63</span>
+<span class="normal">64</span>
+<span class="normal">65</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">rules_flags</span><span class="p">(</span><span class="n">rows</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The rules&#39; flags on ``rows``; NaN on a clause the rules left to the model.&quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">_flags</span><span class="p">(</span><span class="n">rows</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">))</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;float&quot;</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="n">rows</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)[</span><span class="s2">&quot;needs_model&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">)]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-amateur_theatre_consensus-disputes">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">disputes</span><span class="p">(</span><span class="n">rows</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">readings</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">],</span> <span class="n">use_rules</span><span class="p">:</span> <span class="nb">bool</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>Per clause of <code>rows</code>: each voter's flags, and whether they dispute (<code>disputed</code>) and on
+what (<code>on</code>).  Voters: the readers of <code>readings</code> and, on a clause the rules coded, the
+rules.  A missing reading is a dispute.  An undated clause is disputed also on its interval.</p></div>
+<p class="calls"><b>Called by</b> <code>15_frozen_run.ipynb</code> <code>15b_rulings_into_the_runs.ipynb</code> <code>16_theatre_model_pass.ipynb</code> <code>tests/test_theatre_consensus.py</code> <code>tests/test_verify_test_b.py</code> <code>utils/lexikon_1910/run_e1b_second_reader.py</code> <code>utils/lexikon_1910/run_frozen.py</code> <code>utils/lexikon_1910/run_verify_test_b.py</code> <code>utils/reference_tools/places/theatre_ab_check.py</code></p>
+<details><summary>source · lines 78–108 (31 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">disputes</span><span class="p">(</span><span class="n">rows</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">readings</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">],</span> <span class="n">use_rules</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Per clause of ``rows``: each voter&#39;s flags, and whether they dispute (``disputed``) and on</span>
+<span class="sd">    what (``on``).  Voters: the readers of ``readings`` and, on a clause the rules coded, the</span>
+<span class="sd">    rules.  A missing reading is a dispute.  An undated clause is disputed also on its interval.&quot;&quot;&quot;</span>
+    <span class="n">keys</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Index</span><span class="p">(</span><span class="n">rows</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">])</span>
+    <span class="n">undated</span> <span class="o">=</span> <span class="n">rows</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)[</span><span class="s2">&quot;date_source&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">eq</span><span class="p">(</span><span class="s2">&quot;none&quot;</span><span class="p">)</span>
+    <span class="n">voters</span> <span class="o">=</span> <span class="p">{</span><span class="n">name</span><span class="p">:</span> <span class="n">reading_flags</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">table</span><span class="p">)</span> <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">table</span> <span class="ow">in</span> <span class="n">readings</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="k">if</span> <span class="n">use_rules</span><span class="p">:</span>
+        <span class="n">voters</span><span class="p">[</span><span class="s2">&quot;rules&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">rules_flags</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+    <span class="n">dates</span> <span class="o">=</span> <span class="p">{</span><span class="n">name</span><span class="p">:</span> <span class="n">_date_key</span><span class="p">(</span><span class="n">table</span><span class="p">,</span> <span class="n">keys</span><span class="p">)</span> <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">table</span> <span class="ow">in</span> <span class="n">readings</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="n">keys</span><span class="p">)</span>
+    <span class="n">on</span> <span class="o">=</span> <span class="p">[[]</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">keys</span><span class="p">))]</span>
+    <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">readings</span><span class="p">:</span>
+        <span class="n">missing</span> <span class="o">=</span> <span class="n">voters</span><span class="p">[</span><span class="n">name</span><span class="p">][</span><span class="n">FLAGS</span><span class="p">]</span><span class="o">.</span><span class="n">isna</span><span class="p">()</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">missing</span><span class="p">)[</span><span class="mi">0</span><span class="p">]:</span>
+            <span class="n">on</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;no reading: </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">flag</span> <span class="ow">in</span> <span class="n">FLAGS</span><span class="p">:</span>
+        <span class="n">values</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">({</span><span class="n">n</span><span class="p">:</span> <span class="n">v</span><span class="p">[</span><span class="n">flag</span><span class="p">]</span> <span class="k">for</span> <span class="n">n</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">voters</span><span class="o">.</span><span class="n">items</span><span class="p">()},</span> <span class="n">index</span><span class="o">=</span><span class="n">keys</span><span class="p">)</span>
+        <span class="n">out</span><span class="p">[</span><span class="n">flag</span> <span class="o">+</span> <span class="s2">&quot;_votes&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">values</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="k">lambda</span> <span class="n">r</span><span class="p">:</span> <span class="s2">&quot;|&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="k">else</span> <span class="nb">str</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">x</span><span class="p">))</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">r</span><span class="p">),</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">split</span> <span class="o">=</span> <span class="n">values</span><span class="o">.</span><span class="n">nunique</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">dropna</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">split</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">())[</span><span class="mi">0</span><span class="p">]:</span>
+            <span class="n">on</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">flag</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">readings</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="n">d</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">dates</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="n">keys</span><span class="p">)</span>
+        <span class="n">split</span> <span class="o">=</span> <span class="n">undated</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">keys</span><span class="p">)</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">()</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">d</span><span class="o">.</span><span class="n">nunique</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">dropna</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">split</span><span class="p">)[</span><span class="mi">0</span><span class="p">]:</span>
+            <span class="n">on</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;date&quot;</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;on&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;, &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">dict</span><span class="o">.</span><span class="n">fromkeys</span><span class="p">(</span><span class="n">x</span><span class="p">))</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">on</span><span class="p">]</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;disputed&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;on&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;voters&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;|&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">voters</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-amateur_theatre_consensus-judge_others">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">judge_others</span><span class="p">(</span><span class="n">disputed</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">Index</span><span class="p">,</span> <span class="n">readings</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">],</span> <span class="n">rows</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]</span></pre>
+<div class="fndoc"><p>For each disputed clause, the readings the judge weighs, anonymised and in a fixed order:
+<code>Reader 1</code> … for the models, <code>Rules</code> (event types and hedge) on a coded clause.</p></div>
+<p class="calls"><b>Called by</b> <code>16_theatre_model_pass.ipynb</code> <code>tests/test_theatre_consensus.py</code> <code>utils/reference_tools/places/theatre_ab_check.py</code></p>
+<details><summary>source · lines 111–131 (21 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">judge_others</span><span class="p">(</span><span class="n">disputed</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">Index</span><span class="p">,</span> <span class="n">readings</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">],</span> <span class="n">rows</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;For each disputed clause, the readings the judge weighs, anonymised and in a fixed order:</span>
+<span class="sd">    ``Reader 1`` … for the models, ``Rules`` (event types and hedge) on a coded clause.&quot;&quot;&quot;</span>
+    <span class="n">by</span> <span class="o">=</span> <span class="p">{</span><span class="n">name</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="n">t</span><span class="p">[</span><span class="s2">&quot;valid&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">)]</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">readings</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="n">coded</span> <span class="o">=</span> <span class="n">rows</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">disputed</span><span class="p">:</span>
+        <span class="n">others</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">name</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">readings</span><span class="p">,</span> <span class="n">start</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">by</span><span class="p">[</span><span class="n">name</span><span class="p">]</span><span class="o">.</span><span class="n">index</span><span class="p">:</span>
+                <span class="n">r</span> <span class="o">=</span> <span class="n">by</span><span class="p">[</span><span class="n">name</span><span class="p">]</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+                <span class="n">others</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;Reader </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;types&quot;</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;types&quot;</span><span class="p">],</span> <span class="s2">&quot;hedged&quot;</span><span class="p">:</span> <span class="nb">bool</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;hedged&quot;</span><span class="p">]),</span>
+                               <span class="s2">&quot;titles&quot;</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;titles&quot;</span><span class="p">],</span> <span class="o">**</span><span class="p">({</span><span class="n">k</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">DATE_FIELDS</span><span class="p">}</span> <span class="k">if</span> <span class="n">coded</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">key</span><span class="p">,</span> <span class="s2">&quot;date_source&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;none&quot;</span> <span class="k">else</span> <span class="p">{})})</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">others</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;Reader </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;types&quot;</span><span class="p">:</span> <span class="s2">&quot;(no reading)&quot;</span><span class="p">,</span> <span class="s2">&quot;hedged&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;titles&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">})</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">bool</span><span class="p">(</span><span class="n">coded</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">key</span><span class="p">,</span> <span class="s2">&quot;needs_model&quot;</span><span class="p">]):</span>
+            <span class="n">cues</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">coded</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">key</span><span class="p">,</span> <span class="s2">&quot;cues&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">coded</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">key</span><span class="p">,</span> <span class="s2">&quot;cues&quot;</span><span class="p">])</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;|&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">c</span><span class="p">]</span>
+            <span class="n">others</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;Rules&quot;</span><span class="p">,</span> <span class="s2">&quot;types&quot;</span><span class="p">:</span> <span class="s2">&quot;|&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cues</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;hedged&quot;</span><span class="p">,</span> <span class="s2">&quot;title&quot;</span><span class="p">)),</span>
+                           <span class="s2">&quot;hedged&quot;</span><span class="p">:</span> <span class="s2">&quot;hedged&quot;</span> <span class="ow">in</span> <span class="n">cues</span><span class="p">,</span> <span class="s2">&quot;titles&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">})</span>
+        <span class="n">out</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">others</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-amateur_theatre_consensus-consensus">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">consensus</span><span class="p">(</span><span class="n">table</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">readings</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">],</span> <span class="n">judged</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span></pre>
+<div class="fndoc"><p>The readings to apply: an agreed clause takes the first reader's reading (<code>status</code>
+<code>agreed</code>), a disputed one the judge's (<code>judged</code>); a disputed clause without a valid
+judge reading is left out (<code>open</code>: the rules stand, or the clause stays open).
+<code>attrs["status"]</code> counts the three.</p></div>
+<p class="calls"><b>Called by</b> <code>16_theatre_model_pass.ipynb</code> <code>17_recheck.ipynb</code> <code>tests/test_theatre_consensus.py</code> <code>utils/recheck/offices_reread.py</code> <code>utils/recheck/offices_reread_cz.py</code> <code>utils/recheck/offices_resplit.py</code></p>
+<details><summary>source · lines 134–150 (17 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">consensus</span><span class="p">(</span><span class="n">table</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">readings</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">],</span> <span class="n">judged</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The readings to apply: an agreed clause takes the first reader&#39;s reading (``status``</span>
+<span class="sd">    ``agreed``), a disputed one the judge&#39;s (``judged``); a disputed clause without a valid</span>
+<span class="sd">    judge reading is left out (``open``: the rules stand, or the clause stays open).</span>
+<span class="sd">    ``attrs[&quot;status&quot;]`` counts the three.&quot;&quot;&quot;</span>
+    <span class="n">first</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="nb">iter</span><span class="p">(</span><span class="n">readings</span><span class="p">))</span>
+    <span class="n">lead</span> <span class="o">=</span> <span class="n">readings</span><span class="p">[</span><span class="n">first</span><span class="p">][</span><span class="n">readings</span><span class="p">[</span><span class="n">first</span><span class="p">][</span><span class="s2">&quot;valid&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">)]</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)</span>
+    <span class="n">judge</span> <span class="o">=</span> <span class="p">(</span><span class="n">judged</span><span class="p">[</span><span class="n">judged</span><span class="p">[</span><span class="s2">&quot;valid&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">)]</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">judged</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">judged</span><span class="p">)</span>
+             <span class="k">else</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="n">lead</span><span class="o">.</span><span class="n">columns</span><span class="p">))</span>
+    <span class="n">agreed</span> <span class="o">=</span> <span class="n">table</span><span class="o">.</span><span class="n">index</span><span class="p">[</span><span class="o">~</span><span class="n">table</span><span class="p">[</span><span class="s2">&quot;disputed&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">intersection</span><span class="p">(</span><span class="n">lead</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+    <span class="n">settled</span> <span class="o">=</span> <span class="n">table</span><span class="o">.</span><span class="n">index</span><span class="p">[</span><span class="n">table</span><span class="p">[</span><span class="s2">&quot;disputed&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">intersection</span><span class="p">(</span><span class="n">judge</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">lead</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">agreed</span><span class="p">]</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">status</span><span class="o">=</span><span class="s2">&quot;agreed&quot;</span><span class="p">),</span> <span class="n">judge</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">settled</span><span class="p">]</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">status</span><span class="o">=</span><span class="s2">&quot;judged&quot;</span><span class="p">)])</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">reset_index</span><span class="p">()</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;index&quot;</span><span class="p">:</span> <span class="s2">&quot;clause_key&quot;</span><span class="p">})</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;reader&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;consensus&quot;</span>
+    <span class="n">out</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;agreed&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">agreed</span><span class="p">),</span> <span class="s2">&quot;judged&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">settled</span><span class="p">),</span>
+                           <span class="s2">&quot;open&quot;</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">table</span><span class="p">[</span><span class="s2">&quot;disputed&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">settled</span><span class="p">)}</span>
+    <span class="k">return</span> <span class="n">out</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-parsing-amateur_theatre_consensus-save_tables">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">save_tables</span><span class="p">(</span><span class="n">stage</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">rows</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">readings</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">],</span> <span class="n">table</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span> <span class="o">|</span> <span class="kc">None</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">final</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span> <span class="o">|</span> <span class="kc">None</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">pass_dir</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">Path</span><span class="p">]</span></pre>
+<div class="fndoc"><p>Every result of a stage written out (D-217; G&amp;S: keep every result of a slow step), under
+<code>pass_dir/tables/</code>:</p>
+<ul>
+<li><code>&amp;lt;stage&amp;gt;_readings_&amp;lt;reader&amp;gt;.csv</code> — each reader's readings as read, one row a clause, with
+  its validity, problems, tokens and cost, and the measure's flags the codebook makes of it
+  (<code>flag_czech_activity</code> …; NaN where the reading is not valid);</li>
+<li><code>&amp;lt;stage&amp;gt;_disputes.csv</code> — each clause's votes per flag, whether it is disputed and on what;</li>
+<li><code>&amp;lt;stage&amp;gt;_consensus.csv</code> — the readings the pipeline settles on, with <code>status</code>.</li>
+</ul>
+<p>Everything comes from the cached replies.  Into the shared reply folder only on a pass
+machine (<code>amateur_theatre_model.PASS_MACHINES</code>): two machines writing the same
+synced files make conflicted copies.</p></div>
+<p class="calls"><b>Called by</b> <code>16_theatre_model_pass.ipynb</code></p>
+<details><summary>source · lines 153–189 (37 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">save_tables</span><span class="p">(</span><span class="n">stage</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">rows</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">readings</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">],</span>
+                <span class="n">table</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">final</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                <span class="n">pass_dir</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">Path</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Every result of a stage written out (D-217; G&amp;S: keep every result of a slow step), under</span>
+<span class="sd">    ``pass_dir/tables/``:</span>
+
+<span class="sd">    - ``&lt;stage&gt;_readings_&lt;reader&gt;.csv`` — each reader&#39;s readings as read, one row a clause, with</span>
+<span class="sd">      its validity, problems, tokens and cost, and the measure&#39;s flags the codebook makes of it</span>
+<span class="sd">      (``flag_czech_activity`` …; NaN where the reading is not valid);</span>
+<span class="sd">    - ``&lt;stage&gt;_disputes.csv`` — each clause&#39;s votes per flag, whether it is disputed and on what;</span>
+<span class="sd">    - ``&lt;stage&gt;_consensus.csv`` — the readings the pipeline settles on, with ``status``.</span>
+
+<span class="sd">    Everything comes from the cached replies.  Into the shared reply folder only on a pass</span>
+<span class="sd">    machine (:data:`amateur_theatre_model.PASS_MACHINES`): two machines writing the same</span>
+<span class="sd">    synced files make conflicted copies.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">pass_dir</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">pass_dir</span> <span class="ow">or</span> <span class="n">atm</span><span class="o">.</span><span class="n">PASS_DIR</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">pass_dir</span> <span class="o">==</span> <span class="n">atm</span><span class="o">.</span><span class="n">PASS_DIR</span><span class="p">:</span>
+        <span class="n">atm</span><span class="o">.</span><span class="n">_pass_machine_guard</span><span class="p">(</span><span class="s2">&quot;writing the stage tables&quot;</span><span class="p">)</span>
+    <span class="n">out_dir</span> <span class="o">=</span> <span class="n">pass_dir</span> <span class="o">/</span> <span class="s2">&quot;tables&quot;</span>
+    <span class="n">out_dir</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">written</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">reader</span><span class="p">,</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">readings</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">if</span> <span class="n">t</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="ow">not</span> <span class="nb">len</span><span class="p">(</span><span class="n">t</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="n">flags</span> <span class="o">=</span> <span class="n">reading_flags</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">t</span><span class="p">)</span><span class="o">.</span><span class="n">add_prefix</span><span class="p">(</span><span class="s2">&quot;flag_&quot;</span><span class="p">)</span>
+        <span class="n">flat</span> <span class="o">=</span> <span class="n">t</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span><span class="n">flags</span><span class="p">,</span> <span class="n">left_on</span><span class="o">=</span><span class="s2">&quot;clause_key&quot;</span><span class="p">,</span> <span class="n">right_index</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;left&quot;</span><span class="p">,</span> <span class="n">validate</span><span class="o">=</span><span class="s2">&quot;1:1&quot;</span><span class="p">)</span>
+        <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">flat</span><span class="p">)</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">t</span><span class="p">),</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">reader</span><span class="si">}</span><span class="s2">: the flags merge changed the row count&quot;</span>
+        <span class="n">written</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">out_dir</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stage</span><span class="si">}</span><span class="s2">_readings_</span><span class="si">{</span><span class="n">reader</span><span class="si">}</span><span class="s2">.csv&quot;</span><span class="p">)</span>
+        <span class="n">flat</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">written</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">table</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">written</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">out_dir</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stage</span><span class="si">}</span><span class="s2">_disputes.csv&quot;</span><span class="p">)</span>
+        <span class="n">table</span><span class="o">.</span><span class="n">rename_axis</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">reset_index</span><span class="p">()</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">written</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">final</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">final</span><span class="p">):</span>
+        <span class="n">written</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">out_dir</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stage</span><span class="si">}</span><span class="s2">_consensus.csv&quot;</span><span class="p">)</span>
+        <span class="n">final</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">written</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">written</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-parsing-amateur_theatre_consensus-PIPELINE"><pre class="sig">PIPELINE<span class="kind">tuple · 2 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">(</span><span class="s1">&#39;haiku&#39;</span><span class="p">,</span> <span class="s1">&#39;gemini&#39;</span><span class="p">)</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-parsing-amateur_theatre_consensus-JUDGE"><pre class="sig">JUDGE<span class="kind">str</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="s1">&#39;opus_judge&#39;</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-parsing-amateur_theatre_consensus-FLAGS"><pre class="sig">FLAGS<span class="kind">list · 4 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">[</span><span class="s1">&#39;czech_activity&#39;</span><span class="p">,</span> <span class="s1">&#39;certain&#39;</span><span class="p">,</span> <span class="s1">&#39;company&#39;</span><span class="p">,</span> <span class="s1">&#39;performance&#39;</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-parsing-amateur_theatre_consensus-DATE_FIELDS"><pre class="sig">DATE_FIELDS<span class="kind">list · 5 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">[</span><span class="s1">&#39;date_form&#39;</span><span class="p">,</span> <span class="s1">&#39;start_lo&#39;</span><span class="p">,</span> <span class="s1">&#39;start_hi&#39;</span><span class="p">,</span> <span class="s1">&#39;end_lo&#39;</span><span class="p">,</span> <span class="s1">&#39;end_hi&#39;</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<h2>Used by</h2><p><code>16_theatre_model_pass.ipynb</code> <code>utils/reference_tools/places/theatre_ab_check.py</code></p>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<h2>Full source</h2><details><summary>utils/parsing/amateur_theatre_consensus.py · 189 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">&quot;&quot;&quot;Two readers, the rules, and a judge: the theatre model pass as a pipeline (D-217).</span>
+
+<span class="sd">The register&#39;s route reads every crop twice and lets Opus settle what the readers dispute;</span>
+<span class="sd">this does the same for the chronicle clauses:</span>
+
+<span class="sd">1. **read** — every clause is read by two models independently (``PIPELINE``: Haiku 5.5 and</span>
+<span class="sd">   Gemini 3.8 Flash, :mod:`utils.parsing.amateur_theatre_model`), batched, the codebook cached;</span>
+<span class="sd">2. **compare** (:func:`disputes`) — on what reaches the measure only, never on the 22 event</span>
+<span class="sd">   types: Czech activity, whether it is certain (not hedged), a company, a performance, and</span>
+<span class="sd">   for an undated clause the interval it dates.  Each reading is put through</span>
+<span class="sd">   :func:`amateur_theatre.code_clauses` exactly as the rules&#39; cues are, so the codebook (D-141)</span>
+<span class="sd">   decides the flags.  On a clause the rules already coded, the rules are a third voter, at</span>
+<span class="sd">   no cost.  A reader with no valid reading makes the clause disputed;</span>
+<span class="sd">3. **judge** (:func:`judge_others`) — Opus 5.5 at high effort reads each disputed clause with</span>
+<span class="sd">   every reading in front of it, the readers anonymised (``Reader 1``, ``Reader 2``, ``Rules``),</span>
+<span class="sd">   and gives its own reading in the same schema;</span>
+<span class="sd">4. **settle** (:func:`consensus`) — an agreed clause takes the first reader&#39;s reading, a</span>
+<span class="sd">   disputed one the judge&#39;s; a disputed clause the judge has not read stays open.</span>
+
+<span class="sd">What the pipeline cannot see is two readers agreeing and both being wrong: the check</span>
+<span class="sd">samples (``theatre_rule_audit``) measure how often that happens.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">&quot;0.2.0&quot;</span>   <span class="c1"># save_tables: every reader, the disputes, the consensus written out</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing</span><span class="w"> </span><span class="kn">import</span> <span class="n">amateur_theatre_model</span> <span class="k">as</span> <span class="n">atm</span>
+
+<span class="c1">#: The two readers and the judge.</span>
+<span class="n">PIPELINE</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;haiku&quot;</span><span class="p">,</span> <span class="s2">&quot;gemini&quot;</span><span class="p">)</span>
+<span class="n">JUDGE</span> <span class="o">=</span> <span class="s2">&quot;opus_judge&quot;</span>
+<span class="c1">#: What a reading is compared on: the flags the measure is built from.</span>
+<span class="n">FLAGS</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;czech_activity&quot;</span><span class="p">,</span> <span class="s2">&quot;certain&quot;</span><span class="p">,</span> <span class="s2">&quot;company&quot;</span><span class="p">,</span> <span class="s2">&quot;performance&quot;</span><span class="p">]</span>
+<span class="n">DATE_FIELDS</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;date_form&quot;</span><span class="p">,</span> <span class="s2">&quot;start_lo&quot;</span><span class="p">,</span> <span class="s2">&quot;start_hi&quot;</span><span class="p">,</span> <span class="s2">&quot;end_lo&quot;</span><span class="p">,</span> <span class="s2">&quot;end_hi&quot;</span><span class="p">]</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_flags</span><span class="p">(</span><span class="n">coded</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+    <span class="n">act</span> <span class="o">=</span> <span class="n">coded</span><span class="p">[</span><span class="s2">&quot;czech_activity&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">({</span><span class="s2">&quot;czech_activity&quot;</span><span class="p">:</span> <span class="n">act</span><span class="p">,</span> <span class="s2">&quot;certain&quot;</span><span class="p">:</span> <span class="n">act</span> <span class="o">&amp;</span> <span class="o">~</span><span class="n">coded</span><span class="p">[</span><span class="s2">&quot;hedged&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">),</span>
+                         <span class="s2">&quot;company&quot;</span><span class="p">:</span> <span class="n">coded</span><span class="p">[</span><span class="s2">&quot;company&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">),</span>
+                         <span class="s2">&quot;performance&quot;</span><span class="p">:</span> <span class="n">coded</span><span class="p">[</span><span class="s2">&quot;performance&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">)},</span> <span class="n">index</span><span class="o">=</span><span class="n">coded</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">reading_flags</span><span class="p">(</span><span class="n">rows</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">readings</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;One reader&#39;s flags on ``rows`` (coded clauses, keyed ``clause_key``), its readings run</span>
+<span class="sd">    through the codebook; NaN where it has no valid reading.  Index ``clause_key``.&quot;&quot;&quot;</span>
+    <span class="n">valid</span> <span class="o">=</span> <span class="n">readings</span><span class="p">[</span><span class="n">readings</span><span class="p">[</span><span class="s2">&quot;valid&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">)]</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">readings</span><span class="p">)</span> <span class="k">else</span> <span class="n">readings</span>
+    <span class="n">read</span> <span class="o">=</span> <span class="n">rows</span><span class="p">[</span><span class="n">rows</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">valid</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">])]</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">valid</span><span class="p">)</span> <span class="k">else</span> <span class="n">rows</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">parts</span> <span class="o">=</span> <span class="p">[</span><span class="n">atm</span><span class="o">.</span><span class="n">apply_readings</span><span class="p">(</span><span class="n">g</span><span class="p">,</span> <span class="n">valid</span><span class="p">,</span> <span class="n">s</span><span class="p">)</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">clause_key</span><span class="o">=</span><span class="n">g</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">)</span>
+             <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">read</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;source&quot;</span><span class="p">)]</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">_flags</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">))</span> <span class="k">if</span> <span class="n">parts</span> <span class="k">else</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="n">FLAGS</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">rows</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;float&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">rules_flags</span><span class="p">(</span><span class="n">rows</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The rules&#39; flags on ``rows``; NaN on a clause the rules left to the model.&quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">_flags</span><span class="p">(</span><span class="n">rows</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">))</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;float&quot;</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="n">rows</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)[</span><span class="s2">&quot;needs_model&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">)]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_date_key</span><span class="p">(</span><span class="n">readings</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">keys</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">Index</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">:</span>
+    <span class="n">r</span> <span class="o">=</span> <span class="n">readings</span><span class="p">[</span><span class="n">readings</span><span class="p">[</span><span class="s2">&quot;valid&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">)]</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">keys</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">one</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="s2">&quot;date_form&quot;</span><span class="p">]):</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="n">years</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="n">k</span><span class="p">])</span> <span class="k">else</span> <span class="nb">str</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="n">k</span><span class="p">]))</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">DATE_FIELDS</span><span class="p">[</span><span class="mi">1</span><span class="p">:]]</span>
+        <span class="k">return</span> <span class="n">x</span><span class="p">[</span><span class="s2">&quot;date_form&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="s2">&quot;:&quot;</span> <span class="o">+</span> <span class="s2">&quot;/&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">years</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">r</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="n">one</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">r</span><span class="p">)</span> <span class="k">else</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">(</span><span class="n">dtype</span><span class="o">=</span><span class="nb">object</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">disputes</span><span class="p">(</span><span class="n">rows</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">readings</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">],</span> <span class="n">use_rules</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Per clause of ``rows``: each voter&#39;s flags, and whether they dispute (``disputed``) and on</span>
+<span class="sd">    what (``on``).  Voters: the readers of ``readings`` and, on a clause the rules coded, the</span>
+<span class="sd">    rules.  A missing reading is a dispute.  An undated clause is disputed also on its interval.&quot;&quot;&quot;</span>
+    <span class="n">keys</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Index</span><span class="p">(</span><span class="n">rows</span><span class="p">[</span><span class="s2">&quot;clause_key&quot;</span><span class="p">])</span>
+    <span class="n">undated</span> <span class="o">=</span> <span class="n">rows</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)[</span><span class="s2">&quot;date_source&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">eq</span><span class="p">(</span><span class="s2">&quot;none&quot;</span><span class="p">)</span>
+    <span class="n">voters</span> <span class="o">=</span> <span class="p">{</span><span class="n">name</span><span class="p">:</span> <span class="n">reading_flags</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">table</span><span class="p">)</span> <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">table</span> <span class="ow">in</span> <span class="n">readings</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="k">if</span> <span class="n">use_rules</span><span class="p">:</span>
+        <span class="n">voters</span><span class="p">[</span><span class="s2">&quot;rules&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">rules_flags</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+    <span class="n">dates</span> <span class="o">=</span> <span class="p">{</span><span class="n">name</span><span class="p">:</span> <span class="n">_date_key</span><span class="p">(</span><span class="n">table</span><span class="p">,</span> <span class="n">keys</span><span class="p">)</span> <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">table</span> <span class="ow">in</span> <span class="n">readings</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="n">keys</span><span class="p">)</span>
+    <span class="n">on</span> <span class="o">=</span> <span class="p">[[]</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">keys</span><span class="p">))]</span>
+    <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">readings</span><span class="p">:</span>
+        <span class="n">missing</span> <span class="o">=</span> <span class="n">voters</span><span class="p">[</span><span class="n">name</span><span class="p">][</span><span class="n">FLAGS</span><span class="p">]</span><span class="o">.</span><span class="n">isna</span><span class="p">()</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">missing</span><span class="p">)[</span><span class="mi">0</span><span class="p">]:</span>
+            <span class="n">on</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;no reading: </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">flag</span> <span class="ow">in</span> <span class="n">FLAGS</span><span class="p">:</span>
+        <span class="n">values</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">({</span><span class="n">n</span><span class="p">:</span> <span class="n">v</span><span class="p">[</span><span class="n">flag</span><span class="p">]</span> <span class="k">for</span> <span class="n">n</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">voters</span><span class="o">.</span><span class="n">items</span><span class="p">()},</span> <span class="n">index</span><span class="o">=</span><span class="n">keys</span><span class="p">)</span>
+        <span class="n">out</span><span class="p">[</span><span class="n">flag</span> <span class="o">+</span> <span class="s2">&quot;_votes&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">values</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="k">lambda</span> <span class="n">r</span><span class="p">:</span> <span class="s2">&quot;|&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="k">else</span> <span class="nb">str</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">x</span><span class="p">))</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">r</span><span class="p">),</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">split</span> <span class="o">=</span> <span class="n">values</span><span class="o">.</span><span class="n">nunique</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">dropna</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">split</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">())[</span><span class="mi">0</span><span class="p">]:</span>
+            <span class="n">on</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">flag</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">readings</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="n">d</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">dates</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="n">keys</span><span class="p">)</span>
+        <span class="n">split</span> <span class="o">=</span> <span class="n">undated</span><span class="o">.</span><span class="n">reindex</span><span class="p">(</span><span class="n">keys</span><span class="p">)</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">()</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">d</span><span class="o">.</span><span class="n">nunique</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">dropna</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">split</span><span class="p">)[</span><span class="mi">0</span><span class="p">]:</span>
+            <span class="n">on</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;date&quot;</span><span class="p">)</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;on&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;, &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">dict</span><span class="o">.</span><span class="n">fromkeys</span><span class="p">(</span><span class="n">x</span><span class="p">))</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">on</span><span class="p">]</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;disputed&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">out</span><span class="p">[</span><span class="s2">&quot;on&quot;</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;voters&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;|&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">voters</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">judge_others</span><span class="p">(</span><span class="n">disputed</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">Index</span><span class="p">,</span> <span class="n">readings</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">],</span> <span class="n">rows</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;For each disputed clause, the readings the judge weighs, anonymised and in a fixed order:</span>
+<span class="sd">    ``Reader 1`` … for the models, ``Rules`` (event types and hedge) on a coded clause.&quot;&quot;&quot;</span>
+    <span class="n">by</span> <span class="o">=</span> <span class="p">{</span><span class="n">name</span><span class="p">:</span> <span class="n">t</span><span class="p">[</span><span class="n">t</span><span class="p">[</span><span class="s2">&quot;valid&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">)]</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">readings</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="n">coded</span> <span class="o">=</span> <span class="n">rows</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">disputed</span><span class="p">:</span>
+        <span class="n">others</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">name</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">readings</span><span class="p">,</span> <span class="n">start</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">by</span><span class="p">[</span><span class="n">name</span><span class="p">]</span><span class="o">.</span><span class="n">index</span><span class="p">:</span>
+                <span class="n">r</span> <span class="o">=</span> <span class="n">by</span><span class="p">[</span><span class="n">name</span><span class="p">]</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+                <span class="n">others</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;Reader </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;types&quot;</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;types&quot;</span><span class="p">],</span> <span class="s2">&quot;hedged&quot;</span><span class="p">:</span> <span class="nb">bool</span><span class="p">(</span><span class="n">r</span><span class="p">[</span><span class="s2">&quot;hedged&quot;</span><span class="p">]),</span>
+                               <span class="s2">&quot;titles&quot;</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="s2">&quot;titles&quot;</span><span class="p">],</span> <span class="o">**</span><span class="p">({</span><span class="n">k</span><span class="p">:</span> <span class="n">r</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">DATE_FIELDS</span><span class="p">}</span> <span class="k">if</span> <span class="n">coded</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">key</span><span class="p">,</span> <span class="s2">&quot;date_source&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;none&quot;</span> <span class="k">else</span> <span class="p">{})})</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">others</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;Reader </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;types&quot;</span><span class="p">:</span> <span class="s2">&quot;(no reading)&quot;</span><span class="p">,</span> <span class="s2">&quot;hedged&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;titles&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">})</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">bool</span><span class="p">(</span><span class="n">coded</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">key</span><span class="p">,</span> <span class="s2">&quot;needs_model&quot;</span><span class="p">]):</span>
+            <span class="n">cues</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">coded</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">key</span><span class="p">,</span> <span class="s2">&quot;cues&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">coded</span><span class="o">.</span><span class="n">at</span><span class="p">[</span><span class="n">key</span><span class="p">,</span> <span class="s2">&quot;cues&quot;</span><span class="p">])</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;|&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">c</span><span class="p">]</span>
+            <span class="n">others</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;Rules&quot;</span><span class="p">,</span> <span class="s2">&quot;types&quot;</span><span class="p">:</span> <span class="s2">&quot;|&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cues</span> <span class="k">if</span> <span class="n">c</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;hedged&quot;</span><span class="p">,</span> <span class="s2">&quot;title&quot;</span><span class="p">)),</span>
+                           <span class="s2">&quot;hedged&quot;</span><span class="p">:</span> <span class="s2">&quot;hedged&quot;</span> <span class="ow">in</span> <span class="n">cues</span><span class="p">,</span> <span class="s2">&quot;titles&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">})</span>
+        <span class="n">out</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">others</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">consensus</span><span class="p">(</span><span class="n">table</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">readings</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">],</span> <span class="n">judged</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The readings to apply: an agreed clause takes the first reader&#39;s reading (``status``</span>
+<span class="sd">    ``agreed``), a disputed one the judge&#39;s (``judged``); a disputed clause without a valid</span>
+<span class="sd">    judge reading is left out (``open``: the rules stand, or the clause stays open).</span>
+<span class="sd">    ``attrs[&quot;status&quot;]`` counts the three.&quot;&quot;&quot;</span>
+    <span class="n">first</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="nb">iter</span><span class="p">(</span><span class="n">readings</span><span class="p">))</span>
+    <span class="n">lead</span> <span class="o">=</span> <span class="n">readings</span><span class="p">[</span><span class="n">first</span><span class="p">][</span><span class="n">readings</span><span class="p">[</span><span class="n">first</span><span class="p">][</span><span class="s2">&quot;valid&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">)]</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)</span>
+    <span class="n">judge</span> <span class="o">=</span> <span class="p">(</span><span class="n">judged</span><span class="p">[</span><span class="n">judged</span><span class="p">[</span><span class="s2">&quot;valid&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">)]</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">judged</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">judged</span><span class="p">)</span>
+             <span class="k">else</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="n">lead</span><span class="o">.</span><span class="n">columns</span><span class="p">))</span>
+    <span class="n">agreed</span> <span class="o">=</span> <span class="n">table</span><span class="o">.</span><span class="n">index</span><span class="p">[</span><span class="o">~</span><span class="n">table</span><span class="p">[</span><span class="s2">&quot;disputed&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">intersection</span><span class="p">(</span><span class="n">lead</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+    <span class="n">settled</span> <span class="o">=</span> <span class="n">table</span><span class="o">.</span><span class="n">index</span><span class="p">[</span><span class="n">table</span><span class="p">[</span><span class="s2">&quot;disputed&quot;</span><span class="p">]]</span><span class="o">.</span><span class="n">intersection</span><span class="p">(</span><span class="n">judge</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">lead</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">agreed</span><span class="p">]</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">status</span><span class="o">=</span><span class="s2">&quot;agreed&quot;</span><span class="p">),</span> <span class="n">judge</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">settled</span><span class="p">]</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">status</span><span class="o">=</span><span class="s2">&quot;judged&quot;</span><span class="p">)])</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">out</span><span class="o">.</span><span class="n">reset_index</span><span class="p">()</span><span class="o">.</span><span class="n">rename</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;index&quot;</span><span class="p">:</span> <span class="s2">&quot;clause_key&quot;</span><span class="p">})</span>
+    <span class="n">out</span><span class="p">[</span><span class="s2">&quot;reader&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;consensus&quot;</span>
+    <span class="n">out</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;status&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;agreed&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">agreed</span><span class="p">),</span> <span class="s2">&quot;judged&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">settled</span><span class="p">),</span>
+                           <span class="s2">&quot;open&quot;</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">table</span><span class="p">[</span><span class="s2">&quot;disputed&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">settled</span><span class="p">)}</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">save_tables</span><span class="p">(</span><span class="n">stage</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">rows</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">readings</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">],</span>
+                <span class="n">table</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">final</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+                <span class="n">pass_dir</span><span class="p">:</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">Path</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Every result of a stage written out (D-217; G&amp;S: keep every result of a slow step), under</span>
+<span class="sd">    ``pass_dir/tables/``:</span>
+
+<span class="sd">    - ``&lt;stage&gt;_readings_&lt;reader&gt;.csv`` — each reader&#39;s readings as read, one row a clause, with</span>
+<span class="sd">      its validity, problems, tokens and cost, and the measure&#39;s flags the codebook makes of it</span>
+<span class="sd">      (``flag_czech_activity`` …; NaN where the reading is not valid);</span>
+<span class="sd">    - ``&lt;stage&gt;_disputes.csv`` — each clause&#39;s votes per flag, whether it is disputed and on what;</span>
+<span class="sd">    - ``&lt;stage&gt;_consensus.csv`` — the readings the pipeline settles on, with ``status``.</span>
+
+<span class="sd">    Everything comes from the cached replies.  Into the shared reply folder only on a pass</span>
+<span class="sd">    machine (:data:`amateur_theatre_model.PASS_MACHINES`): two machines writing the same</span>
+<span class="sd">    synced files make conflicted copies.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">pass_dir</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">pass_dir</span> <span class="ow">or</span> <span class="n">atm</span><span class="o">.</span><span class="n">PASS_DIR</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">pass_dir</span> <span class="o">==</span> <span class="n">atm</span><span class="o">.</span><span class="n">PASS_DIR</span><span class="p">:</span>
+        <span class="n">atm</span><span class="o">.</span><span class="n">_pass_machine_guard</span><span class="p">(</span><span class="s2">&quot;writing the stage tables&quot;</span><span class="p">)</span>
+    <span class="n">out_dir</span> <span class="o">=</span> <span class="n">pass_dir</span> <span class="o">/</span> <span class="s2">&quot;tables&quot;</span>
+    <span class="n">out_dir</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">written</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">reader</span><span class="p">,</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">readings</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="k">if</span> <span class="n">t</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="ow">not</span> <span class="nb">len</span><span class="p">(</span><span class="n">t</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="n">flags</span> <span class="o">=</span> <span class="n">reading_flags</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">t</span><span class="p">)</span><span class="o">.</span><span class="n">add_prefix</span><span class="p">(</span><span class="s2">&quot;flag_&quot;</span><span class="p">)</span>
+        <span class="n">flat</span> <span class="o">=</span> <span class="n">t</span><span class="o">.</span><span class="n">merge</span><span class="p">(</span><span class="n">flags</span><span class="p">,</span> <span class="n">left_on</span><span class="o">=</span><span class="s2">&quot;clause_key&quot;</span><span class="p">,</span> <span class="n">right_index</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">how</span><span class="o">=</span><span class="s2">&quot;left&quot;</span><span class="p">,</span> <span class="n">validate</span><span class="o">=</span><span class="s2">&quot;1:1&quot;</span><span class="p">)</span>
+        <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">flat</span><span class="p">)</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">t</span><span class="p">),</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">reader</span><span class="si">}</span><span class="s2">: the flags merge changed the row count&quot;</span>
+        <span class="n">written</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">out_dir</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stage</span><span class="si">}</span><span class="s2">_readings_</span><span class="si">{</span><span class="n">reader</span><span class="si">}</span><span class="s2">.csv&quot;</span><span class="p">)</span>
+        <span class="n">flat</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">written</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">table</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">written</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">out_dir</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stage</span><span class="si">}</span><span class="s2">_disputes.csv&quot;</span><span class="p">)</span>
+        <span class="n">table</span><span class="o">.</span><span class="n">rename_axis</span><span class="p">(</span><span class="s2">&quot;clause_key&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">reset_index</span><span class="p">()</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">written</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">final</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">final</span><span class="p">):</span>
+        <span class="n">written</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">out_dir</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stage</span><span class="si">}</span><span class="s2">_consensus.csv&quot;</span><span class="p">)</span>
+        <span class="n">final</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">written</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8-sig&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">written</span>
+</pre></div></td></tr></table></div>
+</details>
