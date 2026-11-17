@@ -1,0 +1,577 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>What <code>locations</code> 1.2 changes against 1.1, string by string, on every raw place column.</p><p class="tldr-facts"><b>Reference tools</b> · v1.0.1 · 160 lines · 6 public functions · 8 constants · used by nothing else · <span class="pill dirty">uncommitted</span> · <code>utils/reference_tools/places/diff_locations_parse.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-reference_tools-places-diff_locations_parse-load_old">load_old</a><a class="chip" href="#fn-utils-reference_tools-places-diff_locations_parse-same">same</a><a class="chip" href="#fn-utils-reference_tools-places-diff_locations_parse-label">label</a><a class="chip" href="#fn-utils-reference_tools-places-diff_locations_parse-diff_column">diff_column</a><a class="chip" href="#fn-utils-reference_tools-places-diff_locations_parse-report">report</a><a class="chip" href="#fn-utils-reference_tools-places-diff_locations_parse-build">build</a><a class="chip const" href="#c-utils-reference_tools-places-diff_locations_parse-ROOT">ROOT</a><a class="chip const" href="#c-utils-reference_tools-places-diff_locations_parse-OUT">OUT</a><a class="chip const" href="#c-utils-reference_tools-places-diff_locations_parse-OLD_PATH">OLD_PATH</a><a class="chip const" href="#c-utils-reference_tools-places-diff_locations_parse-OLD7">OLD7</a><a class="chip const" href="#c-utils-reference_tools-places-diff_locations_parse-VUA_CSV">VUA_CSV</a><a class="chip const" href="#c-utils-reference_tools-places-diff_locations_parse-CSOL_CSV">CSOL_CSV</a><a class="chip const" href="#c-utils-reference_tools-places-diff_locations_parse-VUA_COLS">VUA_COLS</a><a class="chip const" href="#c-utils-reference_tools-places-diff_locations_parse-CSOL_COLS">CSOL_COLS</a></div>
+<h2>How it works</h2><p>Builds <code>output/places/locations_v12_diff_*</code> (until 2026-11-16 a scratch script, so those files had
+no builder). The old parser is the frozen copy <code>_locations_v110</code> (<code>git show
+HEAD:utils/parsing/locations.py</code> at commit 853df72, version 1.1.0); the new one is
+<code>utils.parsing.locations</code> as it stands. Both read each <strong>distinct</strong> string once, after
+<code>utils.parsing.clean.strip_place_markers</code> (notebook 02's cleaning), and a string's row count is
+how often it occurs.</p>
+<p>Columns compared: the v1.1 five (municipality, okres, german, land, cisleithanian) plus <code>uncertain</code>;
+<code>n_candidates</code> is reported separately, since 1.2 counts candidates rather than every <code>;</code>.
+A changed string is labelled with the 1.2 reading that produced it (<code>head:okres</code>,
+<code>candidate:statutory (head bare)</code>, ...); <code>okres debris only</code> marks a change that is nothing but
+1.1's trailing <code>-</code> / <code>)</code> on the okres.</p>
+<p>The <a class="cite" data-ref="csol" href="#references" onclick="return bibGo(event)">csol.cz</a> columns are parsed too although notebook 02 never sends them through this parser
+(<code>records_geo</code> reads csol's two fields directly): they show what the parser would do to the shape.</p>
+<p>Outputs (<code>output/places/</code>)::</p>
+<pre><code>locations_v12_diff_{vua_birth,vua_home,csol_birth_obec,csol_birth_okres,
+                    csol_home_obec,csol_home_okres}.csv   one row per changed distinct string
+locations_v12_diff_summary.txt                             the printed summary
+</code></pre>
+<p>Run from anywhere::</p>
+<pre><code>python utils/reference_tools/places/diff_locations_parse.py
+</code></pre>
+<p>Version 1.0.0 (2026-11-16): moved here from the scratchpad, unchanged in what it measures; also
+writes the summary file it used to print.
+Version 1.0.1 (2026-11-16): every writer LF (<code>lineterminator</code> / <code>newline</code>); the outputs of earlier
+runs were CRLF.</p>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-reference_tools-places-diff_locations_parse-load_old">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">load_old</span><span class="p">()</span></pre>
+<div class="fndoc"><p>The frozen 1.1.0 parser, as a module.</p></div>
+<p class="calls"><b>Called by</b> <code>output/places/_v030/diff_locations_parse_v100.py</code></p>
+<details><summary>source · lines 64–70 (7 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">64</span>
+<span class="normal">65</span>
+<span class="normal">66</span>
+<span class="normal">67</span>
+<span class="normal">68</span>
+<span class="normal">69</span>
+<span class="normal">70</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">load_old</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""The frozen 1.1.0 parser, as a module."""</span>
+    <span class="n">spec</span> <span class="o">=</span> <span class="n">importlib</span><span class="o">.</span><span class="n">util</span><span class="o">.</span><span class="n">spec_from_file_location</span><span class="p">(</span><span class="s2">"_locations_v110"</span><span class="p">,</span> <span class="n">OLD_PATH</span><span class="p">)</span>
+    <span class="n">mod</span> <span class="o">=</span> <span class="n">importlib</span><span class="o">.</span><span class="n">util</span><span class="o">.</span><span class="n">module_from_spec</span><span class="p">(</span><span class="n">spec</span><span class="p">)</span>
+    <span class="n">spec</span><span class="o">.</span><span class="n">loader</span><span class="o">.</span><span class="n">exec_module</span><span class="p">(</span><span class="n">mod</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">mod</span><span class="o">.</span><span class="n">__version__</span> <span class="o">==</span> <span class="s2">"1.1.0"</span><span class="p">,</span> <span class="n">mod</span><span class="o">.</span><span class="n">__version__</span>
+    <span class="k">return</span> <span class="n">mod</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-diff_locations_parse-same">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">same</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span></pre>
+<p class="calls"><b>Called by</b> <code>output/places/_v030/diff_locations_parse_v100.py</code> <code>output/places/_v060/data_checks_v1250.py</code> <code>output/places/_v070/data_checks_v1260.py</code> <code>output/places/_v080/data_checks_v1280.py</code> <code>output/places/_v090/data_checks_v1290.py</code> <code>output/places/_v100/data_checks_v1300.py</code> <code>output/places/_v110/data_checks_v1310.py</code> <code>output/places/_v120/data_checks_v1320.py</code> <code>output/places/_v130/data_checks_v1330.py</code> <code>output/places/_v140/data_checks_v1330.py</code> <code>utils/lexikon_1910/lexikon_1910_notes.py</code> <code>utils/validation/data_checks.py</code></p>
+<details><summary>source · lines 73–78 (6 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">73</span>
+<span class="normal">74</span>
+<span class="normal">75</span>
+<span class="normal">76</span>
+<span class="normal">77</span>
+<span class="normal">78</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">same</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="ow">and</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">b</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="ow">or</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">b</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">return</span> <span class="n">a</span> <span class="o">==</span> <span class="n">b</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-diff_locations_parse-label">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">label</span><span class="p">(</span><span class="n">s</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<div class="fndoc"><p>The 1.2 reading behind a parse: source, kind, and the head's kind when a candidate won.</p></div>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code> <code>15b_rulings_into_the_runs.ipynb</code> <code>output/places/_v030/diff_locations_parse_v100.py</code> <code>output/places/_v050/data_checks_v1230.py</code> <code>output/places/_v050/schema_v1140.py</code> <code>output/places/_v060/data_checks_v1250.py</code> <code>output/places/_v060/schema_v1150.py</code> <code>output/places/_v070/data_checks_v1260.py</code> <code>output/places/_v070/schema_v1160.py</code> <code>output/places/_v080/data_checks_v1280.py</code> <code>output/places/_v080/schema_v1170.py</code> <code>output/places/_v090/data_checks_v1290.py</code> <code>output/places/_v090/schema_v1180.py</code> <code>output/places/_v100/data_checks_v1300.py</code> <code>output/places/_v100/schema_v1190.py</code> <code>output/places/_v110/data_checks_v1310.py</code> <code>output/places/_v110/schema_v1200.py</code> <code>output/places/_v120/data_checks_v1320.py</code> <code>output/places/_v120/schema_v1210.py</code> <code>output/places/_v130/data_checks_v1330.py</code> <code>output/places/_v130/schema_v1220.py</code> <code>output/places/_v140/data_checks_v1330.py</code> <code>output/places/_v140/schema_v1230.py</code> <code>tests/test_statutory_types.py</code> <code>utils/docs/build_docs.py</code> <code>utils/lexikon_1910/build_glyph_bank.py</code> <code>utils/lexikon_1910/lexikon_1910_notes.py</code> <code>utils/lexikon_1910/locate_glyphs.py</code> <code>utils/lexikon_1910/run_e1_gemini_version.py</code> <code>utils/lexikon_1910/run_e1b_second_reader.py</code> <code>utils/lexikon_1910/run_r5_german_notes.py</code> <code>utils/lexikon_1910/run_table_arm.py</code> <code>utils/parsing/schema.py</code> <code>utils/recheck/merge.py</code> <code>utils/recheck/section_keys.py</code> <code>utils/recheck/statutory_types.py</code> <code>utils/reference_tools/places/build_matice_read_sheets.py</code> <code>utils/validation/data_checks.py</code></p>
+<details><summary>source · lines 81–86 (6 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">81</span>
+<span class="normal">82</span>
+<span class="normal">83</span>
+<span class="normal">84</span>
+<span class="normal">85</span>
+<span class="normal">86</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">label</span><span class="p">(</span><span class="n">s</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""The 1.2 reading behind a parse: source, kind, and the head's kind when a candidate won."""</span>
+    <span class="n">cand</span> <span class="o">=</span> <span class="n">new</span><span class="o">.</span><span class="n">_find_candidates</span><span class="p">(</span><span class="n">s</span><span class="p">)</span>
+    <span class="n">r</span><span class="p">,</span> <span class="n">src</span> <span class="o">=</span> <span class="n">new</span><span class="o">.</span><span class="n">_primary_reading</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">cand</span><span class="p">)</span>
+    <span class="n">head_kind</span> <span class="o">=</span> <span class="n">new</span><span class="o">.</span><span class="n">_parse_reading</span><span class="p">(</span><span class="n">s</span><span class="p">[:</span><span class="n">cand</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span> <span class="k">if</span> <span class="n">cand</span> <span class="k">else</span> <span class="n">s</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">"("</span><span class="p">,</span> <span class="mi">1</span><span class="p">)[</span><span class="mi">0</span><span class="p">])[</span><span class="s2">"kind"</span><span class="p">]</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">src</span><span class="si">}</span><span class="s2">:</span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">'kind'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span> <span class="o">+</span> <span class="p">(</span><span class="sa">f</span><span class="s2">" (head </span><span class="si">{</span><span class="n">head_kind</span><span class="si">}</span><span class="s2">)"</span> <span class="k">if</span> <span class="n">src</span> <span class="o">==</span> <span class="s2">"candidate"</span> <span class="k">else</span> <span class="s2">""</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-diff_locations_parse-diff_column">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">diff_column</span><span class="p">(</span><span class="n">series</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">,</span> <span class="n">old</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="nb">dict</span><span class="p">]</span></pre>
+<div class="fndoc"><p>One row per distinct string whose parse changed, and the column's counts.</p></div>
+<p class="calls"><b>Called by</b> <code>output/places/_v030/diff_locations_parse_v100.py</code></p>
+<details><summary>source · lines 89–115 (27 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">diff_column</span><span class="p">(</span><span class="n">series</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">,</span> <span class="n">old</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">"""One row per distinct string whose parse changed, and the column's counts."""</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="n">series</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">strip_place_markers</span><span class="p">)</span><span class="o">.</span><span class="n">dropna</span><span class="p">()</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="n">s</span><span class="p">[</span><span class="n">s</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">str</span><span class="p">)</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">!=</span> <span class="s2">""</span><span class="p">]</span>
+    <span class="n">vc</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span>
+    <span class="n">rows</span><span class="p">,</span> <span class="n">ncand</span> <span class="o">=</span> <span class="p">[],</span> <span class="n">collections</span><span class="o">.</span><span class="n">Counter</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">txt</span><span class="p">,</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">vc</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">o</span><span class="p">,</span> <span class="n">w</span> <span class="o">=</span> <span class="n">old</span><span class="o">.</span><span class="n">parse_location</span><span class="p">(</span><span class="n">txt</span><span class="p">),</span> <span class="n">new</span><span class="o">.</span><span class="n">parse_location</span><span class="p">(</span><span class="n">txt</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">o</span><span class="p">[</span><span class="s2">"n_candidates"</span><span class="p">]</span> <span class="o">!=</span> <span class="n">w</span><span class="p">[</span><span class="s2">"n_candidates"</span><span class="p">]:</span>
+            <span class="n">ncand</span><span class="p">[(</span><span class="n">o</span><span class="p">[</span><span class="s2">"n_candidates"</span><span class="p">],</span> <span class="n">w</span><span class="p">[</span><span class="s2">"n_candidates"</span><span class="p">])]</span> <span class="o">+=</span> <span class="n">n</span>
+        <span class="n">changed</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">OLD7</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">same</span><span class="p">(</span><span class="n">o</span><span class="p">[</span><span class="n">c</span><span class="p">],</span> <span class="n">w</span><span class="p">[</span><span class="n">c</span><span class="p">])]</span>
+        <span class="k">if</span> <span class="n">o</span><span class="p">[</span><span class="s2">"uncertain"</span><span class="p">]</span> <span class="o">!=</span> <span class="n">w</span><span class="p">[</span><span class="s2">"uncertain"</span><span class="p">]:</span>
+            <span class="n">changed</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">"uncertain"</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">changed</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">pat</span> <span class="o">=</span> <span class="n">label</span><span class="p">(</span><span class="n">txt</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">changed</span> <span class="o">==</span> <span class="p">[</span><span class="s2">"okres"</span><span class="p">]</span> <span class="ow">and</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">o</span><span class="p">[</span><span class="s2">"okres"</span><span class="p">])</span> <span class="ow">and</span> <span class="n">same</span><span class="p">(</span><span class="n">new</span><span class="o">.</span><span class="n">_clean_okres</span><span class="p">(</span><span class="n">o</span><span class="p">[</span><span class="s2">"okres"</span><span class="p">]),</span> <span class="n">w</span><span class="p">[</span><span class="s2">"okres"</span><span class="p">]):</span>
+            <span class="n">pat</span> <span class="o">=</span> <span class="s2">"okres debris only ("</span> <span class="o">+</span> <span class="n">pat</span> <span class="o">+</span> <span class="s2">")"</span>
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">"raw"</span><span class="p">:</span> <span class="n">txt</span><span class="p">,</span> <span class="s2">"n"</span><span class="p">:</span> <span class="n">n</span><span class="p">,</span> <span class="s2">"pattern"</span><span class="p">:</span> <span class="n">pat</span><span class="p">,</span> <span class="s2">"changed"</span><span class="p">:</span> <span class="s2">"+"</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">changed</span><span class="p">),</span>
+                     <span class="o">**</span><span class="p">{</span><span class="sa">f</span><span class="s2">"old_</span><span class="si">{</span><span class="n">c</span><span class="si">}</span><span class="s2">"</span><span class="p">:</span> <span class="n">o</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">OLD7</span><span class="p">},</span> <span class="o">**</span><span class="p">{</span><span class="sa">f</span><span class="s2">"new_</span><span class="si">{</span><span class="n">c</span><span class="si">}</span><span class="s2">"</span><span class="p">:</span> <span class="n">w</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">OLD7</span><span class="p">},</span>
+                     <span class="s2">"quarter"</span><span class="p">:</span> <span class="n">w</span><span class="p">[</span><span class="s2">"quarter"</span><span class="p">],</span> <span class="s2">"quarter_no"</span><span class="p">:</span> <span class="n">w</span><span class="p">[</span><span class="s2">"quarter_no"</span><span class="p">],</span>
+                     <span class="s2">"statutory_city"</span><span class="p">:</span> <span class="n">w</span><span class="p">[</span><span class="s2">"statutory_city"</span><span class="p">],</span> <span class="s2">"n_candidates"</span><span class="p">:</span> <span class="n">w</span><span class="p">[</span><span class="s2">"n_candidates"</span><span class="p">],</span>
+                     <span class="s2">"candidates_agree"</span><span class="p">:</span> <span class="n">w</span><span class="p">[</span><span class="s2">"candidates_agree"</span><span class="p">]})</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">d</span><span class="p">):</span>
+        <span class="n">d</span> <span class="o">=</span> <span class="n">d</span><span class="o">.</span><span class="n">sort_values</span><span class="p">(</span><span class="s2">"n"</span><span class="p">,</span> <span class="n">ascending</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">d</span><span class="p">,</span> <span class="p">{</span><span class="s2">"non_empty"</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">s</span><span class="p">),</span> <span class="s2">"distinct"</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">vc</span><span class="p">),</span> <span class="s2">"ncand"</span><span class="p">:</span> <span class="n">ncand</span><span class="p">}</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-diff_locations_parse-report">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">d</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">stats</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span></pre>
+<p class="calls"><b>Called by</b> <code>02_data_cleaning.ipynb</code> <code>03_visualisation.ipynb</code> <code>15_frozen_run.ipynb</code> <code>15b_rulings_into_the_runs.ipynb</code> <code>17_recheck.ipynb</code> <code>output/places/_v030/diff_locations_parse_v100.py</code> <code>output/places/_v050/data_checks_v1230.py</code> <code>output/places/_v060/data_checks_v1250.py</code> <code>output/places/_v070/data_checks_v1260.py</code> <code>output/places/_v080/data_checks_v1280.py</code> <code>output/places/_v090/data_checks_v1290.py</code> <code>output/places/_v100/data_checks_v1300.py</code> <code>output/places/_v110/data_checks_v1310.py</code> <code>output/places/_v120/data_checks_v1320.py</code> <code>output/places/_v130/data_checks_v1330.py</code> <code>output/places/_v140/data_checks_v1330.py</code> <code>tests/test_religion_categories.py</code> <code>tests/test_run_completeness.py</code> <code>tests/test_sealed_scorer.py</code> <code>utils/docs/build_docs.py</code> <code>utils/lexikon_1910/build_de_page_map.py</code> <code>utils/lexikon_1910/build_mark_ledger.py</code> <code>utils/lexikon_1910/build_symbol_atlas_de.py</code> <code>utils/lexikon_1910/read_transcription_md.py</code> <code>utils/lexikon_1910/run_frozen.py</code> <code>utils/lexikon_1910/run_glyph_e3.py</code> <code>utils/lexikon_1910/score_certification.py</code> <code>utils/lexikon_1910/score_table_passes.py</code> <code>utils/linkage.py</code> <code>utils/parsing/clean.py</code> <code>utils/parsing/dates.py</code> <code>utils/parsing/exit_codes.py</code> <code>utils/parsing/habsburg.py</code> <code>utils/recheck/author_carry.py</code> <code>utils/recheck/both_ways.py</code> <code>utils/recheck/dino_flags.py</code> <code>utils/recheck/error_sample.py</code> <code>utils/recheck/offices_reread.py</code> <code>utils/recheck/offices_reread_cz.py</code> <code>utils/recheck/statutory_types_check.py</code> <code>utils/recheck/table_reread.py</code> <code>utils/reference_tools/places/german_click_recall.py</code> <code>utils/reference_tools/places/run_matice_pilot.py</code> <code>utils/reference_tools/places/score_sealed_abbreviations.py</code> <code>utils/reference_tools/places/statutory_coding_check.py</code> <code>utils/reference_tools/places/theatre_rule_audit.py</code> <code>utils/validation/check_offices_coverage.py</code> <code>utils/validation/check_ostafin_silesia.py</code> <code>utils/validation/data_checks.py</code> <code>utils/validation/run_completeness.py</code> <code>utils/validation/score_sealed_retest.py</code></p>
+<details><summary>source · lines 118–129 (12 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">d</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">stats</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="se">\n</span><span class="s2">=== </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">'non_empty'</span><span class="p">]</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> non-empty, </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">'distinct'</span><span class="p">]</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> distinct"</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">d</span><span class="o">.</span><span class="n">empty</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">"  no row changes in the v1.1 columns"</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"  rows changed: </span><span class="si">{</span><span class="n">d</span><span class="o">.</span><span class="n">n</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">d</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> distinct strings)"</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">OLD7</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"    </span><span class="si">{</span><span class="n">c</span><span class="si">:</span><span class="s2">&lt;14</span><span class="si">}{</span><span class="n">d</span><span class="p">[</span><span class="n">d</span><span class="o">.</span><span class="n">changed</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">contains</span><span class="p">(</span><span class="n">c</span><span class="p">)]</span><span class="o">.</span><span class="n">n</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">&gt;8,</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">"  by pattern x changed columns:"</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">d</span><span class="o">.</span><span class="n">groupby</span><span class="p">([</span><span class="s2">"pattern"</span><span class="p">,</span> <span class="s2">"changed"</span><span class="p">])</span><span class="o">.</span><span class="n">n</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">.</span><span class="n">sort_values</span><span class="p">(</span><span class="n">ascending</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+    <span class="n">nc</span> <span class="o">=</span> <span class="n">stats</span><span class="p">[</span><span class="s2">"ncand"</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"  n_candidates changed: </span><span class="si">{</span><span class="nb">sum</span><span class="p">(</span><span class="n">nc</span><span class="o">.</span><span class="n">values</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> rows; top (old,new):"</span><span class="p">,</span> <span class="n">nc</span><span class="o">.</span><span class="n">most_common</span><span class="p">(</span><span class="mi">8</span><span class="p">))</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-diff_locations_parse-build">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">build</span><span class="p">(</span><span class="n">out_dir</span><span class="p">:</span> <span class="n">Path</span><span class="o">=</span><span class="n">OUT</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]</span></pre>
+<div class="fndoc"><p>Every column diffed; CSVs and the summary written to <em>out_dir</em>. Returns the diff frames.</p></div>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 132–156 (25 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">build</span><span class="p">(</span><span class="n">out_dir</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">OUT</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">"""Every column diffed; CSVs and the summary written to *out_dir*. Returns the diff frames."""</span>
+    <span class="n">out_dir</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">old</span> <span class="o">=</span> <span class="n">load_old</span><span class="p">()</span>
+    <span class="n">frames</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">buf</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">StringIO</span><span class="p">()</span>
+    <span class="k">with</span> <span class="n">redirect_stdout</span><span class="p">(</span><span class="n">buf</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"locations </span><span class="si">{</span><span class="n">old</span><span class="o">.</span><span class="n">__version__</span><span class="si">}</span><span class="s2"> (frozen copy) vs </span><span class="si">{</span><span class="n">new</span><span class="o">.</span><span class="n">__version__</span><span class="si">}</span><span class="s2">  "</span>
+              <span class="sa">f</span><span class="s2">"[</span><span class="si">{</span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">__version__</span><span class="si">}</span><span class="s2">]"</span><span class="p">)</span>
+        <span class="n">sources</span> <span class="o">=</span> <span class="p">[(</span><span class="n">VUA_CSV</span><span class="p">,</span> <span class="n">VUA_COLS</span><span class="p">),</span> <span class="p">(</span><span class="n">CSOL_CSV</span><span class="p">,</span> <span class="n">CSOL_COLS</span><span class="p">)]</span>
+        <span class="k">for</span> <span class="n">path</span><span class="p">,</span> <span class="n">cols</span> <span class="ow">in</span> <span class="n">sources</span><span class="p">:</span>
+            <span class="n">raw</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">usecols</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="n">cols</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">col</span><span class="p">,</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">cols</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="n">d</span><span class="p">,</span> <span class="n">stats</span> <span class="o">=</span> <span class="n">diff_column</span><span class="p">(</span><span class="n">raw</span><span class="p">[</span><span class="n">col</span><span class="p">],</span> <span class="n">old</span><span class="p">)</span>
+                <span class="n">report</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">d</span><span class="p">,</span> <span class="n">stats</span><span class="p">)</span>
+                <span class="n">frames</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">d</span>
+                <span class="n">target</span> <span class="o">=</span> <span class="n">out_dir</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">"locations_v12_diff_</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">.csv"</span>
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">d</span><span class="p">):</span>
+                    <span class="n">d</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">target</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8"</span><span class="p">,</span> <span class="n">lineterminator</span><span class="o">=</span><span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="p">)</span>
+                <span class="k">elif</span> <span class="n">target</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+                    <span class="n">target</span><span class="o">.</span><span class="n">unlink</span><span class="p">()</span>               <span class="c1"># no change left: a stale file would claim one</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">buf</span><span class="o">.</span><span class="n">getvalue</span><span class="p">()</span>
+    <span class="p">(</span><span class="n">out_dir</span> <span class="o">/</span> <span class="s2">"locations_v12_diff_summary.txt"</span><span class="p">)</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">text</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8"</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">frames</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-reference_tools-places-diff_locations_parse-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-diff_locations_parse-OUT"><pre class="sig">OUT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">'output'</span> <span class="o">/</span> <span class="s1">'places'</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-diff_locations_parse-OLD_PATH"><pre class="sig">OLD_PATH<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span> <span class="o">/</span> <span class="s1">'_locations_v110.py'</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-diff_locations_parse-OLD7"><pre class="sig">OLD7<span class="kind">list · 5 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">[</span><span class="s1">'municipality'</span><span class="p">,</span> <span class="s1">'okres'</span><span class="p">,</span> <span class="s1">'german'</span><span class="p">,</span> <span class="s1">'land'</span><span class="p">,</span> <span class="s1">'cisleithanian'</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-diff_locations_parse-VUA_CSV"><pre class="sig">VUA_CSV<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">'data'</span> <span class="o">/</span> <span class="s1">'raw'</span> <span class="o">/</span> <span class="s1">'habsburg'</span> <span class="o">/</span> <span class="s1">'habsburg_fallen.csv'</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-diff_locations_parse-CSOL_CSV"><pre class="sig">CSOL_CSV<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">'data'</span> <span class="o">/</span> <span class="s1">'raw'</span> <span class="o">/</span> <span class="s1">'legionnaires'</span> <span class="o">/</span> <span class="s1">'legionnaires.csv'</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-diff_locations_parse-VUA_COLS"><pre class="sig">VUA_COLS<span class="kind">dict · 2 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">'Místo narození'</span><span class="p">:</span> <span class="s1">'vua_birth'</span><span class="p">,</span> <span class="s1">'Domovem'</span><span class="p">:</span> <span class="s1">'vua_home'</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-diff_locations_parse-CSOL_COLS"><pre class="sig">CSOL_COLS<span class="kind">dict · 4 entries</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">{</span><span class="s1">'Obec narození'</span><span class="p">:</span> <span class="s1">'csol_birth_obec'</span><span class="p">,</span> <span class="s1">'Okres narození'</span><span class="p">:</span> <span class="s1">'csol_birth_okres'</span><span class="p">,</span> <span class="s1">'Domovská obec'</span><span class="p">:</span> <span class="s1">'csol_home_obec'</span><span class="p">,</span> <span class="s1">'Domovský okres'</span><span class="p">:</span> <span class="s1">'csol_home_okres'</span><span class="p">}</span>
+</pre></div>
+</details></div>
+<h2>History</h2>
+<p class="muted">No commits touch this file yet.</p>
+<p class="note">This file has <b>uncommitted</b> changes; the reasoning is recorded in <a href='#decisions'>Decisions</a> and the diff is summarised on <a href='#changelog'>Commits &amp; versions</a>.</p>
+<h2>Full source</h2><details><summary>utils/reference_tools/places/diff_locations_parse.py · 160 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">"""What ``locations`` 1.2 changes against 1.1, string by string, on every raw place column.</span>
+
+<span class="sd">Builds ``output/places/locations_v12_diff_*`` (until 2026-11-16 a scratch script, so those files had</span>
+<span class="sd">no builder). The old parser is the frozen copy :mod:`_locations_v110` (``git show</span>
+<span class="sd">HEAD:utils/parsing/locations.py`` at commit 853df72, version 1.1.0); the new one is</span>
+<span class="sd">:mod:`utils.parsing.locations` as it stands. Both read each **distinct** string once, after</span>
+<span class="sd">:func:`utils.parsing.clean.strip_place_markers` (notebook 02's cleaning), and a string's row count is</span>
+<span class="sd">how often it occurs.</span>
+
+<span class="sd">Columns compared: the v1.1 five (municipality, okres, german, land, cisleithanian) plus ``uncertain``;</span>
+<span class="sd">``n_candidates`` is reported separately, since 1.2 counts candidates rather than every ``;``.</span>
+<span class="sd">A changed string is labelled with the 1.2 reading that produced it (``head:okres``,</span>
+<span class="sd">``candidate:statutory (head bare)``, ...); ``okres debris only`` marks a change that is nothing but</span>
+<span class="sd">1.1's trailing ``-`` / ``)`` on the okres.</span>
+
+<span class="sd">The csol.cz columns are parsed too although notebook 02 never sends them through this parser</span>
+<span class="sd">(``records_geo`` reads csol's two fields directly): they show what the parser would do to the shape.</span>
+
+<span class="sd">Outputs (``output/places/``)::</span>
+
+<span class="sd">    locations_v12_diff_{vua_birth,vua_home,csol_birth_obec,csol_birth_okres,</span>
+<span class="sd">                        csol_home_obec,csol_home_okres}.csv   one row per changed distinct string</span>
+<span class="sd">    locations_v12_diff_summary.txt                             the printed summary</span>
+
+<span class="sd">Run from anywhere::</span>
+
+<span class="sd">    python utils/reference_tools/places/diff_locations_parse.py</span>
+
+<span class="sd">Version 1.0.0 (2026-11-16): moved here from the scratchpad, unchanged in what it measures; also</span>
+<span class="sd">writes the summary file it used to print.</span>
+<span class="sd">Version 1.0.1 (2026-11-16): every writer LF (``lineterminator`` / ``newline``); the outputs of earlier</span>
+<span class="sd">runs were CRLF.</span>
+<span class="sd">"""</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">collections</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">importlib.util</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">io</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">contextlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">redirect_stdout</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+<span class="k">if</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">)</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="p">:</span>
+    <span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ROOT</span><span class="p">))</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing</span><span class="w"> </span><span class="kn">import</span> <span class="n">locations</span> <span class="k">as</span> <span class="n">new</span>                     <span class="c1"># noqa: E402</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">utils.parsing.clean</span><span class="w"> </span><span class="kn">import</span> <span class="n">strip_place_markers</span>            <span class="c1"># noqa: E402</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">"1.0.1"</span>
+
+<span class="n">OUT</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">"output"</span> <span class="o">/</span> <span class="s2">"places"</span>
+<span class="n">OLD_PATH</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span> <span class="o">/</span> <span class="s2">"_locations_v110.py"</span>
+<span class="n">OLD7</span> <span class="o">=</span> <span class="p">[</span><span class="s2">"municipality"</span><span class="p">,</span> <span class="s2">"okres"</span><span class="p">,</span> <span class="s2">"german"</span><span class="p">,</span> <span class="s2">"land"</span><span class="p">,</span> <span class="s2">"cisleithanian"</span><span class="p">]</span>
+<span class="n">VUA_CSV</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">"data"</span> <span class="o">/</span> <span class="s2">"raw"</span> <span class="o">/</span> <span class="s2">"habsburg"</span> <span class="o">/</span> <span class="s2">"habsburg_fallen.csv"</span>
+<span class="n">CSOL_CSV</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">"data"</span> <span class="o">/</span> <span class="s2">"raw"</span> <span class="o">/</span> <span class="s2">"legionnaires"</span> <span class="o">/</span> <span class="s2">"legionnaires.csv"</span>
+<span class="n">VUA_COLS</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"Místo narození"</span><span class="p">:</span> <span class="s2">"vua_birth"</span><span class="p">,</span> <span class="s2">"Domovem"</span><span class="p">:</span> <span class="s2">"vua_home"</span><span class="p">}</span>
+<span class="n">CSOL_COLS</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"Obec narození"</span><span class="p">:</span> <span class="s2">"csol_birth_obec"</span><span class="p">,</span> <span class="s2">"Okres narození"</span><span class="p">:</span> <span class="s2">"csol_birth_okres"</span><span class="p">,</span>
+             <span class="s2">"Domovská obec"</span><span class="p">:</span> <span class="s2">"csol_home_obec"</span><span class="p">,</span> <span class="s2">"Domovský okres"</span><span class="p">:</span> <span class="s2">"csol_home_okres"</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">load_old</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">"""The frozen 1.1.0 parser, as a module."""</span>
+    <span class="n">spec</span> <span class="o">=</span> <span class="n">importlib</span><span class="o">.</span><span class="n">util</span><span class="o">.</span><span class="n">spec_from_file_location</span><span class="p">(</span><span class="s2">"_locations_v110"</span><span class="p">,</span> <span class="n">OLD_PATH</span><span class="p">)</span>
+    <span class="n">mod</span> <span class="o">=</span> <span class="n">importlib</span><span class="o">.</span><span class="n">util</span><span class="o">.</span><span class="n">module_from_spec</span><span class="p">(</span><span class="n">spec</span><span class="p">)</span>
+    <span class="n">spec</span><span class="o">.</span><span class="n">loader</span><span class="o">.</span><span class="n">exec_module</span><span class="p">(</span><span class="n">mod</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">mod</span><span class="o">.</span><span class="n">__version__</span> <span class="o">==</span> <span class="s2">"1.1.0"</span><span class="p">,</span> <span class="n">mod</span><span class="o">.</span><span class="n">__version__</span>
+    <span class="k">return</span> <span class="n">mod</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">same</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="ow">and</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">b</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="k">if</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">a</span><span class="p">)</span> <span class="ow">or</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">b</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">return</span> <span class="n">a</span> <span class="o">==</span> <span class="n">b</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">label</span><span class="p">(</span><span class="n">s</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""The 1.2 reading behind a parse: source, kind, and the head's kind when a candidate won."""</span>
+    <span class="n">cand</span> <span class="o">=</span> <span class="n">new</span><span class="o">.</span><span class="n">_find_candidates</span><span class="p">(</span><span class="n">s</span><span class="p">)</span>
+    <span class="n">r</span><span class="p">,</span> <span class="n">src</span> <span class="o">=</span> <span class="n">new</span><span class="o">.</span><span class="n">_primary_reading</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">cand</span><span class="p">)</span>
+    <span class="n">head_kind</span> <span class="o">=</span> <span class="n">new</span><span class="o">.</span><span class="n">_parse_reading</span><span class="p">(</span><span class="n">s</span><span class="p">[:</span><span class="n">cand</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span> <span class="k">if</span> <span class="n">cand</span> <span class="k">else</span> <span class="n">s</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">"("</span><span class="p">,</span> <span class="mi">1</span><span class="p">)[</span><span class="mi">0</span><span class="p">])[</span><span class="s2">"kind"</span><span class="p">]</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">src</span><span class="si">}</span><span class="s2">:</span><span class="si">{</span><span class="n">r</span><span class="p">[</span><span class="s1">'kind'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span> <span class="o">+</span> <span class="p">(</span><span class="sa">f</span><span class="s2">" (head </span><span class="si">{</span><span class="n">head_kind</span><span class="si">}</span><span class="s2">)"</span> <span class="k">if</span> <span class="n">src</span> <span class="o">==</span> <span class="s2">"candidate"</span> <span class="k">else</span> <span class="s2">""</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">diff_column</span><span class="p">(</span><span class="n">series</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">Series</span><span class="p">,</span> <span class="n">old</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="nb">dict</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">"""One row per distinct string whose parse changed, and the column's counts."""</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="n">series</span><span class="o">.</span><span class="n">map</span><span class="p">(</span><span class="n">strip_place_markers</span><span class="p">)</span><span class="o">.</span><span class="n">dropna</span><span class="p">()</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="n">s</span><span class="p">[</span><span class="n">s</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">str</span><span class="p">)</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">!=</span> <span class="s2">""</span><span class="p">]</span>
+    <span class="n">vc</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span>
+    <span class="n">rows</span><span class="p">,</span> <span class="n">ncand</span> <span class="o">=</span> <span class="p">[],</span> <span class="n">collections</span><span class="o">.</span><span class="n">Counter</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">txt</span><span class="p">,</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">vc</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">o</span><span class="p">,</span> <span class="n">w</span> <span class="o">=</span> <span class="n">old</span><span class="o">.</span><span class="n">parse_location</span><span class="p">(</span><span class="n">txt</span><span class="p">),</span> <span class="n">new</span><span class="o">.</span><span class="n">parse_location</span><span class="p">(</span><span class="n">txt</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">o</span><span class="p">[</span><span class="s2">"n_candidates"</span><span class="p">]</span> <span class="o">!=</span> <span class="n">w</span><span class="p">[</span><span class="s2">"n_candidates"</span><span class="p">]:</span>
+            <span class="n">ncand</span><span class="p">[(</span><span class="n">o</span><span class="p">[</span><span class="s2">"n_candidates"</span><span class="p">],</span> <span class="n">w</span><span class="p">[</span><span class="s2">"n_candidates"</span><span class="p">])]</span> <span class="o">+=</span> <span class="n">n</span>
+        <span class="n">changed</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">OLD7</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">same</span><span class="p">(</span><span class="n">o</span><span class="p">[</span><span class="n">c</span><span class="p">],</span> <span class="n">w</span><span class="p">[</span><span class="n">c</span><span class="p">])]</span>
+        <span class="k">if</span> <span class="n">o</span><span class="p">[</span><span class="s2">"uncertain"</span><span class="p">]</span> <span class="o">!=</span> <span class="n">w</span><span class="p">[</span><span class="s2">"uncertain"</span><span class="p">]:</span>
+            <span class="n">changed</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">"uncertain"</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">changed</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">pat</span> <span class="o">=</span> <span class="n">label</span><span class="p">(</span><span class="n">txt</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">changed</span> <span class="o">==</span> <span class="p">[</span><span class="s2">"okres"</span><span class="p">]</span> <span class="ow">and</span> <span class="n">pd</span><span class="o">.</span><span class="n">notna</span><span class="p">(</span><span class="n">o</span><span class="p">[</span><span class="s2">"okres"</span><span class="p">])</span> <span class="ow">and</span> <span class="n">same</span><span class="p">(</span><span class="n">new</span><span class="o">.</span><span class="n">_clean_okres</span><span class="p">(</span><span class="n">o</span><span class="p">[</span><span class="s2">"okres"</span><span class="p">]),</span> <span class="n">w</span><span class="p">[</span><span class="s2">"okres"</span><span class="p">]):</span>
+            <span class="n">pat</span> <span class="o">=</span> <span class="s2">"okres debris only ("</span> <span class="o">+</span> <span class="n">pat</span> <span class="o">+</span> <span class="s2">")"</span>
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">"raw"</span><span class="p">:</span> <span class="n">txt</span><span class="p">,</span> <span class="s2">"n"</span><span class="p">:</span> <span class="n">n</span><span class="p">,</span> <span class="s2">"pattern"</span><span class="p">:</span> <span class="n">pat</span><span class="p">,</span> <span class="s2">"changed"</span><span class="p">:</span> <span class="s2">"+"</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">changed</span><span class="p">),</span>
+                     <span class="o">**</span><span class="p">{</span><span class="sa">f</span><span class="s2">"old_</span><span class="si">{</span><span class="n">c</span><span class="si">}</span><span class="s2">"</span><span class="p">:</span> <span class="n">o</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">OLD7</span><span class="p">},</span> <span class="o">**</span><span class="p">{</span><span class="sa">f</span><span class="s2">"new_</span><span class="si">{</span><span class="n">c</span><span class="si">}</span><span class="s2">"</span><span class="p">:</span> <span class="n">w</span><span class="p">[</span><span class="n">c</span><span class="p">]</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">OLD7</span><span class="p">},</span>
+                     <span class="s2">"quarter"</span><span class="p">:</span> <span class="n">w</span><span class="p">[</span><span class="s2">"quarter"</span><span class="p">],</span> <span class="s2">"quarter_no"</span><span class="p">:</span> <span class="n">w</span><span class="p">[</span><span class="s2">"quarter_no"</span><span class="p">],</span>
+                     <span class="s2">"statutory_city"</span><span class="p">:</span> <span class="n">w</span><span class="p">[</span><span class="s2">"statutory_city"</span><span class="p">],</span> <span class="s2">"n_candidates"</span><span class="p">:</span> <span class="n">w</span><span class="p">[</span><span class="s2">"n_candidates"</span><span class="p">],</span>
+                     <span class="s2">"candidates_agree"</span><span class="p">:</span> <span class="n">w</span><span class="p">[</span><span class="s2">"candidates_agree"</span><span class="p">]})</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">d</span><span class="p">):</span>
+        <span class="n">d</span> <span class="o">=</span> <span class="n">d</span><span class="o">.</span><span class="n">sort_values</span><span class="p">(</span><span class="s2">"n"</span><span class="p">,</span> <span class="n">ascending</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">d</span><span class="p">,</span> <span class="p">{</span><span class="s2">"non_empty"</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">s</span><span class="p">),</span> <span class="s2">"distinct"</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">vc</span><span class="p">),</span> <span class="s2">"ncand"</span><span class="p">:</span> <span class="n">ncand</span><span class="p">}</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">report</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">d</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span> <span class="n">stats</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="se">\n</span><span class="s2">=== </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">'non_empty'</span><span class="p">]</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> non-empty, </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">'distinct'</span><span class="p">]</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> distinct"</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">d</span><span class="o">.</span><span class="n">empty</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">"  no row changes in the v1.1 columns"</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"  rows changed: </span><span class="si">{</span><span class="n">d</span><span class="o">.</span><span class="n">n</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">d</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> distinct strings)"</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">OLD7</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"    </span><span class="si">{</span><span class="n">c</span><span class="si">:</span><span class="s2">&lt;14</span><span class="si">}{</span><span class="n">d</span><span class="p">[</span><span class="n">d</span><span class="o">.</span><span class="n">changed</span><span class="o">.</span><span class="n">str</span><span class="o">.</span><span class="n">contains</span><span class="p">(</span><span class="n">c</span><span class="p">)]</span><span class="o">.</span><span class="n">n</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">:</span><span class="s2">&gt;8,</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">"  by pattern x changed columns:"</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">d</span><span class="o">.</span><span class="n">groupby</span><span class="p">([</span><span class="s2">"pattern"</span><span class="p">,</span> <span class="s2">"changed"</span><span class="p">])</span><span class="o">.</span><span class="n">n</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="o">.</span><span class="n">sort_values</span><span class="p">(</span><span class="n">ascending</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span><span class="o">.</span><span class="n">to_string</span><span class="p">())</span>
+    <span class="n">nc</span> <span class="o">=</span> <span class="n">stats</span><span class="p">[</span><span class="s2">"ncand"</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"  n_candidates changed: </span><span class="si">{</span><span class="nb">sum</span><span class="p">(</span><span class="n">nc</span><span class="o">.</span><span class="n">values</span><span class="p">())</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> rows; top (old,new):"</span><span class="p">,</span> <span class="n">nc</span><span class="o">.</span><span class="n">most_common</span><span class="p">(</span><span class="mi">8</span><span class="p">))</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">build</span><span class="p">(</span><span class="n">out_dir</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">OUT</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">"""Every column diffed; CSVs and the summary written to *out_dir*. Returns the diff frames."""</span>
+    <span class="n">out_dir</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">old</span> <span class="o">=</span> <span class="n">load_old</span><span class="p">()</span>
+    <span class="n">frames</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">buf</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">StringIO</span><span class="p">()</span>
+    <span class="k">with</span> <span class="n">redirect_stdout</span><span class="p">(</span><span class="n">buf</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"locations </span><span class="si">{</span><span class="n">old</span><span class="o">.</span><span class="n">__version__</span><span class="si">}</span><span class="s2"> (frozen copy) vs </span><span class="si">{</span><span class="n">new</span><span class="o">.</span><span class="n">__version__</span><span class="si">}</span><span class="s2">  "</span>
+              <span class="sa">f</span><span class="s2">"[</span><span class="si">{</span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">__version__</span><span class="si">}</span><span class="s2">]"</span><span class="p">)</span>
+        <span class="n">sources</span> <span class="o">=</span> <span class="p">[(</span><span class="n">VUA_CSV</span><span class="p">,</span> <span class="n">VUA_COLS</span><span class="p">),</span> <span class="p">(</span><span class="n">CSOL_CSV</span><span class="p">,</span> <span class="n">CSOL_COLS</span><span class="p">)]</span>
+        <span class="k">for</span> <span class="n">path</span><span class="p">,</span> <span class="n">cols</span> <span class="ow">in</span> <span class="n">sources</span><span class="p">:</span>
+            <span class="n">raw</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">usecols</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="n">cols</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">col</span><span class="p">,</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">cols</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="n">d</span><span class="p">,</span> <span class="n">stats</span> <span class="o">=</span> <span class="n">diff_column</span><span class="p">(</span><span class="n">raw</span><span class="p">[</span><span class="n">col</span><span class="p">],</span> <span class="n">old</span><span class="p">)</span>
+                <span class="n">report</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">d</span><span class="p">,</span> <span class="n">stats</span><span class="p">)</span>
+                <span class="n">frames</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">d</span>
+                <span class="n">target</span> <span class="o">=</span> <span class="n">out_dir</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">"locations_v12_diff_</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">.csv"</span>
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">d</span><span class="p">):</span>
+                    <span class="n">d</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">target</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8"</span><span class="p">,</span> <span class="n">lineterminator</span><span class="o">=</span><span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="p">)</span>
+                <span class="k">elif</span> <span class="n">target</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+                    <span class="n">target</span><span class="o">.</span><span class="n">unlink</span><span class="p">()</span>               <span class="c1"># no change left: a stale file would claim one</span>
+    <span class="n">text</span> <span class="o">=</span> <span class="n">buf</span><span class="o">.</span><span class="n">getvalue</span><span class="p">()</span>
+    <span class="p">(</span><span class="n">out_dir</span> <span class="o">/</span> <span class="s2">"locations_v12_diff_summary.txt"</span><span class="p">)</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">text</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8"</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">frames</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>
+    <span class="n">build</span><span class="p">()</span>
+</pre></div></td></tr></table></div>
+</details>
