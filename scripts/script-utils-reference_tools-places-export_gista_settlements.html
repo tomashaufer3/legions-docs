@@ -1,0 +1,415 @@
+<div class="tldr"><div class="tldr-h">TL;DR</div><p>Export the <a class="cite" data-ref="gista" href="#references" onclick="return bibGo(event)">GISta Hungarorum</a> settlement database to plain CSV tables the pipeline can read.</p><p class="tldr-facts"><b>Reference tools</b> · v1.0.0 · 147 lines · 2 public functions · 5 constants · used by <code>02_data_cleaning.ipynb</code> · <code>utils/reference_tools/places/export_gista_settlements.py</code></p></div>
+<div class="chips"><a class="chip" href="#fn-utils-reference_tools-places-export_gista_settlements-md5">md5</a><a class="chip" href="#fn-utils-reference_tools-places-export_gista_settlements-export">export</a><a class="chip const" href="#c-utils-reference_tools-places-export_gista_settlements-ROOT">ROOT</a><a class="chip const" href="#c-utils-reference_tools-places-export_gista_settlements-ACCDB">ACCDB</a><a class="chip const" href="#c-utils-reference_tools-places-export_gista_settlements-OUT_DIR">OUT_DIR</a><a class="chip const" href="#c-utils-reference_tools-places-export_gista_settlements-TABLES">TABLES</a><a class="chip const" href="#c-utils-reference_tools-places-export_gista_settlements-PROVIDERS">PROVIDERS</a></div>
+<h2>How it works</h2><p><code>data/raw/census_hu/tables/8_MO_1865_1910_settlement.accdb</code> (<a class="cite" data-ref="gista" href="#references" onclick="return bibGo(event)">GISta Hungarorum</a>, 12,542 settlements of
+1910 Hungary) is an Access database. No Python reader for it is installed here, so this script reads it
+through the Windows <strong>ACE OLEDB</strong> provider (<code>Microsoft.ACE.OLEDB.16.0</code>, falling back to 12.0), driven by
+PowerShell's <code>System.Data.OleDb</code>:</p>
+<ol>
+<li>the accdb is <strong>copied</strong> to a temporary directory (never opened in place, never written next to);</li>
+<li>the copy is opened read-only (<code>Mode=Read</code>) and every table in <code>TABLES</code> is dumped as
+   tab-separated text, each value formatted with the <strong>invariant culture</strong> (so a coordinate is
+   <code>18.1324304</code> whatever the machine's locale), <code>NULL</code> written as the empty string;</li>
+<li>Python reads each dump as strings and writes <code>data/raw/census_hu/settlements_1910/&amp;lt;table&amp;gt;.csv</code>
+   (UTF-8, LF, every value a string, no type inference) plus <code>manifest.json</code>: the source path, its
+   md5 and size, the provider used, and each table's columns and row count.</li>
+</ol>
+<p>The pipeline (<code>utils.parsing.birth_settlement_sk</code>) reads only the CSVs. Re-running on an unchanged
+accdb rewrites byte-identical CSVs (the manifest's <code>exported</code> time aside).</p>
+<p>Run::</p>
+<pre><code>python utils/reference_tools/places/export_gista_settlements.py
+</code></pre>
+<p>Version 1.0.0 (2026-11-17): first version.</p>
+<h2>Functions</h2>
+<div class="fn" id="fn-utils-reference_tools-places-export_gista_settlements-md5">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">md5</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span></pre>
+<p class="calls muted">Used only inside this module.</p>
+<details><summary>source · lines 90–95 (6 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">90</span>
+<span class="normal">91</span>
+<span class="normal">92</span>
+<span class="normal">93</span>
+<span class="normal">94</span>
+<span class="normal">95</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">md5</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">h</span> <span class="o">=</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">md5</span><span class="p">()</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="s2">"rb"</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">chunk</span> <span class="ow">in</span> <span class="nb">iter</span><span class="p">(</span><span class="k">lambda</span><span class="p">:</span> <span class="n">f</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="mi">20</span><span class="p">),</span> <span class="sa">b</span><span class="s2">""</span><span class="p">):</span>
+            <span class="n">h</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">chunk</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">h</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<div class="fn" id="fn-utils-reference_tools-places-export_gista_settlements-export">
+<pre class="sig"><span class="k">def</span><span class="w"> </span><span class="nf">export</span><span class="p">(</span><span class="n">accdb</span><span class="p">:</span> <span class="n">Path</span><span class="o">=</span><span class="n">ACCDB</span><span class="p">,</span> <span class="n">out_dir</span><span class="p">:</span> <span class="n">Path</span><span class="o">=</span><span class="n">OUT_DIR</span><span class="p">,</span> <span class="n">tables</span><span class="o">=</span><span class="n">TABLES</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span></pre>
+<div class="fndoc"><p>Copy <em>accdb</em> to a temporary directory, dump <em>tables</em>, write the CSVs and the manifest.</p></div>
+<p class="calls"><b>Called by</b> <code>utils/validation/data_checks.py</code></p>
+<details><summary>source · lines 112–139 (28 lines)</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span></pre></div></td><td class="code"><div><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">export</span><span class="p">(</span><span class="n">accdb</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">ACCDB</span><span class="p">,</span> <span class="n">out_dir</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">OUT_DIR</span><span class="p">,</span> <span class="n">tables</span><span class="o">=</span><span class="n">TABLES</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Copy *accdb* to a temporary directory, dump *tables*, write the CSVs and the manifest."""</span>
+    <span class="n">accdb</span><span class="p">,</span> <span class="n">out_dir</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">accdb</span><span class="p">),</span> <span class="n">Path</span><span class="p">(</span><span class="n">out_dir</span><span class="p">)</span>
+    <span class="n">src_md5</span><span class="p">,</span> <span class="n">size</span> <span class="o">=</span> <span class="n">md5</span><span class="p">(</span><span class="n">accdb</span><span class="p">),</span> <span class="n">accdb</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span>
+    <span class="n">out_dir</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">manifest</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"script"</span><span class="p">:</span> <span class="s2">"utils/reference_tools/places/export_gista_settlements.py"</span><span class="p">,</span> <span class="s2">"version"</span><span class="p">:</span> <span class="n">__version__</span><span class="p">,</span>
+                <span class="s2">"source"</span><span class="p">:</span> <span class="n">accdb</span><span class="o">.</span><span class="n">relative_to</span><span class="p">(</span><span class="n">ROOT</span><span class="p">)</span><span class="o">.</span><span class="n">as_posix</span><span class="p">(),</span> <span class="s2">"source_md5"</span><span class="p">:</span> <span class="n">src_md5</span><span class="p">,</span> <span class="s2">"source_bytes"</span><span class="p">:</span> <span class="n">size</span><span class="p">,</span>
+                <span class="s2">"exported"</span><span class="p">:</span> <span class="n">time</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s2">"%Y-%m-</span><span class="si">%d</span><span class="s2"> %H:%M"</span><span class="p">),</span> <span class="s2">"tables"</span><span class="p">:</span> <span class="p">{}}</span>
+    <span class="k">with</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">TemporaryDirectory</span><span class="p">(</span><span class="n">prefix</span><span class="o">=</span><span class="s2">"gista_"</span><span class="p">)</span> <span class="k">as</span> <span class="n">tmp</span><span class="p">:</span>
+        <span class="n">tmp</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">tmp</span><span class="p">)</span>
+        <span class="n">copy</span> <span class="o">=</span> <span class="n">tmp</span> <span class="o">/</span> <span class="s2">"copy.accdb"</span>
+        <span class="n">shutil</span><span class="o">.</span><span class="n">copyfile</span><span class="p">(</span><span class="n">accdb</span><span class="p">,</span> <span class="n">copy</span><span class="p">)</span>
+        <span class="k">assert</span> <span class="n">md5</span><span class="p">(</span><span class="n">copy</span><span class="p">)</span> <span class="o">==</span> <span class="n">src_md5</span><span class="p">,</span> <span class="s2">"the temporary copy differs from the source"</span>
+        <span class="n">ps1</span> <span class="o">=</span> <span class="n">tmp</span> <span class="o">/</span> <span class="s2">"dump.ps1"</span>
+        <span class="n">ps1</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">_PS</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8-sig"</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">tables</span><span class="p">:</span>
+            <span class="n">tsv</span> <span class="o">=</span> <span class="n">tmp</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">t</span><span class="si">}</span><span class="s2">.tsv"</span>
+            <span class="n">prov</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">fixed</span> <span class="o">=</span> <span class="n">_dump</span><span class="p">(</span><span class="n">ps1</span><span class="p">,</span> <span class="n">copy</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="n">tsv</span><span class="p">)</span>
+            <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">tsv</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">quoting</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8"</span><span class="p">)</span>
+            <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span> <span class="o">==</span> <span class="n">n</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">t</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">}</span><span class="s2"> rows read back, </span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s2"> dumped"</span>
+            <span class="n">df</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">out_dir</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">t</span><span class="si">}</span><span class="s2">.csv"</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8"</span><span class="p">,</span> <span class="n">lineterminator</span><span class="o">=</span><span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="p">)</span>
+            <span class="n">manifest</span><span class="p">[</span><span class="s2">"provider"</span><span class="p">]</span> <span class="o">=</span> <span class="n">prov</span>
+            <span class="n">manifest</span><span class="p">[</span><span class="s2">"tables"</span><span class="p">][</span><span class="n">t</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"file"</span><span class="p">:</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">t</span><span class="si">}</span><span class="s2">.csv"</span><span class="p">,</span> <span class="s2">"rows"</span><span class="p">:</span> <span class="n">n</span><span class="p">,</span> <span class="s2">"columns"</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">),</span>
+                                     <span class="s2">"values_with_tab_or_newline"</span><span class="p">:</span> <span class="n">fixed</span><span class="p">}</span>
+        <span class="k">assert</span> <span class="n">md5</span><span class="p">(</span><span class="n">accdb</span><span class="p">)</span> <span class="o">==</span> <span class="n">src_md5</span><span class="p">,</span> <span class="s2">"the source accdb changed during the export"</span>
+    <span class="p">(</span><span class="n">out_dir</span> <span class="o">/</span> <span class="s2">"manifest.json"</span><span class="p">)</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">manifest</span><span class="p">,</span> <span class="n">ensure_ascii</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span> <span class="o">+</span> <span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="p">,</span>
+                                           <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8"</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">manifest</span>
+</pre></div></td></tr></table></div>
+</details>
+</div>
+<h2>Constants</h2>
+<div class="fn" id="c-utils-reference_tools-places-export_gista_settlements-ROOT"><pre class="sig">ROOT<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-export_gista_settlements-ACCDB"><pre class="sig">ACCDB<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">'data'</span> <span class="o">/</span> <span class="s1">'raw'</span> <span class="o">/</span> <span class="s1">'census_hu'</span> <span class="o">/</span> <span class="s1">'tables'</span> <span class="o">/</span> <span class="s1">'8_MO_1865_1910_settlement.accdb'</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-export_gista_settlements-OUT_DIR"><pre class="sig">OUT_DIR<span class="kind">value</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="n">ROOT</span> <span class="o">/</span> <span class="s1">'data'</span> <span class="o">/</span> <span class="s1">'raw'</span> <span class="o">/</span> <span class="s1">'census_hu'</span> <span class="o">/</span> <span class="s1">'settlements_1910'</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-export_gista_settlements-TABLES"><pre class="sig">TABLES<span class="kind">tuple · 6 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">(</span><span class="s1">'MAI_NEV_ES_ORSZAG'</span><span class="p">,</span> <span class="s1">'MO_1910_ALAPADAT'</span><span class="p">,</span> <span class="s1">'MO_1910_TER_LAK_ETN_telepulesek'</span><span class="p">,</span> <span class="s1">'MO_1900_nevvarians'</span><span class="p">,</span> <span class="s1">'MO_COORDINATES_settlement_CENTER'</span><span class="p">,</span> <span class="s1">'MO_HAZAK_KOR_IROLVAS_1910_JAV'</span><span class="p">)</span>
+</pre></div>
+</details></div>
+<div class="fn" id="c-utils-reference_tools-places-export_gista_settlements-PROVIDERS"><pre class="sig">PROVIDERS<span class="kind">tuple · 2 items</span></pre><details><summary>value</summary><div class="highlight"><pre><span></span><span class="p">(</span><span class="s1">'Microsoft.ACE.OLEDB.16.0'</span><span class="p">,</span> <span class="s1">'Microsoft.ACE.OLEDB.12.0'</span><span class="p">)</span>
+</pre></div>
+</details></div>
+<h2>Used by</h2><p><code>02_data_cleaning.ipynb</code></p>
+<h2>History</h2>
+<div class="tblwrap"><table class="tbl"><thead><tr><th>Commit</th><th>Date</th><th>Subject</th></tr></thead><tbody><tr><td>191097a</td><td>2026-11-18</td><td>Birthplace links into data/final: Czech 0.16.2 + Slovak 1.0.3 (D-241 to D-247, D-253, D-256 to D-259)</td></tr></tbody></table></div>
+<h2>Full source</h2><details><summary>utils/reference_tools/places/export_gista_settlements.py · 147 lines</summary><div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">  1</span>
+<span class="normal">  2</span>
+<span class="normal">  3</span>
+<span class="normal">  4</span>
+<span class="normal">  5</span>
+<span class="normal">  6</span>
+<span class="normal">  7</span>
+<span class="normal">  8</span>
+<span class="normal">  9</span>
+<span class="normal"> 10</span>
+<span class="normal"> 11</span>
+<span class="normal"> 12</span>
+<span class="normal"> 13</span>
+<span class="normal"> 14</span>
+<span class="normal"> 15</span>
+<span class="normal"> 16</span>
+<span class="normal"> 17</span>
+<span class="normal"> 18</span>
+<span class="normal"> 19</span>
+<span class="normal"> 20</span>
+<span class="normal"> 21</span>
+<span class="normal"> 22</span>
+<span class="normal"> 23</span>
+<span class="normal"> 24</span>
+<span class="normal"> 25</span>
+<span class="normal"> 26</span>
+<span class="normal"> 27</span>
+<span class="normal"> 28</span>
+<span class="normal"> 29</span>
+<span class="normal"> 30</span>
+<span class="normal"> 31</span>
+<span class="normal"> 32</span>
+<span class="normal"> 33</span>
+<span class="normal"> 34</span>
+<span class="normal"> 35</span>
+<span class="normal"> 36</span>
+<span class="normal"> 37</span>
+<span class="normal"> 38</span>
+<span class="normal"> 39</span>
+<span class="normal"> 40</span>
+<span class="normal"> 41</span>
+<span class="normal"> 42</span>
+<span class="normal"> 43</span>
+<span class="normal"> 44</span>
+<span class="normal"> 45</span>
+<span class="normal"> 46</span>
+<span class="normal"> 47</span>
+<span class="normal"> 48</span>
+<span class="normal"> 49</span>
+<span class="normal"> 50</span>
+<span class="normal"> 51</span>
+<span class="normal"> 52</span>
+<span class="normal"> 53</span>
+<span class="normal"> 54</span>
+<span class="normal"> 55</span>
+<span class="normal"> 56</span>
+<span class="normal"> 57</span>
+<span class="normal"> 58</span>
+<span class="normal"> 59</span>
+<span class="normal"> 60</span>
+<span class="normal"> 61</span>
+<span class="normal"> 62</span>
+<span class="normal"> 63</span>
+<span class="normal"> 64</span>
+<span class="normal"> 65</span>
+<span class="normal"> 66</span>
+<span class="normal"> 67</span>
+<span class="normal"> 68</span>
+<span class="normal"> 69</span>
+<span class="normal"> 70</span>
+<span class="normal"> 71</span>
+<span class="normal"> 72</span>
+<span class="normal"> 73</span>
+<span class="normal"> 74</span>
+<span class="normal"> 75</span>
+<span class="normal"> 76</span>
+<span class="normal"> 77</span>
+<span class="normal"> 78</span>
+<span class="normal"> 79</span>
+<span class="normal"> 80</span>
+<span class="normal"> 81</span>
+<span class="normal"> 82</span>
+<span class="normal"> 83</span>
+<span class="normal"> 84</span>
+<span class="normal"> 85</span>
+<span class="normal"> 86</span>
+<span class="normal"> 87</span>
+<span class="normal"> 88</span>
+<span class="normal"> 89</span>
+<span class="normal"> 90</span>
+<span class="normal"> 91</span>
+<span class="normal"> 92</span>
+<span class="normal"> 93</span>
+<span class="normal"> 94</span>
+<span class="normal"> 95</span>
+<span class="normal"> 96</span>
+<span class="normal"> 97</span>
+<span class="normal"> 98</span>
+<span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span></pre></div></td><td class="code"><div><pre><span></span><span class="sd">"""Export the GISta Hungarorum settlement database to plain CSV tables the pipeline can read.</span>
+
+<span class="sd">``data/raw/census_hu/tables/8_MO_1865_1910_settlement.accdb`` (GISta Hungarorum, 12,542 settlements of</span>
+<span class="sd">1910 Hungary) is an Access database. No Python reader for it is installed here, so this script reads it</span>
+<span class="sd">through the Windows **ACE OLEDB** provider (``Microsoft.ACE.OLEDB.16.0``, falling back to 12.0), driven by</span>
+<span class="sd">PowerShell's ``System.Data.OleDb``:</span>
+
+<span class="sd">1. the accdb is **copied** to a temporary directory (never opened in place, never written next to);</span>
+<span class="sd">2. the copy is opened read-only (``Mode=Read``) and every table in :data:`TABLES` is dumped as</span>
+<span class="sd">   tab-separated text, each value formatted with the **invariant culture** (so a coordinate is</span>
+<span class="sd">   ``18.1324304`` whatever the machine's locale), ``NULL`` written as the empty string;</span>
+<span class="sd">3. Python reads each dump as strings and writes ``data/raw/census_hu/settlements_1910/&lt;table&gt;.csv``</span>
+<span class="sd">   (UTF-8, LF, every value a string, no type inference) plus ``manifest.json``: the source path, its</span>
+<span class="sd">   md5 and size, the provider used, and each table's columns and row count.</span>
+
+<span class="sd">The pipeline (:mod:`utils.parsing.birth_settlement_sk`) reads only the CSVs. Re-running on an unchanged</span>
+<span class="sd">accdb rewrites byte-identical CSVs (the manifest's ``exported`` time aside).</span>
+
+<span class="sd">Run::</span>
+
+<span class="sd">    python utils/reference_tools/places/export_gista_settlements.py</span>
+
+<span class="sd">Version 1.0.0 (2026-11-17): first version.</span>
+<span class="sd">"""</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">hashlib</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">shutil</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">subprocess</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">tempfile</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+
+<span class="n">ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parents</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+<span class="n">ACCDB</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">"data"</span> <span class="o">/</span> <span class="s2">"raw"</span> <span class="o">/</span> <span class="s2">"census_hu"</span> <span class="o">/</span> <span class="s2">"tables"</span> <span class="o">/</span> <span class="s2">"8_MO_1865_1910_settlement.accdb"</span>
+<span class="n">OUT_DIR</span> <span class="o">=</span> <span class="n">ROOT</span> <span class="o">/</span> <span class="s2">"data"</span> <span class="o">/</span> <span class="s2">"raw"</span> <span class="o">/</span> <span class="s2">"census_hu"</span> <span class="o">/</span> <span class="s2">"settlements_1910"</span>
+
+<span class="n">__version__</span> <span class="o">=</span> <span class="s2">"1.0.0"</span>
+
+<span class="c1"># The tables the Slovak settlement gazetteer reads (birth_settlement_sk.build_gazetteer_sk):</span>
+<span class="n">TABLES</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="s2">"MAI_NEV_ES_ORSZAG"</span><span class="p">,</span>                 <span class="c1"># IDTel1910 -&gt; 1912 name, járás/county, today's name (MAI NEV) and country</span>
+    <span class="s2">"MO_1910_ALAPADAT"</span><span class="p">,</span>                  <span class="c1"># IDTel1910 -&gt; 1912 name, járás/county names, seat flags</span>
+    <span class="s2">"MO_1910_TER_LAK_ETN_telepulesek"</span><span class="p">,</span>   <span class="c1"># 1910 area, population, mother tongue, religion</span>
+    <span class="s2">"MO_1900_nevvarians"</span><span class="p">,</span>                <span class="c1"># 1900 gazetteer names + the 1904-14 official (BM) names</span>
+    <span class="s2">"MO_COORDINATES_settlement_CENTER"</span><span class="p">,</span>  <span class="c1"># settlement centre lon/lat</span>
+    <span class="s2">"MO_HAZAK_KOR_IROLVAS_1910_JAV"</span><span class="p">,</span>     <span class="c1"># 1910 houses, age, literacy</span>
+<span class="p">)</span>
+<span class="n">PROVIDERS</span> <span class="o">=</span> <span class="p">(</span><span class="s2">"Microsoft.ACE.OLEDB.16.0"</span><span class="p">,</span> <span class="s2">"Microsoft.ACE.OLEDB.12.0"</span><span class="p">)</span>
+
+<span class="c1"># PowerShell: open the COPY read-only, dump one table as TSV with invariant-culture values. Tabs and</span>
+<span class="c1"># newlines inside a value are replaced by a space (none occur in these tables; the count is printed).</span>
+<span class="n">_PS</span> <span class="o">=</span> <span class="sa">r</span><span class="s2">"""</span>
+<span class="s2">param([string]$Db, [string]$Table, [string]$Out, [string]$Provider)</span>
+<span class="s2">$ErrorActionPreference = 'Stop'</span>
+<span class="s2">$inv = [System.Globalization.CultureInfo]::InvariantCulture</span>
+<span class="s2">$cn = New-Object System.Data.OleDb.OleDbConnection("Provider=$Provider;Data Source=$Db;Mode=Read;Persist Security Info=False")</span>
+<span class="s2">$cn.Open()</span>
+<span class="s2">try {</span>
+<span class="s2">  $cmd = $cn.CreateCommand(); $cmd.CommandText = "SELECT * FROM [$Table]"</span>
+<span class="s2">  $rd = $cmd.ExecuteReader()</span>
+<span class="s2">  $sw = New-Object System.IO.StreamWriter($Out, $false, (New-Object System.Text.UTF8Encoding($false)))</span>
+<span class="s2">  $sw.NewLine = "`n"</span>
+<span class="s2">  $names = @(); for ($i = 0; $i -lt $rd.FieldCount; $i++) { $names += $rd.GetName($i) }</span>
+<span class="s2">  $sw.WriteLine(($names -join "`t"))</span>
+<span class="s2">  $n = 0; $fixed = 0</span>
+<span class="s2">  while ($rd.Read()) {</span>
+<span class="s2">    $vals = New-Object string[] $rd.FieldCount</span>
+<span class="s2">    for ($i = 0; $i -lt $rd.FieldCount; $i++) {</span>
+<span class="s2">      $v = $rd.GetValue($i)</span>
+<span class="s2">      if ($v -is [System.DBNull]) { $s = '' }</span>
+<span class="s2">      elseif ($v -is [System.IFormattable]) { $s = $v.ToString($null, $inv) }   # a double: 15 significant digits</span>
+<span class="s2">      else { $s = [string]$v }</span>
+<span class="s2">      if ($s -match "[`t`r`n]") { $s = $s -replace "[`t`r`n]+", ' '; $fixed++ }</span>
+<span class="s2">      $vals[$i] = $s</span>
+<span class="s2">    }</span>
+<span class="s2">    $sw.WriteLine(($vals -join "`t")); $n++</span>
+<span class="s2">  }</span>
+<span class="s2">  $sw.Close(); $rd.Close()</span>
+<span class="s2">  Write-Output "$n $fixed"</span>
+<span class="s2">} finally { $cn.Close() }</span>
+<span class="s2">"""</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">md5</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">h</span> <span class="o">=</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">md5</span><span class="p">()</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="s2">"rb"</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">chunk</span> <span class="ow">in</span> <span class="nb">iter</span><span class="p">(</span><span class="k">lambda</span><span class="p">:</span> <span class="n">f</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="mi">20</span><span class="p">),</span> <span class="sa">b</span><span class="s2">""</span><span class="p">):</span>
+            <span class="n">h</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">chunk</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">h</span><span class="o">.</span><span class="n">hexdigest</span><span class="p">()</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_dump</span><span class="p">(</span><span class="n">ps1</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">db</span><span class="p">:</span> <span class="n">Path</span><span class="p">,</span> <span class="n">table</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">out</span><span class="p">:</span> <span class="n">Path</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">"""Dump *table* of the copy *db* to *out* (TSV); returns (provider, rows, values with a tab/newline)."""</span>
+    <span class="n">last</span> <span class="o">=</span> <span class="s2">""</span>
+    <span class="k">for</span> <span class="n">prov</span> <span class="ow">in</span> <span class="n">PROVIDERS</span><span class="p">:</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">run</span><span class="p">([</span><span class="s2">"powershell.exe"</span><span class="p">,</span> <span class="s2">"-NoProfile"</span><span class="p">,</span> <span class="s2">"-NonInteractive"</span><span class="p">,</span> <span class="s2">"-ExecutionPolicy"</span><span class="p">,</span> <span class="s2">"Bypass"</span><span class="p">,</span>
+                            <span class="s2">"-File"</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">ps1</span><span class="p">),</span> <span class="s2">"-Db"</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">db</span><span class="p">),</span> <span class="s2">"-Table"</span><span class="p">,</span> <span class="n">table</span><span class="p">,</span> <span class="s2">"-Out"</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">out</span><span class="p">),</span>
+                            <span class="s2">"-Provider"</span><span class="p">,</span> <span class="n">prov</span><span class="p">],</span> <span class="n">capture_output</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">text</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">returncode</span> <span class="o">==</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">r</span><span class="o">.</span><span class="n">stdout</span><span class="o">.</span><span class="n">strip</span><span class="p">():</span>
+            <span class="n">n</span><span class="p">,</span> <span class="n">fixed</span> <span class="o">=</span> <span class="n">r</span><span class="o">.</span><span class="n">stdout</span><span class="o">.</span><span class="n">split</span><span class="p">()[</span><span class="o">-</span><span class="mi">2</span><span class="p">:]</span>
+            <span class="k">return</span> <span class="n">prov</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">n</span><span class="p">),</span> <span class="nb">int</span><span class="p">(</span><span class="n">fixed</span><span class="p">)</span>
+        <span class="n">last</span> <span class="o">=</span> <span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">stderr</span> <span class="ow">or</span> <span class="n">r</span><span class="o">.</span><span class="n">stdout</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"could not read </span><span class="si">{</span><span class="n">table</span><span class="si">}</span><span class="s2"> through ACE OLEDB: </span><span class="si">{</span><span class="n">last</span><span class="p">[:</span><span class="mi">500</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">export</span><span class="p">(</span><span class="n">accdb</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">ACCDB</span><span class="p">,</span> <span class="n">out_dir</span><span class="p">:</span> <span class="n">Path</span> <span class="o">=</span> <span class="n">OUT_DIR</span><span class="p">,</span> <span class="n">tables</span><span class="o">=</span><span class="n">TABLES</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Copy *accdb* to a temporary directory, dump *tables*, write the CSVs and the manifest."""</span>
+    <span class="n">accdb</span><span class="p">,</span> <span class="n">out_dir</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">accdb</span><span class="p">),</span> <span class="n">Path</span><span class="p">(</span><span class="n">out_dir</span><span class="p">)</span>
+    <span class="n">src_md5</span><span class="p">,</span> <span class="n">size</span> <span class="o">=</span> <span class="n">md5</span><span class="p">(</span><span class="n">accdb</span><span class="p">),</span> <span class="n">accdb</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span>
+    <span class="n">out_dir</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">manifest</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"script"</span><span class="p">:</span> <span class="s2">"utils/reference_tools/places/export_gista_settlements.py"</span><span class="p">,</span> <span class="s2">"version"</span><span class="p">:</span> <span class="n">__version__</span><span class="p">,</span>
+                <span class="s2">"source"</span><span class="p">:</span> <span class="n">accdb</span><span class="o">.</span><span class="n">relative_to</span><span class="p">(</span><span class="n">ROOT</span><span class="p">)</span><span class="o">.</span><span class="n">as_posix</span><span class="p">(),</span> <span class="s2">"source_md5"</span><span class="p">:</span> <span class="n">src_md5</span><span class="p">,</span> <span class="s2">"source_bytes"</span><span class="p">:</span> <span class="n">size</span><span class="p">,</span>
+                <span class="s2">"exported"</span><span class="p">:</span> <span class="n">time</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s2">"%Y-%m-</span><span class="si">%d</span><span class="s2"> %H:%M"</span><span class="p">),</span> <span class="s2">"tables"</span><span class="p">:</span> <span class="p">{}}</span>
+    <span class="k">with</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">TemporaryDirectory</span><span class="p">(</span><span class="n">prefix</span><span class="o">=</span><span class="s2">"gista_"</span><span class="p">)</span> <span class="k">as</span> <span class="n">tmp</span><span class="p">:</span>
+        <span class="n">tmp</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">tmp</span><span class="p">)</span>
+        <span class="n">copy</span> <span class="o">=</span> <span class="n">tmp</span> <span class="o">/</span> <span class="s2">"copy.accdb"</span>
+        <span class="n">shutil</span><span class="o">.</span><span class="n">copyfile</span><span class="p">(</span><span class="n">accdb</span><span class="p">,</span> <span class="n">copy</span><span class="p">)</span>
+        <span class="k">assert</span> <span class="n">md5</span><span class="p">(</span><span class="n">copy</span><span class="p">)</span> <span class="o">==</span> <span class="n">src_md5</span><span class="p">,</span> <span class="s2">"the temporary copy differs from the source"</span>
+        <span class="n">ps1</span> <span class="o">=</span> <span class="n">tmp</span> <span class="o">/</span> <span class="s2">"dump.ps1"</span>
+        <span class="n">ps1</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">_PS</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8-sig"</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">tables</span><span class="p">:</span>
+            <span class="n">tsv</span> <span class="o">=</span> <span class="n">tmp</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">t</span><span class="si">}</span><span class="s2">.tsv"</span>
+            <span class="n">prov</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">fixed</span> <span class="o">=</span> <span class="n">_dump</span><span class="p">(</span><span class="n">ps1</span><span class="p">,</span> <span class="n">copy</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="n">tsv</span><span class="p">)</span>
+            <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">tsv</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">keep_default_na</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">quoting</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8"</span><span class="p">)</span>
+            <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span> <span class="o">==</span> <span class="n">n</span><span class="p">,</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">t</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">}</span><span class="s2"> rows read back, </span><span class="si">{</span><span class="n">n</span><span class="si">}</span><span class="s2"> dumped"</span>
+            <span class="n">df</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">out_dir</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">t</span><span class="si">}</span><span class="s2">.csv"</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8"</span><span class="p">,</span> <span class="n">lineterminator</span><span class="o">=</span><span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="p">)</span>
+            <span class="n">manifest</span><span class="p">[</span><span class="s2">"provider"</span><span class="p">]</span> <span class="o">=</span> <span class="n">prov</span>
+            <span class="n">manifest</span><span class="p">[</span><span class="s2">"tables"</span><span class="p">][</span><span class="n">t</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"file"</span><span class="p">:</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">t</span><span class="si">}</span><span class="s2">.csv"</span><span class="p">,</span> <span class="s2">"rows"</span><span class="p">:</span> <span class="n">n</span><span class="p">,</span> <span class="s2">"columns"</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">),</span>
+                                     <span class="s2">"values_with_tab_or_newline"</span><span class="p">:</span> <span class="n">fixed</span><span class="p">}</span>
+        <span class="k">assert</span> <span class="n">md5</span><span class="p">(</span><span class="n">accdb</span><span class="p">)</span> <span class="o">==</span> <span class="n">src_md5</span><span class="p">,</span> <span class="s2">"the source accdb changed during the export"</span>
+    <span class="p">(</span><span class="n">out_dir</span> <span class="o">/</span> <span class="s2">"manifest.json"</span><span class="p">)</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">manifest</span><span class="p">,</span> <span class="n">ensure_ascii</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span> <span class="o">+</span> <span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="p">,</span>
+                                           <span class="n">encoding</span><span class="o">=</span><span class="s2">"utf-8"</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">manifest</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">export</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">t</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">m</span><span class="p">[</span><span class="s2">"tables"</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">t</span><span class="si">:</span><span class="s2">&lt;36</span><span class="si">}{</span><span class="n">v</span><span class="p">[</span><span class="s1">'rows'</span><span class="p">]</span><span class="si">:</span><span class="s2">&gt;7</span><span class="si">}</span><span class="s2"> rows  </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">[</span><span class="s1">'columns'</span><span class="p">])</span><span class="si">}</span><span class="s2"> columns"</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">"source md5"</span><span class="p">,</span> <span class="n">m</span><span class="p">[</span><span class="s2">"source_md5"</span><span class="p">],</span> <span class="s2">"| provider"</span><span class="p">,</span> <span class="n">m</span><span class="p">[</span><span class="s2">"provider"</span><span class="p">],</span> <span class="s2">"| -&gt;"</span><span class="p">,</span> <span class="n">OUT_DIR</span><span class="o">.</span><span class="n">relative_to</span><span class="p">(</span><span class="n">ROOT</span><span class="p">))</span>
+    <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+</pre></div></td></tr></table></div>
+</details>
